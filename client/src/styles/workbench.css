@@ -785,7 +785,7 @@ body::after{
 
 /* Terminal workbench */
 .terminal-workbench-page{height:calc(100vh - 56px);max-height:calc(100dvh - 56px);display:flex;flex-direction:column;min-height:0}
-.terminal-page-title{height:40px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:0;margin-bottom:8px}
+.terminal-page-title{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:0;margin-bottom:8px}
 .terminal-page-actions{font-size:9px;color:var(--t3);text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .terminal-workbench{flex:1;min-height:0;display:grid;grid-template-columns:260px minmax(0,1fr) 360px;gap:8px}
 .terminal-session-list,.terminal-main,.terminal-history-panel{min-height:0;display:flex;flex-direction:column;padding:10px 12px;background:var(--bg2);border:1px solid var(--b);border-radius:var(--r)}
@@ -1459,7 +1459,7 @@ body::after{
 .market-page{display:flex;flex-direction:column;gap:12px;min-height:0}
 
 /* Header — matches .ptitle style */
-.market-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0;padding-bottom:6px;border-bottom:1px solid var(--b)}
+.market-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0;padding-bottom:5px;border-bottom:1px solid var(--b);margin-bottom:8px}
 .market-title{font-size:9px;font-weight:400;color:var(--t3);display:flex;align-items:center;gap:6px;letter-spacing:.12em;text-transform:uppercase}
 .market-title-icon{color:var(--acc);font-size:10px}
 .market-mode-toggle{display:flex;background:var(--bg3);border:1px solid var(--b);border-radius:var(--r);padding:2px;gap:2px}
