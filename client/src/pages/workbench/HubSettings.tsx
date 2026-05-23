@@ -302,7 +302,7 @@ function ChangePassword() {
           <Field label="当前密码">
             <SecretInput value={old} onChange={setOld} placeholder="当前密码" />
           </Field>
-          <Field label="新密码" hint="至少 8 位">
+          <Field label="新密码">
             <SecretInput value={next} onChange={setNext} placeholder="至少 8 位" />
           </Field>
           <Field label="确认新密码">
