@@ -12,6 +12,7 @@
   --sans:'Inter',system-ui,sans-serif;--r:4px;
   --grain-opacity:.50;
   --warm-glow:rgba(74,222,128,.16);
+  --bg-cover:rgba(12,12,12,.91);
 }
 /* ── Moonstone (light) ── */
 [data-theme=light]{
@@ -23,6 +24,7 @@
   --font:'Inter',system-ui,sans-serif;
   --grain-opacity:.22;
   --warm-glow:rgba(22,163,74,.10);
+  --bg-cover:rgba(240,240,238,.86);
 }
 /* ── Deep Space (electric blue) ── */
 [data-theme=deep-space]{
@@ -33,6 +35,7 @@
   --blue:#38bdf8;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa;--cyan:#22d3ee;
   --grain-opacity:.48;
   --warm-glow:rgba(77,143,255,.20);
+  --bg-cover:rgba(6,12,24,.91);
 }
 /* ── Smoke & Gold (amber) ── */
 [data-theme=smoke-gold]{
@@ -43,6 +46,7 @@
   --blue:#60a5fa;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa;--cyan:#22d3ee;
   --grain-opacity:.50;
   --warm-glow:rgba(240,160,48,.26);
+  --bg-cover:rgba(12,12,10,.91);
 }
 /* ── Catppuccin Mocha (lavender) ── */
 [data-theme=catppuccin]{
@@ -53,6 +57,7 @@
   --blue:#89b4fa;--amber:#f9e2af;--red:#f38ba8;--purple:#cba6f7;--cyan:#89dceb;
   --grain-opacity:.44;
   --warm-glow:rgba(203,166,247,.18);
+  --bg-cover:rgba(17,17,27,.91);
 }
 /* ── Hermes (teal canvas + cream) ── */
 [data-theme=hermes]{
@@ -64,15 +69,21 @@
   --font:'Inter',system-ui,sans-serif;
   --grain-opacity:.55;
   --warm-glow:rgba(255,189,56,.35);
+  --bg-cover:rgba(4,28,28,.91);
 }
 
 /* ─────────────────────────────────────────────────────────────────
-   GLOBAL BASE — Hermes-style: solid color + warm vignette + grain
-   body::before = warm glow vignette (mix-blend-mode: lighten, z-99)
-   body::after  = fractalNoise grain (mix-blend-mode: color-dodge, z-101)
+   GLOBAL BASE — painting faintly visible under theme color overlay
+   Layer stack (back → front):
+     [bg.png]  ← painting at ~9% through --bg-cover
+     [--bg-cover linear-gradient]  ← 91% opaque theme color
+     body::before  ← warm corner vignette (lighten z-99)
+     body::after   ← color-dodge fractalNoise grain (z-101)
    ───────────────────────────────────────────────────────────────── */
 html{height:100%;background:var(--bg);color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
-body{height:100%;background:var(--bg);color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
+body{height:100%;
+     background:linear-gradient(var(--bg-cover),var(--bg-cover)),url('/art/bg.png') center/cover no-repeat;
+     color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
 #root{height:100%;background:transparent;color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
 
 /* Warm corner vignette — mirrors Hermes z-99 layer */
