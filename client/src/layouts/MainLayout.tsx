@@ -75,11 +75,11 @@ export default function MainLayout() {
   const THEMES = ["dark", "deep-space", "smoke-gold", "catppuccin", "hermes", "light"] as const;
   type Theme = typeof THEMES[number];
   const THEME_LABELS: Record<Theme, string> = {
-    "dark":       "🌲 终端绿",
+    "dark":       "🌲 暗夜",
     "deep-space": "🌌 深空蓝",
     "smoke-gold": "✦ 烟金",
     "catppuccin": "🔮 紫幕",
-    "hermes":     "◆ Hermes",
+    "hermes":     "◆ 幽林",
     "light":      "☀ 月岩",
   };
   const [theme, setTheme] = useState<Theme>(() => {
