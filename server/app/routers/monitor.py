@@ -1,0 +1,1008 @@
+"""Server monitoring — real system metrics via psutil."""
+from __future__ import annotations
+
+import os
+import subprocess
+import time
+from typing import List, Optional
+
+import psutil
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+
+from app.core.security import require_user
+
+router = APIRouter()
+
+# Cached last net IO sample for rate calculation.
+_net_state = {"ts": 0.0, "sent": 0, "recv": 0}
+
+# Network interfaces to EXCLUDE from aggregation.
+# lo/docker/veth/br 不是真实公网流量，腾讯云控制台只统计 eth0。
+_NET_EXCLUDE_PREFIXES = ("lo", "docker", "veth", "br-", "virbr", "cni", "flannel", "tun", "tap", "warp", "utun")
+
+
+class CpuInfo(BaseModel):
+    percent: float
+    count: int
+    load_1m: float
+    load_5m: float
+    load_15m: float
+
+
+class MemInfo(BaseModel):
+    total: int
+    used: int
+    available: int
+    percent: float            # Linux available-based (reflects real pressure)
+    percent_used_raw: float   # (total-free)/total — matches 腾讯云控制台显示口径
+
+
+class DiskInfo(BaseModel):
+    total: int
+    used: int
+    free: int
+    percent: float               # df/psutil: used / (used+avail), excludes reserved
+    total_hardware: int          # raw disk capacity from /sys/block/* (matches 腾讯云)
+    percent_hardware: float      # used / total_hardware (matches 腾讯云控制台)
+    mount: str
+
+
+class NetInfo(BaseModel):
+    bytes_sent_total: int
+    bytes_recv_total: int
+    bytes_sent_rate: float  # bytes/sec
+    bytes_recv_rate: float
+    interface: str          # which iface(s) the numbers came from
+
+
+class Snapshot(BaseModel):
+    cpu: CpuInfo
+    memory: MemInfo
+    disk: DiskInfo
+    network: NetInfo
+    uptime_seconds: int
+
+
+class ServiceStatus(BaseModel):
+    name: str
+    active: bool
+    sub_state: Optional[str] = None
+    description: str = ""
+    category: str = "on-demand"
+    impact: str = ""
+
+
+def _cpu() -> CpuInfo:
+    try:
+        l1, l5, l15 = os.getloadavg()
+    except OSError:
+        l1 = l5 = l15 = 0.0
+    # interval=0.2 blocks briefly to give an accurate sample (no more first-call 0%)
+    return CpuInfo(
+        percent=psutil.cpu_percent(interval=0.2),
+        count=psutil.cpu_count(logical=True) or 0,
+        load_1m=l1,
+        load_5m=l5,
+        load_15m=l15,
+    )
+
+
+def _memory() -> MemInfo:
+    m = psutil.virtual_memory()
+    # percent_used_raw = (total-free)/total, the same definition 腾讯云控制台 uses.
+    # m.percent is the Linux "available-based" metric that accounts for reclaimable cache.
+    pct_raw = 100.0 * (m.total - m.free) / m.total if m.total else 0.0
+    return MemInfo(
+        total=m.total,
+        used=m.used,
+        available=m.available,
+        percent=m.percent,
+        percent_used_raw=round(pct_raw, 1),
+    )
+
+
+def _disk(mount: str = "/") -> DiskInfo:
+    d = psutil.disk_usage(mount)
+    # Find the block device backing this mount, then read raw capacity from
+    # /sys/block/<dev>/size (sectors × 512). This is what cloud consoles report.
+    total_hw = d.total  # fallback = filesystem total
+    try:
+        # Resolve mount → device (e.g. /dev/vda1)
+        with open("/proc/mounts", "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == mount:
+                    dev = parts[0]  # e.g. /dev/vda1
+                    base = os.path.basename(dev)
+                    # Strip trailing digits to find parent disk (vda1 → vda)
+                    parent = base.rstrip("0123456789")
+                    if parent and parent != base:
+                        sys_path = f"/sys/block/{parent}/size"
+                        if os.path.isfile(sys_path):
+                            with open(sys_path, "r", encoding="utf-8") as sf:
+                                sectors = int(sf.read().strip())
+                                total_hw = sectors * 512
+                    break
+    except OSError:
+        pass
+    pct_hw = 100.0 * d.used / total_hw if total_hw else d.percent
+    return DiskInfo(
+        total=d.total,
+        used=d.used,
+        free=d.free,
+        percent=d.percent,
+        total_hardware=total_hw,
+        percent_hardware=round(pct_hw, 1),
+        mount=mount,
+    )
+
+
+def _network() -> NetInfo:
+    # Only count real public-facing interfaces — exclude lo/docker/veth/br to
+    # match 腾讯云控制台 (which only reports eth0 traffic).
+    per = psutil.net_io_counters(pernic=True)
+    kept: list[str] = []
+    total_sent = 0
+    total_recv = 0
+    for name, c in per.items():
+        if any(name.startswith(p) for p in _NET_EXCLUDE_PREFIXES):
+            continue
+        kept.append(name)
+        total_sent += c.bytes_sent
+        total_recv += c.bytes_recv
+    iface_label = ",".join(sorted(kept)) or "none"
+    now = time.time()
+    prev_ts = _net_state["ts"]
+    if prev_ts <= 0:
+        sent_rate = 0.0
+        recv_rate = 0.0
+    else:
+        dt = max(now - prev_ts, 0.001)
+        sent_rate = max(0.0, (total_sent - _net_state["sent"]) / dt)
+        recv_rate = max(0.0, (total_recv - _net_state["recv"]) / dt)
+    _net_state.update(ts=now, sent=total_sent, recv=total_recv)
+    return NetInfo(
+        bytes_sent_total=total_sent,
+        bytes_recv_total=total_recv,
+        bytes_sent_rate=sent_rate,
+        bytes_recv_rate=recv_rate,
+        interface=iface_label,
+    )
+
+
+@router.get("/snapshot", response_model=Snapshot)
+def snapshot(_user: str = Depends(require_user)) -> Snapshot:
+    return Snapshot(
+        cpu=_cpu(),
+        memory=_memory(),
+        disk=_disk(),
+        network=_network(),
+        uptime_seconds=int(time.time() - psutil.boot_time()),
+    )
+
+
+# Which systemd services to monitor. Tweak to taste.
+_WATCHED_SERVICES = [
+    "nginx",
+    "ops-hub",
+    "xray",
+    "hysteria-server",
+    "feishu-codex-relay",
+    "warp-svc",
+    "pm2-root",
+    "hermes-dashboard",
+    "cloudcli-ui",
+    "ttyd",
+]
+
+_SERVICE_CATALOG: dict[str, tuple[str, str, str]] = {
+    "nginx": ("公网入口与 HTTPS 反向代理，承载 ops/term/cli 等域名转发", "critical", "停止后所有 Web 页面、API 与终端入口不可访问"),
+    "ops-hub": ("当前运维控制台后端与静态页面服务", "critical", "停止后本控制台不可用"),
+    "xray": ("Xray 代理服务，提供一组备用代理链路", "optional", "对应代理不可用，不影响 ops-hub 本身"),
+    "hysteria-server": ("Hysteria 代理服务，高速 UDP 代理入口", "optional", "对应代理不可用，不影响 Web 控制台"),
+    "feishu-codex-relay": ("飞书消息与 Codex/AI 会话中继服务", "on-demand", "飞书侧 AI 对话和转发停止"),
+    "warp-svc": ("Cloudflare WARP 客户端，用于出站网络代理/绕路", "optional", "WARP 出站链路不可用，通常不影响核心服务"),
+    "pm2-root": ("PM2 托管的 Node 应用进程管理器", "on-demand", "PM2 托管应用可能停止或无法自恢复"),
+    "hermes-dashboard": ("Hermes 监控/仪表盘 Web 服务", "on-demand", "Hermes 仪表盘不可访问"),
+    "cloudcli-ui": ("Claude Code UI / CloudCLI Web 界面", "on-demand", "Web AI 编码界面不可用"),
+    "ttyd": ("Web 服务器终端服务，嵌入 /terminal 页面", "on-demand", "网页终端不可用，SSH 不受影响"),
+}
+
+
+@router.get("/services", response_model=List[ServiceStatus])
+def services(_user: str = Depends(require_user)) -> List[ServiceStatus]:
+    out: List[ServiceStatus] = []
+    for name in _WATCHED_SERVICES:
+        try:
+            r = subprocess.run(
+                ["systemctl", "is-active", f"{name}.service"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            state = r.stdout.strip() or "unknown"
+        except Exception:
+            state = "error"
+        description, category, impact = _SERVICE_CATALOG.get(
+            name,
+            ("系统服务", "on-demand", "影响未登记，操作前请确认依赖关系"),
+        )
+        out.append(
+            ServiceStatus(
+                name=name,
+                active=state == "active",
+                sub_state=state,
+                description=description,
+                category=category,
+                impact=impact,
+            )
+        )
+    return out
+
+
+@router.get("/logs")
+def logs(_user: str = Depends(require_user), n: int = 20) -> dict:
+    """Tail nginx access log (most recent N lines)."""
+    n = max(1, min(200, n))
+    try:
+        r = subprocess.run(
+            ["tail", "-n", str(n), "/var/log/nginx/access.log"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return {"lines": r.stdout.splitlines()}
+    except Exception as e:
+        return {"lines": [], "error": str(e)}
+
+
+# ─── Process Management ───────────────────────────────────────────────────────
+
+# Category: "critical" = must run, "on-demand" = only when needed, "optional" = safe to close
+# Each entry: (description, category, impact_if_stopped)
+_PROC_CATALOG: dict[str, tuple[str, str, str]] = {
+    # ── 必须运行 ──
+    "systemd": ("系统初始化守护进程", "critical", "系统崩溃"),
+    "sshd": ("SSH远程登录服务", "critical", "无法远程连接服务器"),
+    "nginx": ("Web反向代理服务器", "critical", "所有网站和API不可访问"),
+    "crond": ("定时任务调度器", "critical", "所有cron定时任务停止执行"),
+    "rsyslogd": ("系统日志服务", "critical", "无法记录系统日志"),
+    "NetworkManager": ("网络管理服务", "critical", "网络断开"),
+    "systemd-journald": ("Systemd日志服务", "critical", "journalctl无法使用"),
+    "systemd-logind": ("用户登录管理", "critical", "无法登录"),
+    "systemd-udevd": ("设备管理守护进程", "critical", "设备无法识别"),
+    "dbus-broker": ("进程间通信总线", "critical", "系统服务间通信中断"),
+    "agetty": ("终端登录管理", "critical", "控制台无法登录"),
+    "chronyd": ("NTP时间同步", "critical", "系统时间不准确"),
+    "iscsid": ("iSCSI存储服务", "critical", "云盘可能断开"),
+    "ops-hub": ("运维控制台后端", "critical", "当前管理面板不可用"),
+    # ── 按需运行 ──
+    "hermes": ("Hermes AI助手主进程", "on-demand", "AI对话/飞书机器人停止，不影响网站"),
+    "python": ("Hermes/ops-hub Python进程", "on-demand", "对应服务停止"),
+    "tsserver": ("TypeScript语言服务器", "on-demand", "代码补全/检查停止，省~150MB/个"),
+    "pyright": ("Python语言服务器", "on-demand", "Python代码检查停止，省~60MB"),
+    "lark-cli": ("飞书CLI(消息转发)", "on-demand", "飞书消息转发停止"),
+    "ttyd": ("Web终端服务", "on-demand", "网页终端不可用，SSH不受影响"),
+    "kiro-gateway": ("Kiro Gateway API代理", "on-demand", "本地AI API代理不可用"),
+    "feishu-codex-relay": ("飞书Codex中继", "on-demand", "飞书AI对话停止"),
+    "cloudcli-ui": ("Claude Code UI", "on-demand", "Web版Claude Code不可用"),
+    "postgresql": ("PostgreSQL数据库", "on-demand", "gbrain知识库不可用"),
+    "imgflow": ("图片工作流(PM2)", "on-demand", "Amazon图片处理不可用"),
+    "next-server": ("imgflow前端(Next.js)", "on-demand", "图片工作流前端不可用"),
+    "pm2": ("PM2进程管理器", "on-demand", "PM2管理的应用全部停止"),
+    # ── 可关闭(省内存) ──
+    "warp-svc": ("Cloudflare WARP VPN", "optional", "WARP代理不可用，其他代理不受影响。省~199MB"),
+    "YDService": ("腾讯云主机安全(云镜)", "optional", "失去入侵检测，安全风险低。省~61MB"),
+    "YDLive": ("腾讯云安全实时防护", "optional", "失去实时防护。省~9MB"),
+    "barad_agent": ("腾讯云监控Agent", "optional", "腾讯云控制台看不到监控数据。省~25MB"),
+    "sgagent": ("腾讯云星网Agent", "optional", "腾讯云内部通信停止。省~3MB"),
+    "tat_agent": ("腾讯云自动化助手", "optional", "无法从控制台远程执行命令。省~7MB"),
+    "xray": ("Xray代理服务", "optional", "Xray协议代理不可用，Hysteria不受影响"),
+    "hysteria": ("Hysteria代理服务", "optional", "Hysteria协议代理不可用，Xray不受影响"),
+    "kiro-cli": ("Kiro CLI AI助手", "optional", "当前AI会话结束"),
+    "bun": ("Bun运行时(Kiro TUI)", "optional", "Kiro CLI界面关闭"),
+    "upower": ("电源管理守护进程", "optional", "服务器不需要电源管理。省~2MB"),
+    "rtkit-daemon": ("实时调度策略服务", "optional", "音频优先级调度停止，服务器无影响"),
+    "gssproxy": ("GSSAPI代理", "optional", "Kerberos认证停止，通常不需要"),
+    "auditd": ("安全审计服务", "optional", "停止安全审计日志，省少量内存"),
+}
+
+# Processes that must NEVER be killed.
+_PROTECTED_PROCS = {"systemd", "init", "sshd", "kthreadd", "kworker", "ksoftirqd",
+                    "migration", "rcu_sched", "rcu_bh", "watchdog"}
+
+
+def _match_catalog(name: str, cmdline: str) -> tuple[str, str, str]:
+    """Match process to catalog entry. Returns (desc, category, impact)."""
+    # Exact match
+    if name in _PROC_CATALOG:
+        return _PROC_CATALOG[name]
+    # Match by cmdline keywords
+    cmd_lower = cmdline.lower()
+    for key, val in _PROC_CATALOG.items():
+        if key.lower() in cmd_lower:
+            return val
+    # Defaults by name pattern
+    if name in _PROTECTED_PROCS or name.startswith(("systemd", "kworker")):
+        return ("系统内核/守护进程", "critical", "系统不稳定")
+    return ("系统进程", "critical", "未知影响，建议不要关闭")
+
+
+# Cmdline-based identification for processes that share the same binary name.
+# Each entry: (cmdline_keyword, display_name, description, category, impact)
+_CMDLINE_IDENTIFY: list[tuple[str, str, str, str, str]] = [
+    ("tsserver.js --useInferredProject", "tsserver(全量)", "TypeScript全量语言服务", "on-demand", "代码补全停止，省~208MB"),
+    ("tsserver.js --serverMode", "tsserver(轻量)", "TypeScript部分语义检查", "on-demand", "代码检查停止，省~54MB"),
+    ("typingsInstaller.js", "TS类型安装器", "TypeScript类型自动下载", "on-demand", "类型安装停止，省~21MB"),
+    ("typescript-language-server", "TS-LSP入口", "TypeScript语言服务入口", "on-demand", "TS补全停止，省~18MB"),
+    ("pyright-langserver", "Pyright-LSP", "Python语言服务(代码检查)", "on-demand", "Python补全停止，省~60MB"),
+    ("hermes_cli.main gateway", "Hermes网关", "Hermes AI请求网关", "on-demand", "AI对话停止"),
+    ("hermes dashboard", "Hermes仪表盘", "Hermes Web仪表盘", "on-demand", "仪表盘不可用，省~121MB"),
+    # Substring match against `ps` cmdline; "/bin/hermes" catches both
+    # /usr/local/bin/hermes and ~/.local/bin/hermes without needing config.
+    ("/bin/hermes", "Hermes主进程", "Hermes AI助手核心", "on-demand", "所有Hermes功能停止"),
+    ("feishu-codex-relay/relay.js", "飞书中继(node)", "飞书消息转发服务", "on-demand", "飞书AI对话停止"),
+    ("dist-server/server/index.js", "Claude Code UI", "Web版Claude Code界面", "on-demand", "Web AI界面不可用"),
+    ("amazon-image-workflow/backend", "imgflow后端", "Amazon图片工作流API", "on-demand", "图片处理不可用"),
+    ("lark-cli", "飞书CLI", "飞书命令行工具", "on-demand", "飞书消息转发停止"),
+    ("web-terminal/server.cjs", "Web终端插件", "Claude Code UI终端", "on-demand", "Web终端不可用"),
+    ("main.py --port", "Kiro Gateway", "本地AI API代理", "on-demand", "AI API代理不可用"),
+    ("uvicorn", "ops-hub后端", "运维面板API服务", "critical", "当前管理面板不可用"),
+    ("next-server", "imgflow前端", "图片工作流Next.js前端", "on-demand", "图片工作流前端不可用"),
+    ("kiro-cli-chat acp", "Kiro(AI引擎)", "Kiro CLI AI推理进程", "optional", "当前AI会话结束"),
+    ("kiro-cli-chat chat", "Kiro(会话)", "Kiro CLI 会话管理", "optional", "当前AI会话结束"),
+    ("kiro-cli/bun", "Kiro(TUI)", "Kiro CLI 终端界面", "optional", "Kiro界面关闭"),
+]
+
+
+class ProcessInfo(BaseModel):
+    pid: int
+    name: str
+    status: str
+    cpu_percent: float
+    memory_percent: float
+    memory_mb: float
+    cpu_time: float
+    description: str
+    category: str       # critical / on-demand / optional
+    impact: str         # what happens if stopped
+    can_stop: bool
+    username: str
+    service: Optional[str] = None  # systemd service name if applicable
+
+
+# Map known process names/cmdline patterns to their systemd service.
+_PROC_TO_SERVICE: dict[str, str] = {
+    "warp-svc": "warp-svc",
+    "nginx": "nginx",
+    "hysteria": "hysteria-server",
+    "xray": "xray",
+    "ttyd": "ttyd",
+    "YDService": "YDService",
+    "YDLive": "YDLive",
+    "barad_agent": "barad_agent",
+    "sgagent": "sgagent",
+    "tat_agent": "tat_agent",
+    "postmaster": "postgresql",
+    "hermes dashboard": "hermes-dashboard",
+    "cloudcli-ui": "cloudcli-ui",
+    "feishu-codex-relay": "feishu-codex-relay",
+    "kiro-gateway": "kiro-gateway",
+}
+
+
+@router.get("/processes", response_model=List[ProcessInfo])
+def get_processes(_user: str = Depends(require_user)) -> List[ProcessInfo]:
+    """List all system processes with category/impact info."""
+    procs: List[ProcessInfo] = []
+    for p in psutil.process_iter(["pid", "name", "status", "cpu_percent",
+                                   "memory_percent", "cpu_times", "username",
+                                   "memory_info", "cmdline"]):
+        try:
+            info = p.info
+            name = info["name"] or ""
+            pid = info["pid"]
+            if pid == 0 or name.startswith("["):
+                continue
+            cpu_t = info.get("cpu_times")
+            cpu_time = (cpu_t.user + cpu_t.system) if cpu_t else 0.0
+            cmdline = " ".join(info.get("cmdline") or [])
+            mem_info = info.get("memory_info")
+            mem_mb = round((mem_info.rss / 1024 / 1024), 1) if mem_info else 0.0
+
+            # Try cmdline-based identification first (more specific)
+            display_name = name
+            desc, category, impact = "", "", ""
+            for keyword, dname, ddesc, dcat, dimpact in _CMDLINE_IDENTIFY:
+                if keyword in cmdline:
+                    display_name = dname
+                    desc, category, impact = ddesc, dcat, dimpact
+                    break
+
+            if not desc:
+                # Fall back to catalog
+                if name in _PROC_CATALOG:
+                    desc, category, impact = _PROC_CATALOG[name]
+                else:
+                    # Match by cmdline keywords in catalog
+                    for key, val in _PROC_CATALOG.items():
+                        if key.lower() in cmdline.lower():
+                            desc, category, impact = val
+                            break
+                    if not desc:
+                        if name in _PROTECTED_PROCS or name.startswith(("systemd", "kworker")):
+                            desc, category, impact = "系统内核/守护进程", "critical", "系统不稳定"
+                        else:
+                            desc, category, impact = "系统进程", "critical", "未知影响，建议不要关闭"
+
+            can_stop = (pid != 1 and category != "critical" and
+                        name not in _PROTECTED_PROCS)
+
+            # Determine associated systemd service
+            service = None
+            for key, svc in _PROC_TO_SERVICE.items():
+                if key in name or key in cmdline:
+                    service = svc
+                    break
+
+            procs.append(ProcessInfo(
+                pid=pid,
+                name=display_name,
+                status=info.get("status", "unknown") or "unknown",
+                cpu_percent=info.get("cpu_percent", 0.0) or 0.0,
+                memory_percent=round(info.get("memory_percent", 0.0) or 0.0, 1),
+                memory_mb=mem_mb,
+                cpu_time=round(cpu_time, 1),
+                description=desc,
+                category=category,
+                impact=impact,
+                can_stop=can_stop,
+                username=info.get("username", "") or "",
+                service=service,
+            ))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    # Sort: category priority (optional first for easy action), then by memory desc
+    cat_order = {"optional": 0, "on-demand": 1, "critical": 2}
+    running_states = {"running", "sleeping", "disk-sleep"}
+    procs.sort(key=lambda p: (
+        0 if p.status in running_states else 1,
+        cat_order.get(p.category, 2),
+        -p.memory_mb,
+    ))
+    return procs
+
+
+class ProcessAction(BaseModel):
+    pid: Optional[int] = None
+    service: Optional[str] = None
+
+
+@router.post("/processes/stop")
+def stop_process(body: ProcessAction, _user: str = Depends(require_user)) -> dict:
+    """Stop a process by PID or a systemd service by name."""
+    if body.service:
+        try:
+            r = subprocess.run(
+                ["systemctl", "stop", f"{body.service}.service"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode != 0:
+                return {"ok": False, "error": r.stderr.strip() or "stop failed"}
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    if body.pid:
+        try:
+            proc = psutil.Process(body.pid)
+            name = proc.name()
+            if name in _PROTECTED_PROCS or body.pid == 1:
+                return {"ok": False, "error": "不允许停止关键系统进程"}
+            proc.terminate()
+            return {"ok": True}
+        except psutil.NoSuchProcess:
+            return {"ok": False, "error": "进程不存在"}
+        except psutil.AccessDenied:
+            return {"ok": False, "error": "权限不足"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    return {"ok": False, "error": "需要提供 pid 或 service"}
+
+
+@router.post("/processes/start")
+def start_process(body: ProcessAction, _user: str = Depends(require_user)) -> dict:
+    """Start a systemd service by name."""
+    if not body.service:
+        return {"ok": False, "error": "只能启动 systemd 服务，需提供 service 名称"}
+    try:
+        r = subprocess.run(
+            ["systemctl", "start", f"{body.service}.service"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode != 0:
+            return {"ok": False, "error": r.stderr.strip() or "start failed"}
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ─── Token Usage Statistics ───────────────────────────────────────────────────
+
+import sqlite3 as _sqlite3
+from pathlib import Path as _Path
+from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone
+
+# Token-usage DB / session paths are read from hub_settings (External
+# Integrations). Each helper returns a Path that *might* exist; callers
+# guard with .exists(). Wrapped in functions so a hub_settings change
+# takes effect on the next request without a restart.
+def _hermes_db() -> _Path | None:
+    from app.core import integrations
+    return integrations.hermes_db()
+
+def _kiro_gw_db() -> _Path | None:
+    from app.core import integrations
+    return integrations.kiro_gateway_db()
+
+def _codex_db() -> _Path | None:
+    from app.core import integrations
+    return integrations.codex_db()
+
+def _feishu_codex_db() -> _Path | None:
+    from app.core import integrations
+    return integrations.feishu_codex_db()
+
+def _kiro_cli_db() -> _Path | None:
+    from app.core import integrations
+    return integrations.kiro_cli_db()
+
+def _kiro_cli_sessions() -> _Path | None:
+    from app.core import integrations
+    return integrations.kiro_cli_sessions_dir()
+
+def _claude_projects() -> _Path | None:
+    from app.core import integrations
+    return integrations.claude_projects_dir()
+_LOCAL_TZ = _timezone(_timedelta(hours=8))
+_KIRO_DEFAULT_CONTEXT_TOKENS = 200_000
+
+# Pricing per 1M tokens (input, output) in USD
+_PRICING = {
+    "claude-opus-4-7": (15, 75), "claude-opus-4-6": (15, 75), "claude-opus-4.5": (15, 75),
+    "claude-sonnet-4-6": (3, 15), "claude-sonnet-4": (3, 15), "claude-sonnet-4.5": (3, 15),
+    "claude-3.7-sonnet": (3, 15),
+    "claude-haiku-4.5": (0.8, 4),
+    "gpt-5.5": (2, 10), "gpt-5.4": (2, 10),
+    "gpt-image-2": (0, 0),  # per-image pricing, not token-based
+    "deepseek-chat": (0.27, 1.1), "deepseek-3.2": (0.27, 1.1),
+    "MiniMax-M2.7": (0.5, 2), "minimax/minimax-m2.7": (0.5, 2),
+    "moonshotai/kimi-k2.6": (1, 4), "kimi-k2.6": (1, 4),
+    "mimo-v2.5-pro": (0.3, 1.2),
+    "qwen3-coder-next": (0.5, 2),
+}
+
+
+def _estimate_cost(model: str, inp: int, out: int) -> float:
+    """Estimate cost in USD based on model pricing."""
+    key = model.lower() if model else ""
+    prices = None
+    for k, v in _PRICING.items():
+        if k.lower() in key or key in k.lower():
+            prices = v
+            break
+    if not prices:
+        prices = (3, 15)  # default to sonnet-level pricing
+    return (inp * prices[0] + out * prices[1]) / 1_000_000
+
+
+def _scan_claude_sessions(since: float) -> list:
+    """Scan Claude Code jsonl sessions for usage data."""
+    import json as _json
+    results = []
+    root = _claude_projects()
+    if root is None:
+        return results
+    for jsonl in root.rglob("*.jsonl"):
+        if jsonl.stat().st_mtime < since:
+            continue
+        session_input = session_output = 0
+        model = None
+        ts = jsonl.stat().st_mtime
+        with open(jsonl) as fh:
+            for line in fh:
+                try:
+                    d = _json.loads(line)
+                    msg = d.get("message", {})
+                    if isinstance(msg, dict):
+                        usage = msg.get("usage", {})
+                        if usage:
+                            session_input += usage.get("input_tokens", 0) + usage.get("cache_creation_input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+                            session_output += usage.get("output_tokens", 0)
+                        if not model and msg.get("model"):
+                            model = msg["model"]
+                except Exception:
+                    pass
+        if session_input > 0 or session_output > 0:
+            results.append({"ts": ts, "model": model or "claude-code", "input": session_input, "output": session_output})
+    return results
+
+
+def _read_codex_rollout_usage(path: str) -> dict | None:
+    """Return final token_count from a Codex rollout jsonl when available."""
+    import json as _json
+    if not path:
+        return None
+    p = _Path(path)
+    if not p.exists():
+        return None
+    usage = None
+    ts = None
+    try:
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    d = _json.loads(line)
+                except Exception:
+                    continue
+                payload = d.get("payload") or {}
+                if payload.get("type") != "token_count":
+                    continue
+                info = payload.get("info") or {}
+                total_usage = info.get("total_token_usage") or {}
+                if not total_usage:
+                    continue
+                usage = total_usage
+                raw_ts = d.get("timestamp")
+                if raw_ts:
+                    try:
+                        ts = _datetime.fromisoformat(raw_ts.replace("Z", "+00:00")).timestamp()
+                    except Exception:
+                        ts = None
+    except Exception:
+        return None
+    if not usage:
+        return None
+    return {
+        "ts": ts,
+        "input": int(usage.get("input_tokens") or 0),
+        "output": int(usage.get("output_tokens") or 0),
+        "total": int(usage.get("total_tokens") or 0),
+    }
+
+
+def _parse_iso_ts(value: str | None) -> float | None:
+    if not value:
+        return None
+    raw = value.replace("Z", "+00:00")
+    if "." in raw:
+        head, tail = raw.split(".", 1)
+        zone = ""
+        if "+" in tail:
+            frac, rest = tail.split("+", 1)
+            zone = "+" + rest
+        elif "-" in tail[1:]:
+            frac, rest = tail.rsplit("-", 1)
+            zone = "-" + rest
+        else:
+            frac = tail
+        raw = f"{head}.{frac[:6]}{zone}"
+    try:
+        return _datetime.fromisoformat(raw).timestamp()
+    except Exception:
+        return None
+
+
+def _scan_kiro_cli_sessions(since: float) -> list:
+    """Estimate Kiro CLI token usage from saved context usage percentages."""
+    import json as _json
+    results = []
+    sessions_root = _kiro_cli_sessions()
+    if sessions_root is None or not sessions_root.exists():
+        return results
+
+    def _collect_context_percentages(node, out: list):
+        if isinstance(node, dict):
+            val = node.get("context_usage_percentage")
+            if isinstance(val, (int, float)) and val > 0:
+                out.append(float(val))
+            for child in node.values():
+                _collect_context_percentages(child, out)
+        elif isinstance(node, list):
+            for child in node:
+                _collect_context_percentages(child, out)
+
+    def _collect_metering_credits(node) -> float:
+        total = 0.0
+        if isinstance(node, dict):
+            usage = node.get("metering_usage")
+            if isinstance(usage, list):
+                for item in usage:
+                    if not isinstance(item, dict):
+                        continue
+                    unit = str(item.get("unit") or item.get("unitPlural") or "").lower()
+                    value = item.get("value")
+                    if "credit" in unit and isinstance(value, (int, float)):
+                        total += float(value)
+            for child in node.values():
+                total += _collect_metering_credits(child)
+        elif isinstance(node, list):
+            for child in node:
+                total += _collect_metering_credits(child)
+        return total
+
+    for snap in sessions_root.glob("*.json"):
+        if snap.stat().st_mtime < since:
+            continue
+        try:
+            data = _json.loads(snap.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        ts = _parse_iso_ts(data.get("updated_at")) or snap.stat().st_mtime
+        if ts < since:
+            continue
+        percentages: list[float] = []
+        _collect_context_percentages(data, percentages)
+        estimated_input = sum(int((pct / 100) * _KIRO_DEFAULT_CONTEXT_TOKENS) for pct in percentages)
+        if estimated_input <= 0:
+            continue
+        results.append({
+            "ts": ts,
+            "model": "kiro-cli-estimate",
+            "input": estimated_input,
+            "output": 0,
+            "turns": len(percentages),
+            "credits": round(_collect_metering_credits(data), 6),
+        })
+    return results
+
+
+def _append_coverage(rows: list, source: str, path: _Path, status: str, sessions: int = 0, total_tokens: int = 0, credits: float = 0.0):
+    rows.append({
+        "source": source,
+        "path": str(path),
+        "status": status,
+        "sessions": sessions,
+        "total_tokens": total_tokens,
+        "credits": round(credits, 6),
+    })
+
+
+@router.get("/token-usage")
+def token_usage(_user: str = Depends(require_user)) -> dict:
+    """Token usage stats from ALL sources on this server."""
+    now = time.time()
+    today_key = _datetime.fromtimestamp(now, tz=_LOCAL_TZ).strftime("%Y-%m-%d")
+    model_since = now - 30 * 86400
+    daily_map: dict = {}
+    weekly_map: dict = {}
+    monthly_map: dict = {}
+    model_map: dict = {}
+    agent_map: dict = {}
+    today_agent_map: dict = {}
+    coverage: list = []
+
+    def _bump(m: dict, key: str, inp: int, out: int, cost: float, source: str | None = None, credits: float = 0.0):
+        if key not in m:
+            m[key] = {
+                "sessions": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "credits": 0.0,
+                "sources": set(),
+            }
+        m[key]["sessions"] += 1
+        m[key]["input_tokens"] += inp
+        m[key]["output_tokens"] += out
+        m[key]["total_tokens"] += inp + out
+        m[key]["cost_usd"] = round(m[key]["cost_usd"] + cost, 4)
+        m[key]["credits"] = round(m[key]["credits"] + credits, 6)
+        if source:
+            m[key]["sources"].add(source)
+
+    def _add(ts: float, model: str, inp: int, out: int, agent: str, source: str, credits: float = 0.0):
+        dt = _datetime.fromtimestamp(ts, tz=_LOCAL_TZ)
+        day = dt.strftime("%Y-%m-%d")
+        week = dt.strftime("%Y-W%W")
+        month = dt.strftime("%Y-%m")
+        total = inp + out
+        cost = _estimate_cost(model, inp, out)
+        for key, m in [(day, daily_map), (week, weekly_map), (month, monthly_map)]:
+            if key not in m:
+                m[key] = {"sessions": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+            m[key]["sessions"] += 1
+            m[key]["input_tokens"] += inp
+            m[key]["output_tokens"] += out
+            m[key]["total_tokens"] += total
+            m[key]["cost_usd"] = round(m[key]["cost_usd"] + cost, 4)
+        _bump(agent_map, agent, inp, out, cost, source, credits)
+        if day == today_key:
+            _bump(today_agent_map, agent, inp, out, cost, source, credits)
+        if model and ts >= model_since:
+            if model not in model_map:
+                model_map[model] = {"sessions": 0, "total_tokens": 0, "cost_usd": 0.0}
+            model_map[model]["sessions"] += 1
+            model_map[model]["total_tokens"] += total
+            model_map[model]["cost_usd"] = round(model_map[model]["cost_usd"] + cost, 4)
+
+    since = now - 180 * 86400
+
+    # Resolve integration paths once per request so a live hub_settings edit
+    # takes effect on the next call. Each is Optional[Path]; the helper
+    # below stringifies None as "(unconfigured)" for the coverage report.
+    hermes_db_p = _hermes_db()
+    kiro_gw_db_p = _kiro_gw_db()
+    codex_db_p = _codex_db()
+    feishu_codex_db_p = _feishu_codex_db()
+    kiro_cli_db_p = _kiro_cli_db()
+    kiro_cli_sessions_p = _kiro_cli_sessions()
+    claude_projects_p = _claude_projects()
+
+    def _cov(source: str, p: _Path | None, status: str, sessions: int = 0, total: int = 0, credits: float = 0.0):
+        _append_coverage(coverage, source, p if p is not None else _Path("(unconfigured)"),
+                         status, sessions, total, credits)
+
+    # --- Source 1: Hermes state.db ---
+    if hermes_db_p and hermes_db_p.exists():
+        try:
+            conn = _sqlite3.connect(str(hermes_db_p))
+            count = total_seen = 0
+            for row in conn.execute(
+                """SELECT started_at, model, input_tokens, output_tokens, cache_read_tokens,
+                          cache_write_tokens, reasoning_tokens, source
+                   FROM sessions WHERE started_at > ?""",
+                (since,),
+            ).fetchall():
+                inp = (row[2] or 0) + (row[4] or 0) + (row[5] or 0)
+                out = (row[3] or 0) + (row[6] or 0)
+                src = row[7] or "hermes"
+                _add(row[0], row[1] or "hermes", inp, out, "Hermes", f"Hermes/{src}")
+                count += 1
+                total_seen += inp + out
+            conn.close()
+            _cov("Hermes", hermes_db_p, "included", count, total_seen)
+        except Exception as e:
+            _cov("Hermes", hermes_db_p, f"error: {e}")
+    else:
+        _cov("Hermes", hermes_db_p, "missing")
+
+    # --- Source 2: Kiro-gateway usage.db ---
+    if kiro_gw_db_p and kiro_gw_db_p.exists():
+        try:
+            conn = _sqlite3.connect(str(kiro_gw_db_p))
+            count = total_seen = 0
+            for row in conn.execute(
+                "SELECT ts, model, prompt_tokens, completion_tokens, total_tokens, source FROM token_usage WHERE ts > ?",
+                (since,),
+            ).fetchall():
+                inp = row[2] or 0
+                out = row[3] or 0
+                if not inp and not out and row[4]:
+                    inp = int(row[4] * 0.8)
+                    out = int(row[4] * 0.2)
+                _add(row[0], row[1] or "kiro-gateway", inp, out, "Kiro", row[5] or "kiro-gateway")
+                count += 1
+                total_seen += inp + out
+            conn.close()
+            _cov("Kiro Gateway", kiro_gw_db_p, "included", count, total_seen)
+        except Exception:
+            _cov("Kiro Gateway", kiro_gw_db_p, "error")
+    else:
+        _cov("Kiro Gateway", kiro_gw_db_p, "missing")
+
+    # Kiro CLI stores conversation history locally, but this DB does not expose token totals.
+    if kiro_cli_db_p and kiro_cli_db_p.exists():
+        try:
+            conn = _sqlite3.connect(str(kiro_cli_db_p))
+            count = conn.execute("SELECT count(*) FROM conversations_v2").fetchone()[0]
+            conn.close()
+            _cov("Kiro CLI local", kiro_cli_db_p, "found-no-token-counters", count, 0)
+        except Exception:
+            _cov("Kiro CLI local", kiro_cli_db_p, "error")
+
+    if kiro_cli_sessions_p and kiro_cli_sessions_p.exists():
+        try:
+            sessions = _scan_kiro_cli_sessions(since)
+            total_seen = 0
+            credits_seen = 0.0
+            for s in sessions:
+                credits = s.get("credits") or 0.0
+                _add(s["ts"], s["model"], s["input"], s["output"], "Kiro", "Kiro CLI estimate", credits)
+                total_seen += s["input"] + s["output"]
+                credits_seen += credits
+            _cov(
+                "Kiro CLI sessions",
+                kiro_cli_sessions_p,
+                "estimated-from-context-usage",
+                len(sessions),
+                total_seen,
+                credits_seen,
+            )
+        except Exception:
+            _cov("Kiro CLI sessions", kiro_cli_sessions_p, "error")
+    else:
+        _cov("Kiro CLI sessions", kiro_cli_sessions_p, "missing")
+
+    def _scan_codex_db(path: _Path | None, agent: str, source_name: str):
+        if path is None or not path.exists():
+            _cov(source_name, path, "missing")
+            return
+        try:
+            conn = _sqlite3.connect(str(path))
+            count = total_seen = 0
+            for row in conn.execute(
+                """SELECT created_at, updated_at, model, tokens_used, rollout_path
+                   FROM threads WHERE tokens_used > 0 AND updated_at > ?""",
+                (since,),
+            ).fetchall():
+                usage = _read_codex_rollout_usage(row[4])
+                if usage and usage["total"] > 0:
+                    ts = usage["ts"] or row[1] or row[0]
+                    inp = usage["input"]
+                    out = usage["output"]
+                else:
+                    total = row[3] or 0
+                    ts = row[1] or row[0]
+                    inp = int(total * 0.8)
+                    out = int(total * 0.2)
+                _add(ts, row[2] or "codex", inp, out, agent, source_name)
+                count += 1
+                total_seen += inp + out
+            conn.close()
+            _cov(source_name, path, "included", count, total_seen)
+        except Exception:
+            _cov(source_name, path, "error")
+
+    # --- Source 3: Codex (OpenAI Codex CLI) ---
+    _scan_codex_db(codex_db_p, "Codex", "Codex")
+
+    # --- Source 4: Feishu Codex relay belongs to Hermes ---
+    _scan_codex_db(feishu_codex_db_p, "Hermes", "Hermes/Feishu Codex Relay")
+
+    # --- Source 5: Claude Code ---
+    if claude_projects_p and claude_projects_p.exists():
+        try:
+            claude_sessions = _scan_claude_sessions(since)
+            claude_total = 0
+            for s in claude_sessions:
+                _add(s["ts"], s["model"], s["input"], s["output"], "Claude Code", "Claude Code")
+                claude_total += s["input"] + s["output"]
+            _cov("Claude Code", claude_projects_p, "included", len(claude_sessions), claude_total)
+        except Exception:
+            _cov("Claude Code", claude_projects_p, "error")
+    else:
+        _cov("Claude Code", claude_projects_p, "missing")
+
+    # Format output
+    def _to_list(m, key_name):
+        return sorted([{key_name: k, **v} for k, v in m.items()], key=lambda x: x[key_name], reverse=True)
+
+    def _agent_list(m: dict):
+        rows = []
+        for k, v in m.items():
+            row = {kk: vv for kk, vv in v.items() if kk != "sources"}
+            row["agent"] = k
+            row["sources"] = sorted(v.get("sources") or [])
+            rows.append(row)
+        return sorted(rows, key=lambda x: x["total_tokens"], reverse=True)
+
+    daily = _to_list(daily_map, "day")[:30]
+    weekly = _to_list(weekly_map, "week")[:12]
+    monthly = _to_list(monthly_map, "month")[:6]
+    models = sorted(
+        [{"model": k, **v} for k, v in model_map.items()],
+        key=lambda x: x["total_tokens"], reverse=True
+    )[:15]
+
+    return {
+        "daily": daily,
+        "weekly": weekly,
+        "monthly": monthly,
+        "models": models,
+        "agents": _agent_list(agent_map),
+        "today_agents": _agent_list(today_agent_map),
+        "coverage": coverage,
+        "timezone": "Asia/Shanghai",
+    }

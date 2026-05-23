@@ -1,0 +1,437 @@
+"""Per-setting health probes for the /api/settings/test endpoint.
+
+Each handler returns a uniform ``{ok, detail}`` dict. Probes are
+lightweight (HEAD or a single low-cost API call) and bounded by short
+timeouts so the UI stays responsive even when a target is down.
+
+The autodetect() helper at the bottom scans the host for common
+integration paths and returns suggestions the user can apply with one
+click — saves them from typing paths by hand.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sqlite3
+import socket
+import sys
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import httpx
+
+_WINDOWS = sys.platform == "win32"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_DEFAULT_TIMEOUT = 8.0
+
+
+def _ok(detail: str = "可用") -> Dict[str, Any]:
+    return {"ok": True, "detail": detail}
+
+
+def _err(detail: str) -> Dict[str, Any]:
+    return {"ok": False, "detail": detail}
+
+
+def _hub_get(key: str) -> str:
+    """Read a hub_setting (synchronous, falls back to env)."""
+    from app.core import hub_settings as _hs
+    v = _hs.get(key)
+    return str(v) if v is not None else ""
+
+
+# ---------------------------------------------------------------------------
+# Probe handlers
+# ---------------------------------------------------------------------------
+
+async def _probe_apimart(key: str) -> Dict[str, Any]:
+    if not key:
+        return _err("未填写")
+    base = (_hub_get("apimart_base") or "https://api.apimart.ai/v1").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+        if r.status_code == 200:
+            try:
+                data = r.json()
+                models = data.get("data") or data.get("models") or []
+                n = len(models) if isinstance(models, list) else 0
+                return _ok(f"密钥有效（可见 {n} 个模型）" if n else "密钥有效")
+            except Exception:
+                return _ok("HTTP 200")
+        if r.status_code in (401, 403):
+            return _err(f"鉴权失败 (HTTP {r.status_code})，检查密钥是否过期或额度耗尽")
+        return _err(f"HTTP {r.status_code}：{r.text[:120]}")
+    except httpx.ConnectError:
+        return _err("连接失败（DNS / 网络 / 防火墙）")
+    except httpx.TimeoutException:
+        return _err(f"超时（>{_DEFAULT_TIMEOUT}s）")
+    except Exception as e:
+        return _err(f"异常：{e}")
+
+
+async def _probe_apimart_base(url: str) -> Dict[str, Any]:
+    if not url:
+        return _err("未填写")
+    if not url.startswith("http"):
+        return _err("应以 http(s):// 开头")
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.get(url.rstrip("/") + "/models", headers={"Authorization": "Bearer test"})
+        # Even 401 means the endpoint is reachable and OpenAI-compatible.
+        if r.status_code in (200, 401, 403):
+            return _ok(f"端点可达 (HTTP {r.status_code})")
+        return _err(f"HTTP {r.status_code}")
+    except Exception as e:
+        return _err(f"无法连接：{e}")
+
+
+async def _probe_sorftime(key: str) -> Dict[str, Any]:
+    if not key:
+        return _err("未填写")
+    # Use MCP tools/list as a low-cost auth check.
+    url = f"https://mcp.sorftime.com?key={key}"
+    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.post(url, json=payload, headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            })
+        if r.status_code != 200:
+            return _err(f"HTTP {r.status_code}")
+        # Sorftime returns SSE: parse last data line
+        body = None
+        for line in r.text.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                try:
+                    body = json.loads(line[5:].strip())
+                except Exception:
+                    pass
+        if body is None:
+            return _err("响应解析失败")
+        if "error" in body:
+            return _err(f"鉴权失败：{body['error']}")
+        tools = body.get("result", {}).get("tools", [])
+        return _ok(f"密钥有效（{len(tools)} 个工具可用）")
+    except Exception as e:
+        return _err(f"调用失败：{e}")
+
+
+async def _probe_openai(key: str) -> Dict[str, Any]:
+    if not key:
+        return _err("未填写")
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.get("https://api.openai.com/v1/models",
+                            headers={"Authorization": f"Bearer {key}"})
+        if r.status_code == 200:
+            return _ok("密钥有效")
+        if r.status_code in (401, 403):
+            return _err(f"鉴权失败 (HTTP {r.status_code})")
+        return _err(f"HTTP {r.status_code}")
+    except Exception as e:
+        return _err(f"调用失败：{e}")
+
+
+async def _probe_url(url: str, *, label: str = "URL") -> Dict[str, Any]:
+    if not url:
+        return _err("未填写")
+    if not url.startswith(("http://", "https://")):
+        return _err("应以 http(s):// 开头")
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT, follow_redirects=True) as c:
+            r = await c.get(url)
+        # Any sub-500 code means the server is alive and responding.
+        if r.status_code < 500:
+            return _ok(f"可达 (HTTP {r.status_code})")
+        return _err(f"HTTP {r.status_code}（服务端错误）")
+    except httpx.ConnectError:
+        return _err("连接被拒绝（服务未启动？）")
+    except httpx.TimeoutException:
+        return _err(f"超时（>{_DEFAULT_TIMEOUT}s）")
+    except Exception as e:
+        return _err(f"{label} 检测失败：{e}")
+
+
+def _probe_bin(path: str) -> Dict[str, Any]:
+    if not path:
+        return _err("未填写")
+    p = Path(path)
+    if not p.exists():
+        # Fall back: try resolving via PATH if just a name was given
+        if not p.is_absolute():
+            w = shutil.which(path)
+            if w:
+                return _ok(f"通过 PATH 找到：{w}")
+        return _err("文件不存在")
+    if not p.is_file():
+        return _err("不是一个文件")
+    # Windows has no executable bit; treat .exe/.cmd/.bat as executable.
+    if _WINDOWS:
+        executable = p.suffix.lower() in (".exe", ".cmd", ".bat", ".ps1") or not p.suffix
+    else:
+        executable = os.access(p, os.X_OK)
+    if not executable:
+        return _err("文件无可执行权限")
+    return _ok(str(p))
+
+
+def _probe_db(path: str) -> Dict[str, Any]:
+    if not path:
+        return _err("未填写")
+    p = Path(path)
+    if not p.exists():
+        return _err("文件不存在")
+    if not p.is_file():
+        return _err("不是一个文件")
+    try:
+        conn = sqlite3.connect(str(p), timeout=2.0)
+        try:
+            row = conn.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='table'"
+            ).fetchone()
+            n = row[0] if row else 0
+        finally:
+            conn.close()
+        size = p.stat().st_size
+        kb = size / 1024
+        return _ok(f"SQLite 有效（{n} 个表，{kb:.1f} KB）")
+    except sqlite3.DatabaseError as e:
+        return _err(f"不是有效的 SQLite 文件：{e}")
+    except Exception as e:
+        return _err(f"打开失败：{e}")
+
+
+def _probe_dir(path: str) -> Dict[str, Any]:
+    if not path:
+        return _err("未填写")
+    p = Path(path).expanduser()
+    if not p.exists():
+        return _err("目录不存在")
+    if not p.is_dir():
+        return _err("不是一个目录")
+    try:
+        items = list(p.iterdir())
+        return _ok(f"目录存在（{len(items)} 个条目）")
+    except PermissionError:
+        return _err("无读取权限")
+    except Exception as e:
+        return _err(f"读取失败：{e}")
+
+
+async def _probe_feishu_webhook(url: str) -> Dict[str, Any]:
+    """POST a small probe message. The webhook config (keyword / signature)
+    may reject it — that's actually still useful info."""
+    if not url:
+        return _err("未填写")
+    if not url.startswith("https://"):
+        return _err("应以 https:// 开头")
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.post(url, json={
+                "msg_type": "text",
+                "content": {"text": f"ops-hub 配置测试 · {time.strftime('%H:%M:%S')}"},
+            })
+        if r.status_code == 200:
+            try:
+                data = r.json()
+                code = data.get("code") or data.get("StatusCode") or 0
+                if code in (0, None):
+                    return _ok("已发送测试消息，请检查群消息")
+                msg = data.get("msg", "") or data.get("StatusMessage", "")
+                # Common: code=19021 关键词未命中 / code=11212 签名校验失败
+                if "keyword" in msg.lower() or "关键词" in msg:
+                    return _err(f"关键词校验未通过：{msg}（请把告警消息会包含的关键词配进群机器人）")
+                if "sign" in msg.lower() or "签名" in msg:
+                    return _err(f"签名校验未通过：{msg}")
+                return _err(f"飞书返回 code={code}：{msg}")
+            except Exception:
+                return _ok("HTTP 200（响应体非 JSON）")
+        return _err(f"HTTP {r.status_code}：{r.text[:120]}")
+    except Exception as e:
+        return _err(f"请求失败：{e}")
+
+
+async def _probe_feishu_app() -> Dict[str, Any]:
+    """Try to get a tenant_access_token using the configured app_id/secret."""
+    app_id = _hub_get("alert_app_id")
+    app_secret = _hub_get("alert_app_secret")
+    chat_id = _hub_get("alert_chat_id")
+    if not app_id or not app_secret:
+        return _err("App ID 和 App Secret 都需要填写")
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.post(
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                json={"app_id": app_id, "app_secret": app_secret},
+            )
+        if r.status_code != 200:
+            return _err(f"HTTP {r.status_code}")
+        data = r.json()
+        if data.get("code") != 0:
+            return _err(f"飞书拒绝：code={data.get('code')} msg={data.get('msg')}")
+        token = data.get("tenant_access_token")
+        if not token:
+            return _err("返回中没有 tenant_access_token")
+        if not chat_id:
+            return _ok(f"App 凭证有效（tenant_token 已获取）；未填 Chat ID，无法测试消息发送")
+        # Try send a test message to chat_id
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.post(
+                "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+                headers={"Authorization": f"Bearer {token}",
+                         "Content-Type": "application/json; charset=utf-8"},
+                json={
+                    "receive_id": chat_id,
+                    "msg_type": "text",
+                    "content": json.dumps({"text": f"ops-hub 配置测试 · {time.strftime('%H:%M:%S')}"}, ensure_ascii=False),
+                },
+            )
+        data = r.json()
+        if data.get("code") == 0:
+            return _ok(f"App 凭证有效，已向 {chat_id} 发送测试消息")
+        return _err(f"凭证有效但消息发送失败：code={data.get('code')} msg={data.get('msg')}")
+    except Exception as e:
+        return _err(f"调用失败：{e}")
+
+
+# ---------------------------------------------------------------------------
+# Public dispatch
+# ---------------------------------------------------------------------------
+
+async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
+    """Test one setting. `value` is the in-flight (unsaved) value; when
+    None or empty, falls back to the persisted value."""
+    val = value.strip() if value else _hub_get(key)
+
+    # Map keys to probes
+    if key == "apimart_key":
+        return await _probe_apimart(val)
+    if key == "apimart_base":
+        return await _probe_apimart_base(val)
+    if key == "sorftime_key":
+        return await _probe_sorftime(val)
+    if key == "openai_api_key":
+        return await _probe_openai(val)
+
+    if key == "imgflow_url":
+        # imgflow's root may not respond to GET; try /api/health or /
+        if not val:
+            return _err("未填写")
+        for path in ("/api/health", "/"):
+            res = await _probe_url(val.rstrip("/") + path, label="imgflow")
+            if res["ok"]:
+                return res
+        return res  # last one
+    if key in ("dashboard_url", "terminal_url"):
+        return await _probe_url(val)
+
+    if key == "alert_webhook":
+        return await _probe_feishu_webhook(val)
+    if key in ("alert_app_id", "alert_app_secret", "alert_chat_id"):
+        # Test the whole bundle together — single field alone isn't useful.
+        return await _probe_feishu_app()
+
+    if key in ("hermes_bin", "codex_bin", "claude_bin", "kiro_cli_bin", "gbrain_bin"):
+        return _probe_bin(val)
+    if key.endswith("_db"):
+        return _probe_db(val)
+    if key.endswith("_dir") or key == "brain_root":
+        return _probe_dir(val)
+    if key in ("hermes_node_bin", "bun_bin"):
+        return _probe_dir(val)
+
+    return _err(f"未知配置项：{key}")
+
+
+# ---------------------------------------------------------------------------
+# Autodetect: scan known locations for the user's already-installed tools
+# ---------------------------------------------------------------------------
+
+def autodetect() -> Dict[str, Any]:
+    """Return ``{suggestions: {key: value, ...}, scanned: [...]}`` where
+    each suggestion is a path we found on disk. The frontend lets the
+    user review and selectively apply them. Only suggests when:
+      - the key is currently unset in hub_settings, AND
+      - the probed path actually exists.
+    """
+    from app.core import hub_settings as _hs
+    current = _hs.load()
+    suggestions: Dict[str, str] = {}
+    scanned: list[str] = []
+    home = Path.home()
+
+    def _suggest_first(key: str, candidates: list[str]) -> None:
+        if current.get(key):
+            return
+        for c in candidates:
+            scanned.append(f"{key}: {c}")
+            p = Path(c)
+            if p.exists():
+                suggestions[key] = str(p)
+                return
+
+    # --- CLIs (try PATH lookup then common locations) ---
+    for name, key in (("hermes", "hermes_bin"), ("codex", "codex_bin"),
+                      ("kiro-cli", "kiro_cli_bin"), ("gbrain", "gbrain_bin")):
+        if current.get(key):
+            continue
+        w = shutil.which(name)
+        if w:
+            suggestions[key] = w
+            scanned.append(f"{key}: found in PATH at {w}")
+        else:
+            # Try a few well-known absolute locations
+            for c in (f"/usr/local/bin/{name}", f"{home}/.local/bin/{name}",
+                      f"{home}/.hermes/node/bin/{name}", f"{home}/.bun/bin/{name}"):
+                scanned.append(f"{key}: {c}")
+                if Path(c).is_file():
+                    suggestions[key] = c
+                    break
+
+    # claude: avoid the broken .exe shim, walk for a real platform binary
+    if not current.get("claude_bin"):
+        # First try the PATH-resolved binary's real target
+        w = shutil.which("claude")
+        if w:
+            real = os.path.realpath(w)
+            if Path(real).is_file() and not real.endswith(".exe"):
+                suggestions["claude_bin"] = real
+                scanned.append(f"claude_bin: resolved from PATH → {real}")
+        if "claude_bin" not in suggestions:
+            for c in [
+                f"{home}/.hermes/node/lib/node_modules/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-linux-x64/claude",
+                "/usr/local/bin/claude",
+                "/usr/lib/claude-code/claude",
+            ]:
+                scanned.append(f"claude_bin: {c}")
+                if Path(c).is_file():
+                    suggestions["claude_bin"] = c
+                    break
+
+    # --- Databases ---
+    _suggest_first("hermes_db", [str(home / ".hermes/state.db")])
+    _suggest_first("codex_db", [str(home / ".codex/state_5.sqlite")])
+    _suggest_first("feishu_codex_db", [str(home / "feishu-codex-relay/.codex-home/state_5.sqlite")])
+    _suggest_first("kiro_gateway_db", [str(home / "kiro-gateway/usage.db")])
+    _suggest_first("kiro_cli_db", [str(home / ".local/share/kiro-cli/data.sqlite3")])
+
+    # --- Directories ---
+    _suggest_first("kiro_cli_sessions_dir", [str(home / ".kiro/sessions/cli")])
+    _suggest_first("claude_projects_dir", [str(home / ".claude/projects")])
+    _suggest_first("brain_root", [str(home / "brain")])
+
+    # --- PATH augment dirs ---
+    _suggest_first("hermes_node_bin", [str(home / ".hermes/node/bin")])
+    _suggest_first("bun_bin", [str(home / ".bun/bin")])
+
+    return {"suggestions": suggestions, "scanned": scanned}

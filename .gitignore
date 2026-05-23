@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+*.log
+*.tsbuildinfo
+
+# Env & data
+.env
+.env.local
+/data/
+# Safety net: never commit SQLite files or secrets anywhere in the tree
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+
+# Keep the data directory structure but not its contents
+!/data/.gitkeep
+
+# Deploy (private — contains your domain & paths; render targets are generated)
+deploy/install.conf
+deploy/dist/
+
+# Editor
+.vscode/
+.idea/
+
+# Backup files (use git, not timestamped copies)
+*.bak
+*.bak.*
+*.orig
+dist.bak*
+
+# Local uploads
+saved-images/

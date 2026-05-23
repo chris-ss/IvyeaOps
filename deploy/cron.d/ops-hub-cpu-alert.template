@@ -1,0 +1,10 @@
+# ops-hub CPU watchdog — fires Feishu alert on sustained high CPU.
+# Configure thresholds & delivery in the web UI (系统配置 → CPU 报警 / 飞书通知).
+# Install: sudo cp deploy/dist/cron.d/ops-hub-cpu-alert /etc/cron.d/
+#
+# Cron lines in /etc/cron.d/ need a user field (unlike `crontab -e`).
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+* * * * * ${OPSHUB_USER} ${PYTHON_BIN} ${INSTALL_DIR}/scripts/cpu_alert.py >> ${CPU_ALERT_LOG} 2>&1

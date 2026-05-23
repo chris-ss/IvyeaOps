@@ -1,0 +1,39 @@
+# ops-hub deployment configuration.
+#
+# Copy this file to deploy/install.conf and fill in your values, then run:
+#   bash scripts/render-deploy.sh
+# That renders deploy/nginx/, deploy/systemd/, deploy/cron.d/ templates
+# into deploy/dist/. The script prints the next steps (copy / reload).
+#
+# Empty values use the defaults shown after the '#'.
+
+# Public hostname (the certbot domain). REQUIRED.
+SERVER_NAME=ops.example.com
+
+# Where the repo lives on disk.
+INSTALL_DIR=/root/ops-hub
+
+# OS user that runs the FastAPI process.
+OPSHUB_USER=root
+
+# Internal port FastAPI listens on (must match server/.env OPSHUB_PORT).
+OPSHUB_PORT=8001
+
+# Python interpreter (must have the requirements.txt deps installed).
+PYTHON_BIN=/usr/bin/python3
+
+# CPU-alert cron log location. The directory must be writable by OPSHUB_USER.
+CPU_ALERT_LOG=/var/log/ops-hub/cpu-alert.log
+
+# --- Optional sub-services ---
+# Leave port empty to comment-out the corresponding nginx location block.
+
+# claudecodeui at https://${SERVER_NAME}/cli/
+CLAUDECODEUI_PORT=5175
+
+# amazon-image-workflow web at /imgflow and API at /imgflow-api/
+IMGFLOW_WEB_PORT=3000
+IMGFLOW_API_PORT=3001
+
+# skill-studio static dist served at /skill-studio/
+SKILL_STUDIO_DIST=/var/www/skill-studio
