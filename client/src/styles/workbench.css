@@ -142,7 +142,7 @@ body::after{
 
 /* --- MAIN --- */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.topbar{height:40px;border-bottom:1px solid var(--b);display:flex;align-items:center;padding:0 16px;gap:12px;background:var(--bg1);flex-shrink:0}
+.topbar{height:40px;border-bottom:1px solid var(--b);display:flex;align-items:center;padding:0 16px;gap:12px;background:var(--bg2);flex-shrink:0}
 .tb-path{font-size:11px;color:var(--t3)}
 .tb-path b{color:var(--t2);font-weight:400}
 .tb-r{margin-left:auto;display:flex;align-items:center;gap:8px}
@@ -779,7 +779,7 @@ body::after{
 .terminal-page-title{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .terminal-page-actions{font-size:9px;color:var(--t3);text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .terminal-workbench{flex:1;min-height:0;display:grid;grid-template-columns:260px minmax(0,1fr) 360px;gap:12px}
-.terminal-session-list,.terminal-main,.terminal-history-panel{min-height:0;display:flex;flex-direction:column;padding:10px 12px}
+.terminal-session-list,.terminal-main,.terminal-history-panel{min-height:0;display:flex;flex-direction:column;padding:10px 12px;background:var(--bg2);border:1px solid var(--b);border-radius:var(--r)}
 .terminal-section-title{font-size:10px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
 .terminal-session-scroll,.terminal-history-scroll{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px}
 .terminal-session-scroll::-webkit-scrollbar,.terminal-history-scroll::-webkit-scrollbar{width:4px}
