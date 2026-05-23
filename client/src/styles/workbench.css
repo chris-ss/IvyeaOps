@@ -595,7 +595,7 @@ body::after{
 
 
 /* --- AGENT HUB (/agents) --- */
-.agent-hub{display:grid;grid-template-columns:220px 1fr 260px;flex:1;min-height:0;background:var(--bg1);border:1px solid var(--b);border-radius:var(--r);overflow:hidden;position:relative}
+.agent-hub{display:grid;grid-template-columns:220px 1fr 260px;flex:1;min-height:0;background:var(--bg1);overflow:hidden;position:relative}
 .agent-hub-col{display:flex;flex-direction:column;overflow:hidden;min-width:0;min-height:0}
 .agent-hub-col + .agent-hub-col{border-left:1px solid var(--b)}
 .agent-hub-head{height:36px;padding:0 10px;border-bottom:1px solid var(--b);display:flex;align-items:center;gap:6px;background:var(--bg1);flex-shrink:0}

@@ -206,20 +206,13 @@ export default function AgentChat() {
         <div className="agent-hub-col col-tree">
           <div className="agent-hub-head">
             <span className="h-title">会话列表</span>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "var(--t3)", cursor: "pointer", fontFamily: "var(--font)", flexShrink: 0 }}>
+              <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} style={{ accentColor: "var(--acc)", width: 11, height: 11 }} />
+              已归档
+            </label>
             <button className="btn-acc" onClick={() => setPickerOpen(true)} title="新建会话">
               + 新建
             </button>
-          </div>
-          <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--b)" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--t3)", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={showArchived}
-                onChange={(e) => setShowArchived(e.target.checked)}
-                style={{ accentColor: "var(--acc)" }}
-              />
-              显示已归档
-            </label>
           </div>
           <div className="agent-hub-body">
             <BranchTree
