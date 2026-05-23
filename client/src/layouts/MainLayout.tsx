@@ -232,7 +232,7 @@ export default function MainLayout() {
             >
               ↻
             </button>
-            <div ref={themePickerRef} style={{ position: "relative" }}>
+            <div ref={themePickerRef} style={{ position: "relative", display: "flex", alignItems: "center" }}>
               <button
                 className="tbtn"
                 onClick={() => setThemePicker(!themePicker)}
