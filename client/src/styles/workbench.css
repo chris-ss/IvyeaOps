@@ -10,7 +10,8 @@
   --blue:#60a5fa;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa;--cyan:#22d3ee;
   --font:'JetBrains Mono','Fira Code','SF Mono',Menlo,Consolas,monospace;
   --sans:'Inter',system-ui,sans-serif;--r:4px;
-  --grain-opacity:.24;
+  --grain-opacity:.50;
+  --warm-glow:rgba(74,222,128,.16);
 }
 /* ── Moonstone (light) ── */
 [data-theme=light]{
@@ -20,7 +21,8 @@
   --acc:#16a34a;
   --blue:#2563eb;--amber:#d97706;--red:#dc2626;--purple:#7c3aed;--cyan:#0891b2;
   --font:'Inter',system-ui,sans-serif;
-  --grain-opacity:.30;
+  --grain-opacity:.22;
+  --warm-glow:rgba(22,163,74,.10);
 }
 /* ── Deep Space (electric blue) ── */
 [data-theme=deep-space]{
@@ -29,7 +31,8 @@
   --t:#c8deff;--t2:#6a8db0;--t3:#334d6e;
   --acc:#4d8fff;
   --blue:#38bdf8;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa;--cyan:#22d3ee;
-  --grain-opacity:.22;
+  --grain-opacity:.48;
+  --warm-glow:rgba(77,143,255,.20);
 }
 /* ── Smoke & Gold (amber) ── */
 [data-theme=smoke-gold]{
@@ -38,7 +41,8 @@
   --t:#e8e0cc;--t2:#8c8470;--t3:#524f44;
   --acc:#f0a030;
   --blue:#60a5fa;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa;--cyan:#22d3ee;
-  --grain-opacity:.24;
+  --grain-opacity:.50;
+  --warm-glow:rgba(240,160,48,.26);
 }
 /* ── Catppuccin Mocha (lavender) ── */
 [data-theme=catppuccin]{
@@ -47,7 +51,8 @@
   --t:#cdd6f4;--t2:#a6adc8;--t3:#585b70;
   --acc:#cba6f7;
   --blue:#89b4fa;--amber:#f9e2af;--red:#f38ba8;--purple:#cba6f7;--cyan:#89dceb;
-  --grain-opacity:.22;
+  --grain-opacity:.44;
+  --warm-glow:rgba(203,166,247,.18);
 }
 /* ── Hermes (teal canvas + cream) ── */
 [data-theme=hermes]{
@@ -57,23 +62,34 @@
   --acc:#e8a84a;
   --blue:#6ecfcf;--amber:#ffbd38;--red:#f87a7a;--purple:#c49ff5;--cyan:#4dd4c0;
   --font:'Inter',system-ui,sans-serif;
-  --grain-opacity:.26;
+  --grain-opacity:.55;
+  --warm-glow:rgba(255,189,56,.35);
 }
 
 /* ─────────────────────────────────────────────────────────────────
-   GLOBAL BASE — solid theme color + grain texture (Hermes style)
-   No painting, no glass effects. Grain IS the texture/depth element.
+   GLOBAL BASE — Hermes-style: solid color + warm vignette + grain
+   body::before = warm glow vignette (mix-blend-mode: lighten, z-99)
+   body::after  = fractalNoise grain (mix-blend-mode: color-dodge, z-101)
    ───────────────────────────────────────────────────────────────── */
 html{height:100%;background:var(--bg);color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
 body{height:100%;background:var(--bg);color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
 #root{height:100%;background:transparent;color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
 
-/* ── Grain texture — fractalNoise, clearly visible across all themes ── */
+/* Warm corner vignette — mirrors Hermes z-99 layer */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:radial-gradient(ellipse at 0% 0%, transparent 55%, var(--warm-glow,transparent) 100%);
+  mix-blend-mode:lighten;
+  opacity:.22;
+}
+
+/* fractalNoise grain — color-dodge so it glows on dark surfaces (mirrors Hermes z-101) */
 body::after{
-  content:'';position:fixed;inset:0;pointer-events:none;z-index:99999;
-  opacity:var(--grain-opacity,.24);
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.70' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='256' height='256' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size:160px 160px;
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:101;
+  opacity:var(--grain-opacity,.50);
+  mix-blend-mode:color-dodge;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='512' height='512' fill='%23eaeaea' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-size:512px 512px;
 }
 
 /* --- APP SHELL --- */
