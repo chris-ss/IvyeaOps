@@ -72,9 +72,19 @@ export default function MainLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [termMounted, setTermMounted] = useState(false);
-  const [dark, setDark] = useState(
-    () => (localStorage.getItem("opshub.theme") ?? "dark") !== "light",
-  );
+  const THEMES = ["dark", "deep-space", "smoke-gold", "catppuccin", "light"] as const;
+  type Theme = typeof THEMES[number];
+  const THEME_LABELS: Record<Theme, string> = {
+    "dark":       "🌲 终端绿",
+    "deep-space": "🌌 深空蓝",
+    "smoke-gold": "✦ 烟金",
+    "catppuccin": "🔮 紫幕",
+    "light":      "☀ 月岩",
+  };
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem("opshub.theme") as Theme | null;
+    return THEMES.includes(saved as any) ? saved! : "dark";
+  });
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("opshub.sidebar.collapsed") === "1" || window.innerWidth <= 680,
   );
@@ -108,12 +118,12 @@ export default function MainLayout() {
     return () => clearInterval(t);
   }, []);
 
-  const toggleTheme = () => {
-    const next = !dark;
-    setDark(next);
-    const value = next ? "dark" : "light";
-    document.documentElement.setAttribute("data-theme", value);
-    localStorage.setItem("opshub.theme", value);
+  const cycleTheme = () => {
+    const idx = THEMES.indexOf(theme);
+    const next = THEMES[(idx + 1) % THEMES.length];
+    setTheme(next);
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("opshub.theme", next);
   };
 
   const toggleSidebar = () => {
@@ -204,11 +214,11 @@ export default function MainLayout() {
             </button>
             <button
               className="tbtn"
-              onClick={toggleTheme}
-              style={{ minWidth: 58 }}
-              title="切换主题"
+              onClick={cycleTheme}
+              style={{ minWidth: 72 }}
+              title="切换主题（点击循环）"
             >
-              {dark ? "🌙 深色" : "☀️ 浅色"}
+              {THEME_LABELS[theme]}
             </button>
             <button className="tbtn" onClick={handleLogout} title="退出登录">
               ↩ 退出
