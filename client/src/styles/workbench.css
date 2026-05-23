@@ -3,7 +3,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 /* ── Terminal Green (default dark) ── */
 :root{
-  --bg:rgba(12,12,12,.62);--bg1:rgba(17,17,17,.84);--bg2:rgba(22,22,22,.80);--bg3:rgba(28,28,28,.76);
+  /* solid bg vars for content panels — fully opaque so gaps look uniform */
+  --bg:#0c0c0c;--bg1:#111111;--bg2:#161616;--bg3:#1c1c1c;
   --b:#262626;--b2:#383838;--brd:var(--b);
   --t:#e8e8e8;--t2:#888;--t3:#555;
   --acc:#4ade80;
@@ -11,53 +12,66 @@
   --font:'JetBrains Mono','Fira Code','SF Mono',Menlo,Consolas,monospace;
   --sans:'Inter',system-ui,sans-serif;--r:4px;
   --grain-opacity:.13;
+  /* glass vars — sidebar and main topbar only */
+  --glass:rgba(12,12,12,.44);
+  --glass-tb:rgba(12,12,12,.64);
 }
 /* ── Moonstone (light) ── */
 [data-theme=light]{
-  --bg:rgba(240,240,238,.52);--bg1:rgba(255,255,255,.84);--bg2:rgba(248,248,246,.80);--bg3:rgba(239,239,237,.74);
+  --bg:#f0f0ee;--bg1:#ffffff;--bg2:#f8f8f6;--bg3:#efefed;
   --b:#dededb;--b2:#c8c8c4;--brd:var(--b);
   --t:#111111;--t2:#555550;--t3:#a0a09a;
   --acc:#16a34a;
   --blue:#2563eb;--amber:#d97706;--red:#dc2626;--purple:#7c3aed;--cyan:#0891b2;
   --font:'Inter',system-ui,sans-serif;
   --grain-opacity:.18;
+  --glass:rgba(240,240,238,.46);
+  --glass-tb:rgba(240,240,238,.70);
 }
 /* ── Deep Space (electric blue) ── */
 [data-theme=deep-space]{
-  --bg:rgba(6,12,24,.72);--bg1:rgba(10,16,32,.86);--bg2:rgba(14,22,40,.82);--bg3:rgba(19,32,58,.78);
+  --bg:#060c18;--bg1:#0a1020;--bg2:#0e1628;--bg3:#13203a;
   --b:#1e2d4a;--b2:#2d4266;--brd:var(--b);
   --t:#c8deff;--t2:#6a8db0;--t3:#334d6e;
   --acc:#4d8fff;
   --blue:#38bdf8;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa;--cyan:#22d3ee;
   --grain-opacity:.14;
+  --glass:rgba(6,12,24,.46);
+  --glass-tb:rgba(6,12,24,.66);
 }
 /* ── Smoke & Gold (amber) ── */
 [data-theme=smoke-gold]{
-  --bg:rgba(12,12,10,.66);--bg1:rgba(17,17,16,.86);--bg2:rgba(24,24,22,.82);--bg3:rgba(31,30,27,.78);
+  --bg:#0c0c0a;--bg1:#111110;--bg2:#181816;--bg3:#1f1e1b;
   --b:#2e2d28;--b2:#454440;--brd:var(--b);
   --t:#e8e0cc;--t2:#8c8470;--t3:#524f44;
   --acc:#f0a030;
   --blue:#60a5fa;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa;--cyan:#22d3ee;
   --grain-opacity:.14;
+  --glass:rgba(12,12,10,.44);
+  --glass-tb:rgba(12,12,10,.64);
 }
 /* ── Catppuccin Mocha (lavender) ── */
 [data-theme=catppuccin]{
-  --bg:rgba(17,17,27,.70);--bg1:rgba(30,30,46,.86);--bg2:rgba(36,36,56,.82);--bg3:rgba(42,42,64,.78);
+  --bg:#11111b;--bg1:#1e1e2e;--bg2:#242438;--bg3:#2a2a40;
   --b:#383850;--b2:#4e4e6c;--brd:var(--b);
   --t:#cdd6f4;--t2:#a6adc8;--t3:#585b70;
   --acc:#cba6f7;
   --blue:#89b4fa;--amber:#f9e2af;--red:#f38ba8;--purple:#cba6f7;--cyan:#89dceb;
   --grain-opacity:.13;
+  --glass:rgba(17,17,27,.46);
+  --glass-tb:rgba(17,17,27,.66);
 }
 /* ── Hermes (teal canvas + cream) ── */
 [data-theme=hermes]{
-  --bg:rgba(4,28,28,.66);--bg1:rgba(14,35,34,.86);--bg2:rgba(21,43,40,.82);--bg3:rgba(29,53,50,.78);
+  --bg:#041c1c;--bg1:#0e2322;--bg2:#152b28;--bg3:#1d3532;
   --b:#2b3e3a;--b2:#3e5450;--brd:var(--b);
   --t:#ffe6cb;--t2:#8a8072;--t3:#4c5450;
   --acc:#e8a84a;
   --blue:#6ecfcf;--amber:#ffbd38;--red:#f87a7a;--purple:#c49ff5;--cyan:#4dd4c0;
   --font:'Inter',system-ui,sans-serif;
   --grain-opacity:.14;
+  --glass:rgba(4,28,28,.44);
+  --glass-tb:rgba(4,28,28,.64);
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -65,8 +79,9 @@
    html carries the painting (fixed); body = semi-transparent theme
    overlay; #root/.app are transparent so painting shows through.
    ───────────────────────────────────────────────────────────────── */
+/* html = painting; body/root/app = transparent so painting shows through sidebar+topbar glass */
 html{height:100%;background:url('/art/bg.png') center/cover no-repeat fixed;color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
-body{height:100%;background:var(--bg);color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
+body{height:100%;background:transparent;color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
 #root{height:100%;background:transparent;color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
 
 /* ── Eggshell / snowflake grain — SVG feTurbulence fractalNoise ── */
@@ -81,7 +96,7 @@ body::after{
 .app{display:flex;height:100vh;height:100dvh}
 
 /* --- SIDEBAR --- */
-.sb{width:196px;min-width:196px;background:var(--bg1);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-right:1px solid var(--b);display:flex;flex-direction:column;transition:width .18s ease, min-width .18s ease}
+.sb{width:196px;min-width:196px;background:var(--glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-right:1px solid var(--b);display:flex;flex-direction:column;transition:width .18s ease, min-width .18s ease}
 .sb-logo{height:40px;padding:0 10px 0 14px;border-bottom:1px solid var(--b);display:flex;align-items:center;gap:8px;flex-shrink:0}
 .sb-logo-name{flex:1;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t);min-width:0;overflow:hidden}
 .sb-logo-icon{color:var(--acc);font-size:12px;flex-shrink:0;width:14px;text-align:center}
@@ -116,7 +131,7 @@ body::after{
 
 /* --- MAIN --- */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.topbar{height:40px;border-bottom:1px solid var(--b);display:flex;align-items:center;padding:0 16px;gap:12px;background:var(--bg1);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);flex-shrink:0}
+.topbar{height:40px;border-bottom:1px solid var(--b);display:flex;align-items:center;padding:0 16px;gap:12px;background:var(--glass-tb);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);flex-shrink:0}
 .tb-path{font-size:11px;color:var(--t3)}
 .tb-path b{color:var(--t2);font-weight:400}
 .tb-r{margin-left:auto;display:flex;align-items:center;gap:8px}
@@ -128,7 +143,7 @@ body::after{
 .tb-time{font-size:10px;color:var(--t3)}
 
 /* --- CONTENT --- */
-.content{flex:1;overflow-y:auto;padding:16px 18px}
+.content{flex:1;overflow-y:auto;padding:16px 18px;background:var(--bg)}
 .content:has(.agent-hub),.content-fullpage{padding:0;overflow:hidden;display:flex;flex-direction:column}
 .content::-webkit-scrollbar{width:3px}
 .content::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
