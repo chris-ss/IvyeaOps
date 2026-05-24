@@ -6,7 +6,6 @@ import { ConfirmProvider } from "./components/ConfirmDialog";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Home from "./pages/workbench/Home";
-import Dashboard from "./pages/workbench/Dashboard";
 import Tools from "./pages/workbench/Tools";
 import SkillStudio from "./pages/skill/SkillStudio";
 import StatsOverview from "./pages/skill/StatsOverview";
@@ -97,7 +96,6 @@ export default function App() {
             }
           >
             <Route index element={<Home />} />
-            <Route path="dashboard" element={<Dashboard />} />
             <Route path="tools" element={<Tools />} />
             <Route path="skill" element={<SkillStudio />}>
               <Route index element={<StatsOverview />} />

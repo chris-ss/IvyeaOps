@@ -20,7 +20,6 @@ const NAV: NavSection[] = [
     title: "运营",
     items: [
       { to: "/", icon: "⌂", label: "首页" },
-      { to: "/dashboard", icon: "▦", label: "仪表盘 / Hermes" },
       { to: "/tools", icon: "⚙", label: "工具箱" },
       { to: "/imgflow", icon: "◧", label: "Listing生成" },
       { to: "/market", icon: "◈", label: "市场调研" },
@@ -52,7 +51,6 @@ const NAV: NavSection[] = [
 
 const PATH_LABEL: Record<string, string> = {
   "/": "~/首页",
-  "/dashboard": "~/仪表盘·Hermes",
   "/tools": "~/工具箱",
   "/imgflow": "~/Listing生成",
   "/market": "~/市场调研",
