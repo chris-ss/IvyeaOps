@@ -47,7 +47,7 @@ export default function TrafficDiagnosis() {
       </div>
 
       {error && <div className="market-error" style={{ marginTop: 10 }}>{error}</div>}
-      {loading && <div className="pulse-loading" style={{ marginTop: 10 }}><span className="pulse-spin">◌</span> 正在分析流量异动根因（约 30 秒）…</div>}
+      {loading && <div className="pulse-loading" style={{ marginTop: 10 }}><span className="pulse-spin">◌</span> 正在分析流量数据…</div>}
 
       {result && (
         <div style={{ marginTop: 14 }}>
@@ -56,39 +56,63 @@ export default function TrafficDiagnosis() {
               「{asin}」流量诊断报告
             </div>
 
-            {/* Key findings */}
-            {result.key_findings && (
+            {/* Traffic Terms */}
+            {result.traffic_terms && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 4 }}>核心发现</div>
-                {Array.isArray(result.key_findings) ? result.key_findings.map((f: string, i: number) => (
-                  <div key={i} style={{ fontSize: 10, padding: "4px 8px", background: "var(--bg3)", borderRadius: 4, marginBottom: 3, lineHeight: 1.5 }}>
-                    {f}
+                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>流量关键词</div>
+                {typeof result.traffic_terms === "string" ? (
+                  <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>{result.traffic_terms}</div>
+                ) : Array.isArray(result.traffic_terms) ? (
+                  <div style={{ fontSize: 10 }}>
+                    {result.traffic_terms.slice(0, 15).map((t: any, i: number) => (
+                      <div key={i} style={{ padding: "3px 6px", background: "var(--bg3)", borderRadius: 4, marginBottom: 3 }}>
+                        {typeof t === "string" ? t : t.keyword || t.关键词 || JSON.stringify(t).substring(0, 50)}
+                      </div>
+                    ))}
                   </div>
-                )) : (
-                  <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t2)" }}>{String(result.key_findings)}</div>
+                ) : (
+                  <pre style={{ fontSize: 9, maxHeight: 200, overflow: "auto", padding: 8, background: "var(--bg)", borderRadius: 4 }}>
+                    {JSON.stringify(result.traffic_terms, null, 2)}
+                  </pre>
                 )}
               </div>
             )}
 
-            {/* Diagnosis */}
-            {result.diagnosis && (
+            {/* Trend */}
+            {result.trend && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 4 }}>诊断结论</div>
-                <div style={{ fontSize: 11, lineHeight: 1.6, color: "var(--t)" }}>{result.diagnosis}</div>
+                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>销量/流量趋势</div>
+                {typeof result.trend === "string" ? (
+                  <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>{result.trend}</div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 10 }}>
+                    {Object.entries(result.trend).map(([k, v]) => (
+                      <div key={k} style={{ padding: "4px 8px", background: "var(--bg3)", borderRadius: 4 }}>
+                        <span style={{ color: "var(--t3)" }}>{k}: </span>
+                        <span style={{ color: "var(--t)" }}>
+                          {typeof v === "object" ? JSON.stringify(v).substring(0, 60) : String(v)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Action items */}
-            {result.recommendations && (
+            {/* Report */}
+            {result.report && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 4 }}>行动建议</div>
-                {Array.isArray(result.recommendations) ? result.recommendations.map((r: string, i: number) => (
-                  <div key={i} style={{ fontSize: 10, padding: "4px 8px", borderLeft: "2px solid var(--green)", marginBottom: 3, lineHeight: 1.5 }}>
-                    {r}
-                  </div>
-                )) : (
-                  <div style={{ fontSize: 10, lineHeight: 1.6 }}>{String(result.recommendations)}</div>
-                )}
+                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>产品报告</div>
+                <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>
+                  {typeof result.report === "string" ? result.report.substring(0, 800) : JSON.stringify(result.report).substring(0, 800)}
+                </div>
+              </div>
+            )}
+
+            {/* Errors */}
+            {result.errors?.length > 0 && (
+              <div style={{ marginBottom: 10, fontSize: 10, color: "var(--amber)" }}>
+                {result.errors.map((e: string, i: number) => <div key={i}>⚠ {e}</div>)}
               </div>
             )}
 
