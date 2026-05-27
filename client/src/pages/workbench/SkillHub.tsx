@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import SkillTools from "./SkillTools";
 import IdeaSkill from "./IdeaSkill";
 import SkillManage from "./skill/SkillManage";
+
+const ImportGitHubDialog = lazy(() => import("../skill/ImportGitHubDialog"));
 
 const TABS = [
   { key: "tools", label: "工具" },
@@ -13,6 +15,7 @@ type TabKey = (typeof TABS)[number]["key"];
 
 export default function SkillHub() {
   const [tab, setTab] = useState<TabKey>("tools");
+  const [showGithubImport, setShowGithubImport] = useState(false);
 
   return (
     <div>
@@ -42,7 +45,26 @@ export default function SkillHub() {
 
       {tab === "tools" && <div className="skill-hub-tab"><SkillTools /></div>}
       {tab === "create" && <div className="skill-hub-tab"><IdeaSkill /></div>}
-      {tab === "manage" && <SkillManage />}
+      {tab === "manage" && (
+        <div>
+          <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
+            <button
+              className="tbtn"
+              onClick={() => setShowGithubImport(true)}
+              style={{ fontSize: 10 }}
+            >
+              ⬇ 从 GitHub 导入 Skill
+            </button>
+          </div>
+          <SkillManage />
+        </div>
+      )}
+
+      {showGithubImport && (
+        <Suspense fallback={null}>
+          <ImportGitHubDialog onClose={() => setShowGithubImport(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

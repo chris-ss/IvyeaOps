@@ -20,6 +20,7 @@ import {
   type RunnerStatus,
 } from "../../api/client";
 import AdAuditPanel from "./AdAuditPanel";
+import DeepAnalysis from "./DeepAnalysis";
 
 const MARKETPLACES = ["US", "UK", "DE", "FR", "CA", "JP", "ES", "IT", "MX", "AU", "AE", "BR", "SA"];
 
@@ -42,14 +43,9 @@ export default function Tools() {
       {/* Secondary: ad search-term report audit */}
       <AdAuditPanel />
 
-      {/* Link to deep analysis page */}
-      <div style={{ marginTop: 18, padding: "12px 16px", background: "var(--bg2)", borderRadius: "var(--r)", border: "1px solid var(--b)", display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 16 }}>⊖</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t)" }}>更多分析工具已上线</div>
-          <div style={{ fontSize: 10, color: "var(--t3)" }}>关键词竞争分析、竞品反查、评论聚类、Listing 批量改写、流量异动诊断</div>
-        </div>
-        <a href="/deep-analysis" className="tbtn" style={{ textDecoration: "none", fontSize: 10 }}>前往深度分析 →</a>
+      {/* Deep Analysis Tools */}
+      <div style={{ marginTop: 18 }}>
+        <DeepAnalysis />
       </div>
     </div>
   );
