@@ -1,45 +1,178 @@
-# ops-hub — Windows quick setup
-Write-Host ""
-Write-Host "  ops-hub — quick setup" -ForegroundColor Cyan
-Write-Host ""
+# ═══════════════════════════════════════════════════
+# ops-hub — Smart Installer for Windows
+# Auto-detects & installs all dependencies
+# ═══════════════════════════════════════════════════
 
-# Check Docker
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    Write-Host "  [ERROR] Docker is not installed." -ForegroundColor Red
-    Write-Host "  Install Docker Desktop: https://docs.docker.com/desktop/install/windows-install/"
-    exit 1
+function Write-Status($msg, $type="info") {
+    $colors = @{ "ok"="Green"; "warn"="Yellow"; "err"="Red"; "info"="Cyan" }
+    $prefix = @{ "ok"="  ✓"; "warn"="  !"; "err"="  ✗"; "info"="  " }
+    Write-Host "$($prefix[$type]) $msg" -ForegroundColor $colors[$type]
 }
 
-# Check Docker Compose
-try { docker compose version 2>&1 | Out-Null } catch {
-    Write-Host "  [ERROR] Docker Compose is not available." -ForegroundColor Red
-    Write-Host "  Update Docker Desktop to the latest version."
-    exit 1
+function Test-Command($cmd) {
+    return [bool](Get-Command $cmd -ErrorAction SilentlyContinue)
 }
 
-# Create .env if not exists
-if (-not (Test-Path .env)) {
-    Copy-Item .env.example .env
-    # Generate random password
+Write-Host ""
+Write-Host "  ╔═══════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "  ║     ops-hub — Smart Installer         ║" -ForegroundColor Cyan
+Write-Host "  ╚═══════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host ""
+
+# ── Step 1: Check Git ──
+Write-Status "Step 1/5 — Checking required tools..." "info"
+Write-Host ""
+
+if (Test-Command "git") {
+    Write-Status "git found" "ok"
+} else {
+    Write-Status "git not found. Installing..." "warn"
+    if (Test-Command "winget") {
+        winget install --id Git.Git -e --silent
+    } elseif (Test-Command "choco") {
+        choco install git -y
+    } else {
+        Write-Status "Please install Git from https://git-scm.com" "err"
+        exit 1
+    }
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+}
+
+# ── Step 2: Check Docker ──
+if (Test-Command "docker") {
+    Write-Status "docker found" "ok"
+} else {
+    Write-Status "Docker not found." "warn"
+    $install = Read-Host "  Install Docker Desktop? (y/n)"
+    if ($install -eq "y") {
+        Write-Status "Installing Docker Desktop..." "info"
+        if (Test-Command "winget") {
+            winget install --id Docker.DockerDesktop -e --silent
+        } elseif (Test-Command "choco") {
+            choco install docker-desktop -y
+        } else {
+            Write-Status "Please install Docker Desktop from https://docker.com/products/docker-desktop" "err"
+            exit 1
+        }
+        Write-Status "Docker Desktop installed. Please restart your computer and start Docker." "warn"
+        Write-Host "  Press Enter after Docker is running..." -ForegroundColor Yellow
+        Read-Host
+    } else {
+        Write-Status "Docker is required. Exiting." "err"
+        exit 1
+    }
+}
+
+# Docker Compose check
+try { docker compose version 2>&1 | Out-Null; Write-Status "docker compose found" "ok" } catch {
+    Write-Status "Docker Compose not available. Please update Docker Desktop." "warn"
+}
+
+Write-Host ""
+
+# ── Step 3: Check Hermes (optional) ──
+Write-Status "Step 3/5 — Checking Hermes Agent..." "info"
+Write-Host ""
+
+if (Test-Command "hermes") {
+    Write-Status "Hermes found" "ok"
+} else {
+    Write-Status "Hermes not found." "warn"
+    $install = Read-Host "  Install Hermes? (recommended) (y/n)"
+    if ($install -eq "y") {
+        Write-Status "Installing Hermes Agent..." "info"
+        $hermesDir = "$env:USERPROFILE\.hermes\hermes-agent"
+        if (!(Test-Path $hermesDir)) {
+            git clone --depth 1 https://github.com/nousresearch/hermes-agent.git $hermesDir 2>$null
+            if (!$?) { git clone --depth 1 https://github.com/Hector-xue/hermes-agent.git $hermesDir }
+        }
+        Push-Location $hermesDir
+        python -m venv venv
+        .\venv\Scripts\activate
+        pip install -e . --quiet
+        deactivate
+        Pop-Location
+        Write-Status "Hermes installed" "ok"
+    } else {
+        Write-Status "Skipping Hermes." "warn"
+    }
+}
+
+Write-Host ""
+
+# ── Step 4: Clone repo ──
+Write-Status "Step 4/5 — Getting ops-hub..." "info"
+Write-Host ""
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoDir = $scriptDir
+
+if (Test-Path "$repoDir\docker-compose.yml") {
+    Write-Status "Already in ops-hub directory" "ok"
+} else {
+    Write-Status "Cloning ops-hub..." "info"
+    $repoDir = "$env:USERPROFILE\ops-hub"
+    git clone https://github.com/Hector-xue/ops-hub.git $repoDir
+    Set-Location $repoDir
+    Write-Status "Cloned to $repoDir" "ok"
+}
+
+Write-Host ""
+
+# ── Step 5: Configure & Start ──
+Write-Status "Step 5/5 — Configuring & starting..." "info"
+Write-Host ""
+
+Set-Location $repoDir
+
+if (!(Test-Path ".env")) {
     $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
     $pass = -join (1..12 | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
-    (Get-Content .env) -replace 'CHANGE_ME_123', $pass | Set-Content .env
-    Write-Host "  Created .env with random password: $pass" -ForegroundColor Green
-    Write-Host "  Save this password!"
+    "ADMIN_PASSWORD=*** | "PORT=8080" | Set-Content .env
+    Write-Status "Created .env" "ok"
     Write-Host ""
+    Write-Host "  ╔═══════════════════════════════════════╗" -ForegroundColor Yellow
+    Write-Host "  ║  Your admin password: $pass  ║" -ForegroundColor Green
+    Write-Host "  ║  Save this! You'll need it to login.  ║" -ForegroundColor Yellow
+    Write-Host "  ╚═══════════════════════════════════════╝" -ForegroundColor Yellow
+    Write-Host ""
+} else {
+    Write-Status ".env already exists" "ok"
 }
 
-# Build and start
-Write-Host "  Building Docker image..."
-docker compose build
+docker compose build --quiet
+Write-Status "Docker image built" "ok"
 
-Write-Host "  Starting services..."
 docker compose up -d
+Write-Status "Services started" "ok"
 
-$port = if ($env:PORT) { $env:PORT } else { "8080" }
 Write-Host ""
-Write-Host "  =====================================" -ForegroundColor Green
-Write-Host "  ops-hub is running!" -ForegroundColor Green
-Write-Host "  Open: http://localhost:$port" -ForegroundColor Green
-Write-Host "  =====================================" -ForegroundColor Green
+
+# ── Wait for health ──
+Write-Status "Waiting for services..." "info"
+$port = if ($env:PORT) { $env:PORT } else { "8080" }
+for ($i = 0; $i -lt 30; $i++) {
+    try {
+        $resp = Invoke-WebRequest -Uri "http://localhost:$port/api/health" -UseBasicParsing -TimeoutSec 2
+        if ($resp.StatusCode -eq 200) {
+            Write-Status "Backend is healthy" "ok"
+            break
+        }
+    } catch {}
+    Start-Sleep -Seconds 1
+}
+
+Write-Host ""
+Write-Host "  ╔═══════════════════════════════════════╗" -ForegroundColor Green
+Write-Host "  ║                                       ║" -ForegroundColor Green
+Write-Host "  ║   ops-hub is ready!                   ║" -ForegroundColor Green
+Write-Host "  ║                                       ║" -ForegroundColor Green
+Write-Host "  ║   Open: http://localhost:$port           ║" -ForegroundColor Green
+Write-Host "  ║                                       ║" -ForegroundColor Green
+Write-Host "  ╚═══════════════════════════════════════╝" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Useful commands:" -ForegroundColor Gray
+Write-Host "    docker compose logs -f    # View logs" -ForegroundColor Gray
+Write-Host "    docker compose restart    # Restart" -ForegroundColor Gray
+Write-Host "    docker compose down       # Stop" -ForegroundColor Gray
 Write-Host ""
