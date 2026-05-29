@@ -23,6 +23,20 @@ def _brain_root() -> Path:
     return Path(fallback).resolve()
 
 
+def __getattr__(name: str):
+    """Module-level lazy attribute (PEP 562).
+
+    ``brain_chat_service`` references ``gb.BRAIN_ROOT`` as if it were a
+    constant, but the value must be resolved at call time (it reads
+    hub_settings, which can change at runtime and isn't ready at import).
+    Expose it lazily so existing callers work without each becoming a
+    function call, while still honoring live config changes.
+    """
+    if name == "BRAIN_ROOT":
+        return _brain_root()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def _gbrain_bin() -> str:
     from app.core import hub_settings
     val = hub_settings.get("gbrain_bin")
