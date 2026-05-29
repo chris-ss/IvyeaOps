@@ -189,10 +189,37 @@ def overview() -> dict[str, Any]:
     except Exception:
         search_mode = "conservative"
     git = _run_git(["status", "--short"], timeout=10)
+
+    # Real embedding status: read GBrain's own config (provider:model). This
+    # reflects ollama / zhipu / openai / etc — not just OPENAI_API_KEY, which
+    # the old `openai_configured` flag wrongly assumed was the only option.
+    embed_model = ""
+    embed_provider = ""
+    try:
+        import json as _json
+        from pathlib import Path as _P
+        cfg_path = _P.home() / ".gbrain" / "config.json"
+        if cfg_path.exists():
+            gcfg = _json.loads(cfg_path.read_text())
+            embed_model = str(gcfg.get("embedding_model") or "")
+            if ":" in embed_model:
+                embed_provider = embed_model.split(":", 1)[0]
+            elif embed_model:
+                embed_provider = "openai"  # bare model name = openai default
+    except Exception:
+        pass
+    # Configured if a non-openai provider is set, OR openai with a key present.
+    embed_configured = bool(
+        embed_provider and (embed_provider != "openai" or os.environ.get("OPENAI_API_KEY"))
+    )
+
     return {
         "brain_root": str(_brain_root()),
         "gbrain_bin": _gbrain_bin(),
-        "openai_configured": bool(os.environ.get("OPENAI_API_KEY")),
+        "openai_configured": embed_configured,   # back-compat key, now provider-aware
+        "embed_configured": embed_configured,
+        "embed_provider": embed_provider,
+        "embed_model": embed_model,
         "search_mode": search_mode,
         "doctor_status": doctor_status,
         "git_dirty": bool(git.stdout.strip()),

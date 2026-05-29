@@ -626,7 +626,10 @@ export type BrainStats = {
 export type BrainOverview = {
   brain_root: string;
   gbrain_bin: string;
-  openai_configured: boolean;
+  openai_configured: boolean;   // back-compat: now true for any configured embedding provider
+  embed_configured?: boolean;
+  embed_provider?: string;       // "ollama" | "zhipu" | "openai" | ...
+  embed_model?: string;          // provider:model
   search_mode: string;
   doctor_status: string;
   git_dirty: boolean;
