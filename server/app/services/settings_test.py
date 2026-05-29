@@ -126,6 +126,42 @@ async def _probe_sorftime(key: str) -> Dict[str, Any]:
         return _err(str(e)[:200])
 
 
+async def _probe_sif(key: str) -> Dict[str, Any]:
+    if not key:
+        return _err("未填写")
+    try:
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.post("https://mcp.sif.com/mcp", json=payload, headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+                "Accept": "application/json, text/event-stream",
+            })
+        if r.status_code == 401:
+            return _err("密钥无效")
+        if r.status_code != 200:
+            return _err(f"HTTP {r.status_code}")
+        body = None
+        for line in r.text.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                try:
+                    body = json.loads(line[5:].strip())
+                except Exception:
+                    pass
+        if body is None:
+            try:
+                body = r.json()
+            except Exception:
+                return _err("响应解析失败")
+        if "error" in body:
+            return _err(f"鉴权失败：{body['error']}")
+        tools = body.get("result", {}).get("tools", [])
+        return _ok(f"SIF 密钥有效（{len(tools)} 个工具）")
+    except Exception as e:
+        return _err(str(e)[:200])
+
+
 async def _probe_sellersprite(key: str) -> Dict[str, Any]:
     if not key:
         return _err("未填写")
@@ -343,6 +379,8 @@ async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
         return await _probe_apimart_base(val)
     if key == "sorftime_key":
         return await _probe_sorftime(val)
+    if key == "sif_key":
+        return await _probe_sif(val)
     if key == "sellersprite_key":
         return await _probe_sellersprite(val)
     if key == "openai_api_key":

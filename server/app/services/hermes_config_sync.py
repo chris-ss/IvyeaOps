@@ -45,29 +45,29 @@ def _save(cfg: Dict[str, Any]) -> None:
 
 # ── Sync functions ────────────────────────────────────────────────────────────
 
-def sync_sorftime_sif(key: str) -> None:
-    """Update Sorftime URL + SIF Bearer token in hermes config."""
+def sync_sorftime(key: str) -> None:
+    """Update Sorftime URL query param in hermes config."""
     cfg = _load()
     mcp = cfg.setdefault("mcp_servers", {})
-
-    # Sorftime: key goes in URL query string
     sorftime = mcp.setdefault("sorftime", {})
     if key:
-        old_url = sorftime.get("url", "")
-        # Replace or set ?key= param
-        base = re.sub(r"\?.*$", "", old_url) or "https://mcp.sorftime.com"
+        base = re.sub(r"\?.*$", "", sorftime.get("url", "")) or "https://mcp.sorftime.com"
         sorftime["url"] = f"{base}?key={key}"
     sorftime.setdefault("timeout", 180)
     sorftime.setdefault("connect_timeout", 60)
+    _save(cfg)
 
-    # SIF MCP: key goes in Authorization header
+
+def sync_sif(key: str) -> None:
+    """Update SIF MCP Bearer token in hermes config."""
+    cfg = _load()
+    mcp = cfg.setdefault("mcp_servers", {})
     sif = mcp.setdefault("sif_mcp", {})
     sif["url"] = "https://mcp.sif.com/mcp"
     sif.setdefault("timeout", 120)
     sif.setdefault("connect_timeout", 60)
     if key:
         sif.setdefault("headers", {})["Authorization"] = f"Bearer {key}"
-
     _save(cfg)
 
 
@@ -97,22 +97,23 @@ def _python_bin() -> str:
 
 def on_settings_saved(updates: Dict[str, Any]) -> None:
     """Called after hub_settings.save() with the full updated settings dict."""
-    sorftime_key    = (updates.get("sorftime_key")    or "").strip()
-    sif_key         = (updates.get("sif_key")         or "").strip()
-    sellersprite_key = (updates.get("sellersprite_key") or "").strip()
+    import logging
+    _log = logging.getLogger(__name__)
 
-    # SIF and Sorftime share one key; prefer sif_key override if explicitly set
-    effective_sorftime_sif = sif_key or sorftime_key
-    if effective_sorftime_sif or "sorftime_key" in updates or "sif_key" in updates:
+    if "sorftime_key" in updates:
         try:
-            sync_sorftime_sif(effective_sorftime_sif)
+            sync_sorftime((updates.get("sorftime_key") or "").strip())
         except Exception as exc:  # noqa: BLE001
-            import logging
-            logging.getLogger(__name__).warning("hermes sorftime/sif sync failed: %s", exc)
+            _log.warning("hermes sorftime sync failed: %s", exc)
+
+    if "sif_key" in updates:
+        try:
+            sync_sif((updates.get("sif_key") or "").strip())
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("hermes sif sync failed: %s", exc)
 
     if "sellersprite_key" in updates:
         try:
-            sync_sellersprite(sellersprite_key)
+            sync_sellersprite((updates.get("sellersprite_key") or "").strip())
         except Exception as exc:  # noqa: BLE001
-            import logging
-            logging.getLogger(__name__).warning("hermes sellersprite sync failed: %s", exc)
+            _log.warning("hermes sellersprite sync failed: %s", exc)

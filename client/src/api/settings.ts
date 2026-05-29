@@ -43,6 +43,8 @@ export interface HubSettings {
   bun_bin: string;
   // Auto bug-fix toggle (admin-only feature)
   autofix_enabled: boolean;
+  // SIF — 深度分析工具箱，独立 key（mcp.sif.com Bearer token）
+  sif_key: string;
   // SellerSprite — separate key, auto-registers stdio MCP server in Hermes
   sellersprite_key: string;
   // Account (password_hash not exposed to frontend)

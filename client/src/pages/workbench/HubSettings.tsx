@@ -342,7 +342,7 @@ function AdvancedBlock({ children }: { children: React.ReactNode }) {
 const EMPTY: HubSettings = {
   apimart_key: "", apimart_base: "https://api.apimart.ai/v1",
   text_ai_providers: "hermes,codex,claude",
-  sorftime_key: "", sellersprite_key: "",
+  sorftime_key: "", sif_key: "", sellersprite_key: "",
   imgflow_url: "http://127.0.0.1:3001",
   gbrain_bin: "", brain_root: "", openai_api_key: "",
   alert_webhook: "", alert_app_id: "", alert_app_secret: "", alert_chat_id: "",
@@ -410,31 +410,39 @@ export default function HubSettings() {
       <Section
         title="数据源"
         desc={<>填 key 保存后<strong>自动配置到 Hermes MCP</strong>，无需手动操作。有哪个用哪个，都填则按情况择优调用。</>}
-        keys={["sorftime_key", "sellersprite_key", "apimart_key", "apimart_base"]}
+        keys={["sorftime_key", "sif_key", "sellersprite_key", "apimart_key", "apimart_base"]}
         vals={vals} onSave={save}
       >
         <Field
-          label={<><Tag kind="rec">推荐</Tag>Sorftime / SIF Key</>}
-          hint={<>同一个 key 同时解锁两个数据源：<strong>Sorftime</strong>（市场调研、关键词趋势）和 <strong>SIF</strong>（深度分析工具箱）。登录 sorftime.com → 账户 → API。</>}
+          label={<><Tag kind="rec">推荐</Tag>Sorftime Key</>}
+          hint={<>市场调研、关键词趋势。登录 sorftime.com → 账户设置 → API。</>}
         >
-          <SecretInput value={vals.sorftime_key} onChange={v => set("sorftime_key", v)} placeholder="你的 Sorftime/SIF key" />
-          <TestButton settingKey="sorftime_key" value={vals.sorftime_key} label="测试连通" />
+          <SecretInput value={vals.sorftime_key} onChange={v => set("sorftime_key", v)} placeholder="你的 Sorftime key" />
+          <TestButton settingKey="sorftime_key" value={vals.sorftime_key} label="测试" />
+        </Field>
+
+        <Field
+          label={<><Tag kind="rec">推荐</Tag>SIF Key</>}
+          hint={<>深度分析工具箱（关键词竞争、竞品信号、流量异常）。登录 sif.com → 获取 API Key。</>}
+        >
+          <SecretInput value={vals.sif_key} onChange={v => set("sif_key", v)} placeholder="你的 SIF key" />
+          <TestButton settingKey="sif_key" value={vals.sif_key} label="测试" />
         </Field>
 
         <Field
           label={<><Tag kind="opt">可选</Tag>卖家精灵 Secret Key</>}
-          hint={<>保存后自动在 Hermes 注册卖家精灵 MCP，支持关键词流量、ASIN 词、竞品词分析。登录 sellersprite.com → 账户 → API Key。</>}
+          hint={<>竞品关键词分析。保存后自动注册 Hermes MCP，hermes 对话中即可调用。登录 sellersprite.com → 账户 → API Key。</>}
         >
           <SecretInput value={vals.sellersprite_key} onChange={v => set("sellersprite_key", v)} placeholder="你的卖家精灵 Secret Key" />
-          <TestButton settingKey="sellersprite_key" value={vals.sellersprite_key} label="测试连通" />
+          <TestButton settingKey="sellersprite_key" value={vals.sellersprite_key} label="测试" />
         </Field>
 
         <Field
           label={<><Tag kind="opt">可选</Tag>Apimart API Key</>}
-          hint={<>仅 Listing 图片生成需要。登录 apimart.ai → 控制台 → API Keys，复制 <code>sk-</code> 开头密钥。</>}
+          hint={<>仅 Listing 图片生成需要。登录 apimart.ai → 控制台 → API Keys。</>}
         >
           <SecretInput value={vals.apimart_key} onChange={v => set("apimart_key", v)} placeholder="sk-..." />
-          <TestButton settingKey="apimart_key" value={vals.apimart_key} label="测试密钥" />
+          <TestButton settingKey="apimart_key" value={vals.apimart_key} label="测试" />
         </Field>
       </Section>
 

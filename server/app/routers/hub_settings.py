@@ -15,12 +15,12 @@ from app.core.security import require_user
 router = APIRouter()
 
 _SECRET_KEYS: List[str] = [
-    "apimart_key", "sorftime_key", "sellersprite_key",
+    "apimart_key", "sorftime_key", "sif_key", "sellersprite_key",
     "alert_app_secret", "alert_webhook", "openai_api_key",
 ]
 
 # Keys that, when changed, require syncing into Hermes config.
-_HERMES_SYNC_KEYS = {"sorftime_key", "sellersprite_key"}
+_HERMES_SYNC_KEYS = {"sorftime_key", "sif_key", "sellersprite_key"}
 
 
 class SettingsPatch(BaseModel):

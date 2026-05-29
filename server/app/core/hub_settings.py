@@ -22,12 +22,10 @@ _DEFAULTS: Dict[str, Any] = {
     # here only if your key has access to Claude text models.
     # Valid values: hermes, codex, claude, apimart
     "text_ai_providers": "hermes,codex,claude",
-    # Market data — Sorftime and SIF share one key (same account/token).
-    # Saving sorftime_key auto-syncs to Hermes MCP config for both services.
-    "sorftime_key": "",
-    # SellerSprite — separate key, auto-registers a local stdio MCP server
-    # in Hermes so the agent can call keyword_traffic / asin_keywords etc.
-    "sellersprite_key": "",
+    # Market data
+    "sorftime_key": "",      # sorftime.com — 市场调研、关键词趋势
+    "sif_key": "",           # sif.com — 深度分析工具箱（独立账号和 key）
+    "sellersprite_key": "",  # sellersprite.com — 竞品关键词分析
     # Listing Generator — imgflow backend
     "imgflow_url": "http://127.0.0.1:3001",
     # GBrain knowledge base
