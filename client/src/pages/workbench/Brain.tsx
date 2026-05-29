@@ -445,8 +445,8 @@ export default function Brain() {
       </div>
 
       {tab === "chat" && (
-        <div style={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr)", gap: 10 }} className="brain-chat-grid">
-          <div className="card" style={{ maxHeight: 680, overflow: "auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr)", gap: 10, height: "calc(100vh - 180px)", minHeight: 360 }} className="brain-chat-grid">
+          <div className="card" style={{ overflow: "auto" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
               <div className="ct" style={{ margin: 0, flex: 1 }}>SESSIONS</div>
               <button className="tbtn" onClick={newChat} disabled={sending}>新建</button>
@@ -459,12 +459,12 @@ export default function Brain() {
               ))}
             </div>
           </div>
-          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--b)", flexWrap: "wrap" }}>
+          <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--b)", flexWrap: "wrap", flexShrink: 0 }}>
               <span style={{ color: "var(--t)", fontSize: 12, flex: 1 }}>{activeSession?.title || "知识库对话"}</span>
               {activeSession && <button className="tbtn" onClick={() => archiveChat(activeSession.id)}>归档</button>}
             </div>
-            <div style={{ minHeight: 420, maxHeight: 560, overflow: "auto", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, display: "grid", gap: 10, alignContent: "start" }}>
               {!messages.length && <div style={{ color: "var(--t3)", fontSize: 12 }}>直接提问，例如：「这个产品广告应该怎么打？」系统会先检索知识库，再调用本机 Hermes 生成回答，并在消息下方显示引用来源。</div>}
               {messages.map((m) => (
                 <div key={m.id} style={{ justifySelf: m.role === "user" ? "end" : "start", maxWidth: "88%" }}>
@@ -480,8 +480,8 @@ export default function Brain() {
                 </div>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid var(--b)" }}>
-              <textarea className="inp" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendChat(); }} placeholder="输入问题，Ctrl/⌘ + Enter 发送" style={{ minHeight: 54, flex: 1, resize: "vertical" }} />
+            <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid var(--b)", flexShrink: 0 }}>
+              <textarea className="inp" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendChat(); }} placeholder="输入问题，Ctrl/⌘ + Enter 发送" style={{ minHeight: 54, maxHeight: 140, flex: 1, resize: "vertical" }} />
               <button className="tbtn" onClick={sendChat} disabled={sending || !chatInput.trim()}>{sending ? "发送中..." : "发送"}</button>
             </div>
           </div>
