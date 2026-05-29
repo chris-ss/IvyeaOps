@@ -221,49 +221,27 @@ function ProviderPicker({
   onChange: (id: string, defaultModel: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<DOMRect | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const selected = PROVIDERS.find(p => p.id === value);
 
-  // Close on outside tap/click — must exclude BOTH the trigger and the
-  // fixed-position menu (the menu is rendered outside the trigger's subtree,
-  // so a tap inside it would otherwise be treated as "outside" and close it
-  // before the option's click handler runs).
+  // Lock body scroll while the modal is open.
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as Node;
-      const inTrigger = triggerRef.current?.contains(target);
-      const inMenu = menuRef.current?.contains(target);
-      if (!inTrigger && !inMenu) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    document.addEventListener("touchstart", handler);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onEsc);
     return () => {
-      document.removeEventListener("mousedown", handler);
-      document.removeEventListener("touchstart", handler);
+      document.body.style.overflow = prev;
+      document.removeEventListener("keydown", onEsc);
     };
   }, [open]);
-
-  const toggle = () => {
-    if (!open && triggerRef.current)
-      setRect(triggerRef.current.getBoundingClientRect());
-    setOpen(o => !o);
-  };
-
-  // Position: below trigger if space, otherwise above
-  const dropTop = rect
-    ? (rect.bottom + 4 + 280 < window.innerHeight ? rect.bottom + 4 : rect.top - 284)
-    : 0;
 
   return (
     <>
       <button
-        ref={triggerRef}
         type="button"
-        onClick={toggle}
+        onClick={() => setOpen(true)}
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "8px 12px", borderRadius: 6,
@@ -271,8 +249,7 @@ function ProviderPicker({
           background: "var(--bg2)",
           color: selected ? "var(--t)" : "var(--t3)",
           fontSize: 12.5, fontFamily: "var(--font)", cursor: "pointer",
-          outline: "none", transition: "border .12s, box-shadow .12s",
-          boxShadow: open ? "0 0 0 3px color-mix(in srgb, var(--acc) 14%, transparent)" : "none",
+          outline: "none", transition: "border .12s",
         }}
       >
         <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -285,66 +262,76 @@ function ProviderPicker({
             </span>
           )}
         </span>
-        <span style={{
-          color: "var(--t3)", fontSize: 9, marginLeft: 8, flexShrink: 0, display: "inline-block",
-          transition: "transform .15s", transform: open ? "rotate(180deg)" : "none",
-        }}>▼</span>
+        <span style={{ color: "var(--t3)", fontSize: 9, marginLeft: 8, flexShrink: 0 }}>▼</span>
       </button>
 
-      {/* fixed-position dropdown — not clipped by any parent overflow */}
-      {open && rect && (
-        <div ref={menuRef} style={{
-          position: "fixed",
-          top: dropTop,
-          left: rect.left,
-          width: rect.width,
-          zIndex: 9999,
-          background: "var(--bg1, var(--bg2))",
-          border: "1px solid var(--b)",
-          borderRadius: 8,
-          boxShadow: "0 8px 28px rgba(0,0,0,.4)",
-          maxHeight: 300,
-          overflowY: "auto",
-          WebkitOverflowScrolling: "touch",
-          padding: 5,
-        }}>
-          {PROVIDERS.map(p => {
-            const pick = () => { onChange(p.id, p.defaultModel); setOpen(false); };
-            const isSel = value === p.id;
-            const isHover = hovered === p.id;
-            return (
-              <div
-                key={p.id}
-                role="button"
-                tabIndex={0}
-                onClick={pick}
-                onMouseEnter={() => setHovered(p.id)}
-                onMouseLeave={() => setHovered(h => (h === p.id ? null : h))}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  padding: "9px 11px", borderRadius: 6, marginBottom: 1,
-                  background: isSel
-                    ? "color-mix(in srgb, var(--acc) 16%, transparent)"
-                    : isHover
-                    ? "color-mix(in srgb, var(--t) 7%, transparent)"
-                    : "transparent",
-                  color: isSel ? "var(--acc)" : "var(--t)",
-                  fontSize: 12.5, fontFamily: "var(--font)", cursor: "pointer",
-                  userSelect: "none", transition: "background .1s",
-                }}
-              >
-                <span style={{ flex: 1, fontWeight: isSel ? 500 : 400 }}>{p.label}</span>
-                {p.hint && (
-                  <span style={{ color: isSel ? "color-mix(in srgb, var(--acc) 70%, var(--t3))" : "var(--t3)", fontSize: 10.5 }}>
-                    {p.hint}
-                  </span>
-                )}
-                <span style={{ width: 12, textAlign: "center", color: "var(--acc)", fontSize: 11, flexShrink: 0 }}>
-                  {isSel ? "✓" : ""}
-                </span>
-              </div>
-            );
-          })}
+      {/* centered modal — overlay + dialog */}
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            background: "rgba(0,0,0,.5)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: "min(420px, 100%)", maxHeight: "70vh", display: "flex", flexDirection: "column",
+              background: "var(--bg1, var(--bg2))",
+              border: "1px solid var(--b)", borderRadius: 12,
+              boxShadow: "0 16px 48px rgba(0,0,0,.5)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "14px 16px", borderBottom: "1px solid var(--b)",
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t)" }}>选择模型 Provider</span>
+              <span onClick={() => setOpen(false)} style={{ cursor: "pointer", color: "var(--t3)", fontSize: 16, lineHeight: 1 }}>✕</span>
+            </div>
+            <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 6 }}>
+              {PROVIDERS.map(p => {
+                const isSel = value === p.id;
+                const isHover = hovered === p.id;
+                return (
+                  <div
+                    key={p.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => { onChange(p.id, p.defaultModel); setOpen(false); }}
+                    onMouseEnter={() => setHovered(p.id)}
+                    onMouseLeave={() => setHovered(h => (h === p.id ? null : h))}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "11px 12px", borderRadius: 8, marginBottom: 2,
+                      background: isSel
+                        ? "color-mix(in srgb, var(--acc) 16%, transparent)"
+                        : isHover
+                        ? "color-mix(in srgb, var(--t) 7%, transparent)"
+                        : "transparent",
+                      color: isSel ? "var(--acc)" : "var(--t)",
+                      fontSize: 13, fontFamily: "var(--font)", cursor: "pointer",
+                      userSelect: "none", transition: "background .1s",
+                    }}
+                  >
+                    <span style={{ flex: 1, fontWeight: isSel ? 500 : 400 }}>{p.label}</span>
+                    {p.hint && (
+                      <span style={{ color: isSel ? "color-mix(in srgb, var(--acc) 70%, var(--t3))" : "var(--t3)", fontSize: 11 }}>
+                        {p.hint}
+                      </span>
+                    )}
+                    <span style={{ width: 12, textAlign: "center", color: "var(--acc)", fontSize: 12, flexShrink: 0 }}>
+                      {isSel ? "✓" : ""}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </>
