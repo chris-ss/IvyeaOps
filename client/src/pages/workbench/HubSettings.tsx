@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   getSettings, patchSettings, getHealth, changePassword,
@@ -220,37 +220,69 @@ function ProviderPicker({
   value: string;
   onChange: (id: string, defaultModel: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = PROVIDERS.find(p => p.id === value);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-      {PROVIDERS.map(p => {
-        const active = value === p.id;
-        return (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => onChange(p.id, p.defaultModel)}
-            style={{
-              padding: "5px 11px",
-              borderRadius: 5,
-              border: active ? "1px solid var(--acc)" : "1px solid var(--b)",
-              background: active ? "color-mix(in srgb, var(--acc) 15%, var(--bg2))" : "var(--bg2)",
-              color: active ? "var(--acc)" : "var(--t2)",
-              fontSize: 11,
-              fontFamily: "var(--font)",
-              cursor: "pointer",
-              transition: "all .12s",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {p.label}
-            {p.hint && (
-              <span style={{ color: active ? "var(--acc)" : "var(--t3)", marginLeft: 5, fontSize: 10 }}>
-                · {p.hint}
-              </span>
-            )}
-          </button>
-        );
-      })}
+    <div ref={ref} style={{ position: "relative", width: "100%" }}>
+      {/* trigger */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "7px 10px", borderRadius: 4,
+          border: "1px solid var(--b)", background: "var(--bg2)",
+          color: selected ? "var(--t)" : "var(--t3)",
+          fontSize: 12, fontFamily: "var(--font)", cursor: "pointer",
+          outline: "none", transition: "border .12s",
+        }}
+      >
+        <span>
+          {selected ? selected.label : "选择 Provider"}
+          {selected?.hint && (
+            <span style={{ color: "var(--t3)", marginLeft: 8, fontSize: 11 }}>· {selected.hint}</span>
+          )}
+        </span>
+        <span style={{ color: "var(--t3)", fontSize: 10, transition: "transform .15s", display: "inline-block", transform: open ? "rotate(180deg)" : "none" }}>▼</span>
+      </button>
+
+      {/* dropdown */}
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 200,
+          background: "var(--bg2)", border: "1px solid var(--b)", borderRadius: 4,
+          boxShadow: "0 4px 16px rgba(0,0,0,.25)", overflow: "hidden",
+        }}>
+          {PROVIDERS.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => { onChange(p.id, p.defaultModel); setOpen(false); }}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 12px", border: "none",
+                background: value === p.id ? "color-mix(in srgb, var(--acc) 12%, var(--bg2))" : "transparent",
+                color: value === p.id ? "var(--acc)" : "var(--t2)",
+                fontSize: 12, fontFamily: "var(--font)", cursor: "pointer", textAlign: "left",
+              }}
+            >
+              <span style={{ flex: 1 }}>{p.label}</span>
+              {p.hint && <span style={{ color: "var(--t3)", fontSize: 10 }}>{p.hint}</span>}
+              {value === p.id && <span style={{ color: "var(--acc)", fontSize: 10 }}>✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
