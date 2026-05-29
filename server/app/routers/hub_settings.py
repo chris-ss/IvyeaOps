@@ -14,7 +14,13 @@ from app.core.security import require_user
 
 router = APIRouter()
 
-_SECRET_KEYS: List[str] = ["apimart_key", "sorftime_key", "alert_app_secret", "alert_webhook", "openai_api_key"]
+_SECRET_KEYS: List[str] = [
+    "apimart_key", "sorftime_key", "sellersprite_key",
+    "alert_app_secret", "alert_webhook", "openai_api_key",
+]
+
+# Keys that, when changed, require syncing into Hermes config.
+_HERMES_SYNC_KEYS = {"sorftime_key", "sellersprite_key"}
 
 
 class SettingsPatch(BaseModel):
@@ -34,6 +40,13 @@ async def get_settings(_u: str = Depends(require_user)):
 @router.patch("/settings")
 async def patch_settings(body: SettingsPatch, _u: str = Depends(require_user)):
     updated = _hs.save(body.settings)
+    # Sync data-source keys into Hermes config if any relevant key was touched.
+    if _HERMES_SYNC_KEYS & body.settings.keys():
+        try:
+            from app.services.hermes_config_sync import on_settings_saved
+            on_settings_saved(updated)
+        except Exception:
+            pass  # non-fatal — settings are saved regardless
     return {"settings": updated, "secret_keys": _SECRET_KEYS}
 
 

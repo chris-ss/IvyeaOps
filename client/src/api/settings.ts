@@ -43,6 +43,8 @@ export interface HubSettings {
   bun_bin: string;
   // Auto bug-fix toggle (admin-only feature)
   autofix_enabled: boolean;
+  // SellerSprite — separate key, auto-registers stdio MCP server in Hermes
+  sellersprite_key: string;
   // Account (password_hash not exposed to frontend)
 }
 

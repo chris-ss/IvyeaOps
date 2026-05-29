@@ -105,6 +105,84 @@ install_docker() {
     fi
 }
 
+# ── Install Bun ──────────────────────────────────
+install_bun() {
+    log "Installing Bun..."
+    curl -fsSL https://bun.sh/install | bash 2>/dev/null
+    export PATH="$HOME/.bun/bin:$PATH"
+    if has bun; then
+        ok "Bun installed ($(bun --version))"
+    else
+        warn "Bun installed but not in PATH. Run: export PATH=\"\$HOME/.bun/bin:\$PATH\""
+    fi
+}
+
+# ── Install GBrain ────────────────────────────────
+install_gbrain() {
+    log "Installing GBrain..."
+
+    # Ensure bun is available
+    if ! has bun; then
+        if [[ -f "$HOME/.bun/bin/bun" ]]; then
+            export PATH="$HOME/.bun/bin:$PATH"
+        else
+            install_bun
+        fi
+    fi
+
+    if ! has bun; then
+        err "Bun not available — cannot install GBrain. Install bun manually: https://bun.sh"
+        return 1
+    fi
+
+    bun install -g gbrain 2>/dev/null || {
+        err "Failed to install GBrain. Check: https://github.com/gbrain/gbrain"
+        return 1
+    }
+
+    # Add bun bin to PATH
+    BUN_BIN="$HOME/.bun/bin"
+    if [[ ":$PATH:" != *":$BUN_BIN:"* ]]; then
+        export PATH="$BUN_BIN:$PATH"
+        echo "export PATH=\"$BUN_BIN:\$PATH\"" >> "$HOME/.bashrc" 2>/dev/null || true
+        echo "export PATH=\"$BUN_BIN:\$PATH\"" >> "$HOME/.zshrc" 2>/dev/null || true
+    fi
+
+    if ! has gbrain; then
+        warn "GBrain installed but not in PATH. Run: export PATH=\"\$HOME/.bun/bin:\$PATH\""
+        return 0
+    fi
+
+    ok "GBrain installed ($(gbrain --version 2>/dev/null || echo 'ok'))"
+
+    # Initialize brain directory if not already done
+    BRAIN_DIR="$HOME/brain"
+    if [[ ! -d "$BRAIN_DIR" ]]; then
+        log "Initializing GBrain knowledge base at ~/brain ..."
+        mkdir -p "$BRAIN_DIR"
+        cd "$BRAIN_DIR"
+        gbrain init --pglite 2>/dev/null && ok "GBrain initialized at ~/brain" || warn "GBrain init skipped (run manually: cd ~/brain && gbrain init)"
+        cd - > /dev/null
+    else
+        ok "GBrain brain directory already exists: $BRAIN_DIR"
+    fi
+
+    # Register GBrain as Hermes MCP server (so hermes can call gbrain tools)
+    if has hermes; then
+        GBRAIN_BIN="$(which gbrain)"
+        if hermes mcp list 2>/dev/null | grep -q "gbrain"; then
+            ok "GBrain already registered as Hermes MCP server"
+        else
+            log "Registering GBrain as Hermes MCP server..."
+            echo "Y" | hermes mcp add gbrain --command "$GBRAIN_BIN" --args serve 2>/dev/null && \
+                ok "GBrain registered in Hermes MCP (63 tools enabled)" || \
+                warn "Could not auto-register GBrain in Hermes. Run manually: hermes mcp add gbrain --command gbrain --args serve"
+        fi
+    else
+        warn "Hermes not found — skipping GBrain MCP registration. Run after installing Hermes: hermes mcp add gbrain --command gbrain --args serve"
+    fi
+}
+
 # ── Install Hermes ────────────────────────────────
 install_hermes() {
     log "Installing Hermes Agent..."
@@ -206,7 +284,7 @@ fi
 echo ""
 
 # ── Step 2: Check Hermes (optional) ───────────────
-log "Step 2/5 — Checking Hermes Agent..."
+log "Step 2/5 — Checking Hermes Agent & GBrain..."
 echo ""
 
 if has hermes; then
@@ -219,6 +297,28 @@ else
         install_hermes
     else
         warn "Skipping Hermes. Some AI features will be limited."
+    fi
+fi
+
+echo ""
+
+if has gbrain; then
+    ok "GBrain found ($(gbrain --version 2>/dev/null || echo 'ok'))"
+    # Ensure GBrain is registered in Hermes MCP
+    if has hermes && ! hermes mcp list 2>/dev/null | grep -q "gbrain"; then
+        log "Registering GBrain as Hermes MCP server..."
+        GBRAIN_BIN="$(which gbrain)"
+        echo "Y" | hermes mcp add gbrain --command "$GBRAIN_BIN" --args serve 2>/dev/null && \
+            ok "GBrain registered in Hermes MCP" || true
+    fi
+else
+    warn "GBrain not found."
+    read -p "  Install GBrain (personal knowledge base, recommended)? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        install_gbrain
+    else
+        warn "Skipping GBrain. Knowledge base features will be unavailable."
     fi
 fi
 

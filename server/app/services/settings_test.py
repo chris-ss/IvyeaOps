@@ -123,6 +123,29 @@ async def _probe_sorftime(key: str) -> Dict[str, Any]:
         tools = body.get("result", {}).get("tools", [])
         return _ok(f"密钥有效（{len(tools)} 个工具可用）")
     except Exception as e:
+        return _err(str(e)[:200])
+
+
+async def _probe_sellersprite(key: str) -> Dict[str, Any]:
+    if not key:
+        return _err("未填写")
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.post(
+                "https://api.sellersprite.com/v1/traffic/keyword",
+                json={"keyword": "test", "marketplace": "US"},
+                headers={"Content-Type": "application/json", "secret-key": key},
+            )
+        if r.status_code == 200:
+            return _ok("密钥有效")
+        if r.status_code in (401, 403):
+            return _err("密钥无效或无权限")
+        return _err(f"HTTP {r.status_code}")
+    except Exception as e:
+        return _err(str(e)[:200])
+
+
+async def _probe_sorftime_placeholder() -> None:  # noqa: keep line count consistent
         return _err(f"调用失败：{e}")
 
 
@@ -320,6 +343,8 @@ async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
         return await _probe_apimart_base(val)
     if key == "sorftime_key":
         return await _probe_sorftime(val)
+    if key == "sellersprite_key":
+        return await _probe_sellersprite(val)
     if key == "openai_api_key":
         return await _probe_openai(val)
 

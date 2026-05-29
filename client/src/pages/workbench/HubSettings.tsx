@@ -342,7 +342,7 @@ function AdvancedBlock({ children }: { children: React.ReactNode }) {
 const EMPTY: HubSettings = {
   apimart_key: "", apimart_base: "https://api.apimart.ai/v1",
   text_ai_providers: "hermes,codex,claude",
-  sorftime_key: "",
+  sorftime_key: "", sellersprite_key: "",
   imgflow_url: "http://127.0.0.1:3001",
   gbrain_bin: "", brain_root: "", openai_api_key: "",
   alert_webhook: "", alert_app_id: "", alert_app_secret: "", alert_chat_id: "",
@@ -386,7 +386,6 @@ export default function HubSettings() {
     setVals({ ...EMPTY, ...r.settings });
   }, []);
 
-  // GBrain path fields collapsible
   const [gbrainPathsOpen, setGbrainPathsOpen] = useState(false);
 
   if (loading) return <div className="hs-loading">加载中…</div>;
@@ -400,302 +399,213 @@ export default function HubSettings() {
         <span className="hs-header-icon">⊙</span>
         <div>
           <div className="hs-header-title">系统配置</div>
-          <div className="hs-header-sub">管理外部服务密钥与集成路径。每个区块独立保存。</div>
+          <div className="hs-header-sub">填写下方密钥后点保存即可直接使用，大多数场景只需填「数据源」一栏。</div>
         </div>
-      </div>
-
-      <div className="hs-help">
-        <Tag kind="req">必填</Tag> 缺失会导致对应功能不可用。
-        <Tag kind="opt">可选</Tag> 留空也能正常运行。
-        每个字段右侧 🔌 可在保存前验证当前值是否真的可用。
       </div>
 
       <AutodetectPanel onApply={applySuggestions} />
       <HealthPanel />
 
-      {/* ── 1. 核心服务密钥 ── */}
+      {/* -- 区块 1: 数据源 -- */}
       <Section
-        title="核心服务密钥"
-        desc="图片生成（Listing 模块）依赖 Apimart；市场调研依赖 Sorftime。这是大多数用户唯一需要填的两项。"
-        keys={["apimart_key", "apimart_base", "sorftime_key"]}
+        title="数据源"
+        desc={<>填 key 保存后<strong>自动配置到 Hermes MCP</strong>，无需手动操作。有哪个用哪个，都填则按情况择优调用。</>}
+        keys={["sorftime_key", "sellersprite_key", "apimart_key", "apimart_base"]}
         vals={vals} onSave={save}
       >
         <Field
-          label={<><Tag kind="rec">推荐</Tag>Apimart API Key</>}
-          hint={<>登录 apimart.ai → 控制台 → API Keys，复制 <code>sk-</code> 开头的密钥。用于图片生成；若密钥包含 Claude 文本权限也可用于文本 AI。</>}
+          label={<><Tag kind="rec">推荐</Tag>Sorftime / SIF Key</>}
+          hint={<>同一个 key 同时解锁两个数据源：<strong>Sorftime</strong>（市场调研、关键词趋势）和 <strong>SIF</strong>（深度分析工具箱）。登录 sorftime.com → 账户 → API。</>}
+        >
+          <SecretInput value={vals.sorftime_key} onChange={v => set("sorftime_key", v)} placeholder="你的 Sorftime/SIF key" />
+          <TestButton settingKey="sorftime_key" value={vals.sorftime_key} label="测试连通" />
+        </Field>
+
+        <Field
+          label={<><Tag kind="opt">可选</Tag>卖家精灵 Secret Key</>}
+          hint={<>保存后自动在 Hermes 注册卖家精灵 MCP，支持关键词流量、ASIN 词、竞品词分析。登录 sellersprite.com → 账户 → API Key。</>}
+        >
+          <SecretInput value={vals.sellersprite_key} onChange={v => set("sellersprite_key", v)} placeholder="你的卖家精灵 Secret Key" />
+          <TestButton settingKey="sellersprite_key" value={vals.sellersprite_key} label="测试连通" />
+        </Field>
+
+        <Field
+          label={<><Tag kind="opt">可选</Tag>Apimart API Key</>}
+          hint={<>仅 Listing 图片生成需要。登录 apimart.ai → 控制台 → API Keys，复制 <code>sk-</code> 开头密钥。</>}
         >
           <SecretInput value={vals.apimart_key} onChange={v => set("apimart_key", v)} placeholder="sk-..." />
           <TestButton settingKey="apimart_key" value={vals.apimart_key} label="测试密钥" />
         </Field>
-
-        <Field
-          label={<><Tag kind="opt">默认即可</Tag>Apimart API 地址</>}
-          hint="除非使用自建网关或镜像站，否则保持默认值。"
-        >
-          <TxtInput value={vals.apimart_base} onChange={v => set("apimart_base", v)} placeholder="https://api.apimart.ai/v1" />
-        </Field>
-
-        <Field
-          label={<><Tag kind="rec">推荐</Tag>Sorftime API Key</>}
-          hint={<>登录 sorftime.com → 账户设置 → API → 复制密钥。市场调研模块必需，未订阅返回 401。</>}
-        >
-          <SecretInput value={vals.sorftime_key} onChange={v => set("sorftime_key", v)} placeholder="bho5v..." />
-          <TestButton settingKey="sorftime_key" value={vals.sorftime_key} label="测试密钥" />
-        </Field>
       </Section>
 
-      {/* ── 2. AI 智能体 ── */}
+      {/* -- 区块 2: 智能体 -- */}
       <Section
-        title="AI 智能体"
-        desc={<>hermes / codex / claude 三个本机 CLI 会从 PATH <strong>自动发现</strong>，通常不需要手动填路径。提供商顺序决定市场调研、广告审计等模块优先用哪个 AI。</>}
-        keys={["text_ai_providers", "hermes_bin", "codex_bin", "claude_bin"]}
+        title="智能体"
+        desc={<>Hermes、Claude、GBrain 均从系统 PATH <strong>自动发现</strong>，绿色即代表可用，无需手动配置路径。</>}
+        keys={["hermes_bin", "codex_bin", "claude_bin", "text_ai_providers", "autofix_enabled"]}
         vals={vals} onSave={save}
       >
-        <Field
-          label={<><Tag kind="opt">默认即可</Tag>提供商顺序</>}
-          hint={<>逗号分隔，按顺序尝试。合法值：<code>hermes</code> <code>codex</code> <code>claude</code> <code>apimart</code>（后者需密钥有文本权限）。</>}
-        >
-          <TxtInput value={vals.text_ai_providers} onChange={v => set("text_ai_providers", v)} placeholder="hermes,codex,claude" />
-        </Field>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          {(["hermes", "codex", "claude"] as const).map(name => {
+            const key = `${name}_bin` as keyof HubSettings;
+            const val = (vals[key] as string) || "";
+            return (
+              <TestButton key={name} settingKey={key} value={val}
+                label={`${name === "hermes" ? "Hermes" : name === "codex" ? "Codex" : "Claude"} 检测`} />
+            );
+          })}
+        </div>
 
-        <Field
-          label={<><Tag kind="opt">可选</Tag>hermes CLI 路径</>}
-          hint="留空 = 从 PATH 自动发现。仅当自动发现失败时手动指定。"
-        >
-          <TxtInput value={vals.hermes_bin} onChange={v => set("hermes_bin", v)} placeholder="留空 = PATH 自动发现" />
-          <TestButton settingKey="hermes_bin" value={vals.hermes_bin} label="测试路径" />
-        </Field>
-
-        <Field
-          label={<><Tag kind="opt">可选</Tag>codex CLI 路径</>}
-          hint={<>留空 = PATH 自动发现。安装：<code>npm install -g @openai/codex</code></>}
-        >
-          <TxtInput value={vals.codex_bin} onChange={v => set("codex_bin", v)} placeholder="留空 = PATH 自动发现" />
-          <TestButton settingKey="codex_bin" value={vals.codex_bin} label="测试路径" />
-        </Field>
-
-        <Field
-          label={<><Tag kind="opt">可选</Tag>claude CLI 路径</>}
-          hint={<>留空 = PATH 自动发现。安装：<code>npm install -g @anthropic-ai/claude-code</code></>}
-        >
-          <TxtInput value={vals.claude_bin} onChange={v => set("claude_bin", v)} placeholder="留空 = PATH 自动发现" />
-          <TestButton settingKey="claude_bin" value={vals.claude_bin} label="测试路径" />
-        </Field>
-      </Section>
-
-      {/* ── 自动修复 Bug ── */}
-      <Section
-        title="自动修复 Bug"
-        desc={<>开启后，任意功能在服务端报错（5xx）时会弹窗询问是否修复，AI（hermes）在<strong>隔离副本</strong>中排查并给出改动，由你审核 diff 后再应用并重启。默认关闭，仅管理员可见，关闭时零开销。</>}
-        keys={["autofix_enabled"]}
-        vals={vals} onSave={save}
-      >
-        <Field
-          label={<><Tag kind="opt">默认关闭</Tag>启用自动修复</>}
-          hint={<>仅在你信任 AI 改动当前生产代码时开启。修复全程审核制：应用前展示 diff；需重启时弹窗确认，<strong>60 秒</strong>无确认自动重启；改坏可一键回滚。</>}
-        >
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--t2)", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={vals.autofix_enabled}
-              onChange={e => set("autofix_enabled", e.target.checked)}
-            />
-            {vals.autofix_enabled ? "已开启（记得点右上角“保存”）" : "已关闭"}
-          </label>
-        </Field>
-      </Section>
-
-      {/* ── 3. GBrain 知识库 ── */}
-      <Section
-        title="GBrain 知识库"
-        desc={<>安装 gbrain 后<strong>开箱即用</strong>（<code>bun install -g gbrain</code>）。笔记默认存 <code>~/brain</code>，无需任何配置。仅当你想换目录或自动发现失败时才需要展开下方选项。</>}
-        keys={["brain_root", "gbrain_bin", "openai_api_key"]}
-        vals={vals} onSave={save}
-      >
         <button
           type="button"
           onClick={() => setGbrainPathsOpen(o => !o)}
           style={{
-            display: "flex", alignItems: "center", gap: 6,
+            display: "flex", alignItems: "center", gap: 6, marginBottom: 4,
             background: "transparent", border: "1px solid var(--b)", borderRadius: 4,
             padding: "5px 12px", color: "var(--t3)", fontSize: 11,
             cursor: "pointer", fontFamily: "var(--font)",
           }}
         >
           <span style={{ display: "inline-block", transition: "transform .15s", transform: gbrainPathsOpen ? "rotate(90deg)" : "none" }}>▶</span>
-          自定义路径（通常无需展开）
+          手动指定路径（自动发现失败时才需要）
         </button>
 
         {gbrainPathsOpen && (
-          <div style={{ marginTop: 10, paddingLeft: 10, borderLeft: "2px solid var(--b)" }}>
-            <Field
-              label={<><Tag kind="opt">可选</Tag>知识库根目录</>}
-              hint={<>Markdown 笔记存放目录。留空 = <code>~/brain</code>。</>}
-            >
-              <TxtInput value={vals.brain_root} onChange={v => set("brain_root", v)} placeholder="~/brain" />
-              <TestButton settingKey="brain_root" value={vals.brain_root} label="测试路径" />
+          <div style={{ paddingLeft: 10, borderLeft: "2px solid var(--b)" }}>
+            <Field label={<><Tag kind="opt">可选</Tag>AI 提供商顺序</>}
+              hint={<>逗号分隔：<code>hermes</code> <code>codex</code> <code>claude</code> <code>apimart</code>，按顺序尝试。</>}>
+              <TxtInput value={vals.text_ai_providers} onChange={v => set("text_ai_providers", v)} placeholder="hermes,codex,claude" />
             </Field>
-
-            <Field
-              label={<><Tag kind="opt">可选</Tag>gbrain 可执行文件路径</>}
-              hint={<>留空 = PATH 自动发现（通常在 <code>~/.bun/bin/gbrain</code>）。</>}
-            >
+            <Field label={<><Tag kind="opt">可选</Tag>Hermes 路径</>} hint="留空 = PATH 自动发现">
+              <TxtInput value={vals.hermes_bin} onChange={v => set("hermes_bin", v)} placeholder="留空 = PATH 自动发现" />
+            </Field>
+            <Field label={<><Tag kind="opt">可选</Tag>Claude 路径</>} hint={<>留空 = PATH 自动发现。<code>npm i -g @anthropic-ai/claude-code</code></>}>
+              <TxtInput value={vals.claude_bin} onChange={v => set("claude_bin", v)} placeholder="留空 = PATH 自动发现" />
+            </Field>
+            <Field label={<><Tag kind="opt">可选</Tag>GBrain 路径</>} hint={<>留空 = PATH 自动发现（通常 <code>~/.bun/bin/gbrain</code>）。</>}>
               <TxtInput value={vals.gbrain_bin} onChange={v => set("gbrain_bin", v)} placeholder="留空 = PATH 自动发现" />
-              <TestButton settingKey="gbrain_bin" value={vals.gbrain_bin} label="测试路径" />
             </Field>
-
-            <Field
-              label={<><Tag kind="opt">可选</Tag>OpenAI API Key</>}
-              hint={<>仅语义检索（<code>gbrain embed</code>）需要，普通文本搜索无需填写。</>}
-            >
-              <SecretInput value={vals.openai_api_key} onChange={v => set("openai_api_key", v)} placeholder="sk-..." />
-              <TestButton settingKey="openai_api_key" value={vals.openai_api_key} label="测试密钥" />
+            <Field label={<><Tag kind="opt">可选</Tag>知识库根目录</>} hint={<>GBrain 笔记目录，留空 = <code>~/brain</code>。</>}>
+              <TxtInput value={vals.brain_root} onChange={v => set("brain_root", v)} placeholder="~/brain" />
+            </Field>
+            <Field label={<><Tag kind="opt">可选</Tag>知识库 Embedding Key</>}
+              hint="用于语义检索（gbrain embed），留空则退化为关键词检索，不影响对话功能。">
+              <SecretInput value={vals.openai_api_key} onChange={v => set("openai_api_key", v)} placeholder="OpenAI / 兼容服务的 API Key" />
             </Field>
           </div>
         )}
+
+        <Field label={<><Tag kind="opt">功能</Tag>自动修复 Bug</>}
+          hint={<>开启后，功能报错时弹窗询问是否 AI 修复（hermes 在隔离副本中排查，你审核 diff 后应用）。默认关闭。</>}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--t2)", cursor: "pointer" }}>
+            <input type="checkbox" checked={vals.autofix_enabled}
+              onChange={e => set("autofix_enabled", e.target.checked)} />
+            {vals.autofix_enabled ? "已开启" : "已关闭"}
+          </label>
+        </Field>
       </Section>
 
-      {/* ── 高级选项（折叠） ── */}
+      {/* -- 区块 3 & 4: 通知 + 高级（折叠） -- */}
       <AdvancedBlock>
-
-        {/* Token 用量监控 */}
-        <Section
-          title="Token 用量监控"
-          desc="监控页扫描以下数据库统计 token 消耗。只读；留空或填错只会让对应数据源显示空白，不报错。路径均可自动发现，通常不需手动填。"
-          keys={["hermes_db", "codex_db", "claude_projects_dir"]}
-          vals={vals} onSave={save}
-        >
-          <Field label={<><Tag kind="opt">可选</Tag>Hermes state.db</>} hint={<>默认 <code>~/.hermes/state.db</code>，留空自动检测。</>}>
-            <TxtInput value={vals.hermes_db} onChange={v => set("hermes_db", v)} placeholder="~/.hermes/state.db" />
-            <TestButton settingKey="hermes_db" value={vals.hermes_db} label="测试 DB" />
-          </Field>
-          <Field label={<><Tag kind="opt">可选</Tag>Codex state DB</>} hint={<>默认 <code>~/.codex/state_5.sqlite</code>，留空自动检测。</>}>
-            <TxtInput value={vals.codex_db} onChange={v => set("codex_db", v)} placeholder="~/.codex/state_5.sqlite" />
-            <TestButton settingKey="codex_db" value={vals.codex_db} label="测试 DB" />
-          </Field>
-          <Field label={<><Tag kind="opt">可选</Tag>Claude projects 目录</>} hint={<>默认 <code>~/.claude/projects</code>，留空自动检测。</>}>
-            <TxtInput value={vals.claude_projects_dir} onChange={v => set("claude_projects_dir", v)} placeholder="~/.claude/projects" />
-            <TestButton settingKey="claude_projects_dir" value={vals.claude_projects_dir} label="测试目录" />
-          </Field>
-        </Section>
-
-        {/* Listing Imgflow */}
-        <Section
-          title="Listing 生成（Imgflow）"
-          desc={<>Listing Generator 的图片处理后端，需单独部署（<code>amazon-image-workflow</code> 项目）。不做 Listing 图片生成可忽略。</>}
-          keys={["imgflow_url"]}
-          vals={vals} onSave={save}
-        >
-          <Field label={<><Tag kind="opt">可选</Tag>imgflow 服务地址</>} hint={<>默认 <code>http://127.0.0.1:3001</code>，只填到端口，前端会自动追加 <code>/api</code>。</>}>
-            <TxtInput value={vals.imgflow_url} onChange={v => set("imgflow_url", v)} placeholder="http://127.0.0.1:3001" />
-            <TestButton settingKey="imgflow_url" value={vals.imgflow_url} label="测试连通性" />
-          </Field>
-        </Section>
 
         {/* 飞书通知 */}
         <Section
           title="飞书 / Lark 通知"
-          desc="CPU 高位持续告警推送到飞书群。渠道 A（Webhook）和渠道 B（自建应用）任选其一，都不配置则不告警。"
-          keys={["alert_webhook", "alert_app_id", "alert_app_secret", "alert_chat_id"]}
+          desc="CPU 告警推送到飞书群。Webhook（渠道 A）和自建应用（渠道 B）任选其一。"
+          keys={["alert_webhook", "alert_app_id", "alert_app_secret", "alert_chat_id", "alert_threshold", "alert_sustain", "alert_cooldown"]}
           vals={vals} onSave={save}
         >
-          <Field label={<>Webhook 地址 <span style={{ color: "var(--t3)", marginLeft: 6 }}>渠道 A（推荐）</span></>}
-            hint={<>群设置 → 群机器人 → 添加自定义机器人，复制 Webhook URL。需设关键词"ops-hub"或"CPU"。</>}>
+          <Field label="Webhook 地址" hint={<>群机器人 → 添加自定义机器人，复制 URL。设关键词 "ops-hub" 或 "CPU"。</>}>
             <SecretInput value={vals.alert_webhook} onChange={v => set("alert_webhook", v)}
               placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." />
             <TestButton settingKey="alert_webhook" value={vals.alert_webhook} label="发测试消息" />
           </Field>
           <div className="hs-row3">
-            <Field label={<>App ID <span style={{ color: "var(--t3)", marginLeft: 6 }}>渠道 B</span></>} hint="开放平台 → 凭证与基础信息，cli_ 开头。">
+            <Field label="App ID" hint="cli_ 开头">
               <TxtInput value={vals.alert_app_id} onChange={v => set("alert_app_id", v)} placeholder="cli_xxx" />
             </Field>
             <Field label="App Secret">
               <SecretInput value={vals.alert_app_secret} onChange={v => set("alert_app_secret", v)} placeholder="App Secret" />
             </Field>
-            <Field label="Chat ID" hint="目标群的 open_chat_id（oc_ 开头）。留空 = Hermes 默认频道。">
+            <Field label="Chat ID" hint="oc_ 开头">
               <TxtInput value={vals.alert_chat_id} onChange={v => set("alert_chat_id", v)} placeholder="oc_..." />
             </Field>
           </div>
-          <TestButton settingKey="alert_app_id" value={vals.alert_app_id} label="测试 App 凭证 + 发测试消息" />
-        </Section>
-
-        {/* CPU 告警阈值 */}
-        <Section
-          title="CPU 告警阈值"
-          desc="cpu_alert.py 每分钟检查 ops-hub 进程 CPU，连续超阈值才告警。"
-          keys={["alert_threshold", "alert_sustain", "alert_cooldown"]}
-          vals={vals} onSave={save}
-        >
-          <div className="hs-row3">
-            <Field label="触发阈值" hint="单核 100%；多核可超 100%。">
+          <div className="hs-row3" style={{ marginTop: 8 }}>
+            <Field label="触发阈值">
               <NumInput value={vals.alert_threshold} onChange={v => set("alert_threshold", v)} min={10} max={9999} unit="%" />
             </Field>
-            <Field label="持续时长" hint="需连续高于阈值才告警，避免抖动误报。">
+            <Field label="持续时长">
               <NumInput value={vals.alert_sustain} onChange={v => set("alert_sustain", v)} min={1} max={60} unit="分钟" />
             </Field>
-            <Field label="冷却时间" hint="一次告警后等多久再发下一条。">
+            <Field label="冷却时间">
               <NumInput value={vals.alert_cooldown} onChange={v => set("alert_cooldown", v)} min={1} max={1440} unit="分钟" />
             </Field>
           </div>
         </Section>
 
-        {/* 内嵌服务地址 */}
+        {/* 高级 / 运维 */}
         <Section
-          title="内嵌服务地址"
-          desc="侧边栏「仪表盘」的 iframe 地址，以及终端页「新窗打开」的跳转 URL。留空则对应入口显示「未配置」。"
-          keys={["dashboard_url", "terminal_url"]}
+          title="高级 / 运维"
+          desc="Listing 图片后端、嵌入服务 URL、Token 监控 DB 路径、Kiro 集成等。通常无需改动。"
+          keys={["imgflow_url", "dashboard_url", "terminal_url", "hermes_db", "codex_db", "claude_projects_dir",
+            "apimart_base", "kiro_cli_bin", "kiro_gateway_db", "kiro_cli_db", "kiro_cli_sessions_dir",
+            "feishu_codex_db", "hermes_node_bin", "bun_bin"]}
           vals={vals} onSave={save}
         >
-          <Field label={<><Tag kind="opt">可选</Tag>仪表盘地址</>} hint="目标站点须允许 iframe 嵌入（X-Frame-Options）。">
-            <TxtInput value={vals.dashboard_url} onChange={v => set("dashboard_url", v)} placeholder="https://hermes.example.com/" />
-            <TestButton settingKey="dashboard_url" value={vals.dashboard_url} label="测试连通性" />
+          <div className="hs-field-group-title">图片生成 · 嵌入服务</div>
+          <Field label={<><Tag kind="opt">可选</Tag>Imgflow 地址</>} hint={<>Listing 图片处理后端，默认 <code>http://127.0.0.1:3001</code>。</>}>
+            <TxtInput value={vals.imgflow_url} onChange={v => set("imgflow_url", v)} placeholder="http://127.0.0.1:3001" />
+            <TestButton settingKey="imgflow_url" value={vals.imgflow_url} label="测试" />
           </Field>
-          <Field label={<><Tag kind="opt">可选</Tag>外部终端地址</>} hint="通常是独立部署的 ttyd Web 终端。">
-            <TxtInput value={vals.terminal_url} onChange={v => set("terminal_url", v)} placeholder="https://term.example.com/" />
-            <TestButton settingKey="terminal_url" value={vals.terminal_url} label="测试连通性" />
+          <Field label={<><Tag kind="opt">可选</Tag>Apimart 地址</>} hint="非官方网关才需改，否则保持默认。">
+            <TxtInput value={vals.apimart_base} onChange={v => set("apimart_base", v)} placeholder="https://api.apimart.ai/v1" />
           </Field>
-        </Section>
+          <div className="hs-row3">
+            <Field label="仪表盘地址">
+              <TxtInput value={vals.dashboard_url} onChange={v => set("dashboard_url", v)} placeholder="https://..." />
+            </Field>
+            <Field label="外部终端地址">
+              <TxtInput value={vals.terminal_url} onChange={v => set("terminal_url", v)} placeholder="https://..." />
+            </Field>
+          </div>
 
-        {/* Kiro · 飞书-Codex · PATH */}
-        <Section
-          title="Kiro · 飞书-Codex 中继 · PATH 扩展"
-          desc="未使用 Kiro 或 feishu-codex-relay 项目可完全忽略本区。PATH 扩展仅在子进程报「找不到 node/bun」时才需要填。"
-          keys={["kiro_cli_bin", "kiro_gateway_db", "kiro_cli_db", "kiro_cli_sessions_dir", "feishu_codex_db", "hermes_node_bin", "bun_bin"]}
-          vals={vals} onSave={save}
-        >
-          <div className="hs-field-group-title">Kiro CLI</div>
-          <Field label={<><Tag kind="opt">可选</Tag>kiro-cli 路径</>} hint="留空 = PATH 自动发现。">
-            <TxtInput value={vals.kiro_cli_bin as string} onChange={v => set("kiro_cli_bin", v)} placeholder="留空 = PATH 自动发现" />
-            <TestButton settingKey="kiro_cli_bin" value={vals.kiro_cli_bin} label="测试路径" />
-          </Field>
-          <Field label={<><Tag kind="opt">可选</Tag>Kiro Gateway DB</>} hint={<>默认 <code>~/kiro-gateway/usage.db</code></>}>
-            <TxtInput value={vals.kiro_gateway_db as string} onChange={v => set("kiro_gateway_db", v)} placeholder="~/kiro-gateway/usage.db" />
-            <TestButton settingKey="kiro_gateway_db" value={vals.kiro_gateway_db} label="测试 DB" />
-          </Field>
-          <Field label={<><Tag kind="opt">可选</Tag>Kiro CLI 对话库</>} hint={<>默认 <code>~/.local/share/kiro-cli/data.sqlite3</code></>}>
-            <TxtInput value={vals.kiro_cli_db as string} onChange={v => set("kiro_cli_db", v)} placeholder="~/.local/share/kiro-cli/data.sqlite3" />
-            <TestButton settingKey="kiro_cli_db" value={vals.kiro_cli_db} label="测试 DB" />
-          </Field>
-          <Field label={<><Tag kind="opt">可选</Tag>Kiro CLI 会话目录</>} hint={<>默认 <code>~/.kiro/sessions/cli</code></>}>
-            <TxtInput value={vals.kiro_cli_sessions_dir as string} onChange={v => set("kiro_cli_sessions_dir", v)} placeholder="~/.kiro/sessions/cli" />
-            <TestButton settingKey="kiro_cli_sessions_dir" value={vals.kiro_cli_sessions_dir} label="测试目录" />
-          </Field>
+          <div className="hs-field-group-title" style={{ marginTop: 12 }}>Token 用量监控（DB 路径）</div>
+          <div className="hs-row3">
+            <Field label="Hermes state.db">
+              <TxtInput value={vals.hermes_db} onChange={v => set("hermes_db", v)} placeholder="~/.hermes/state.db" />
+            </Field>
+            <Field label="Codex state DB">
+              <TxtInput value={vals.codex_db} onChange={v => set("codex_db", v)} placeholder="~/.codex/state_5.sqlite" />
+            </Field>
+            <Field label="Claude projects 目录">
+              <TxtInput value={vals.claude_projects_dir} onChange={v => set("claude_projects_dir", v)} placeholder="~/.claude/projects" />
+            </Field>
+          </div>
 
-          <div className="hs-field-group-title" style={{ marginTop: 12 }}>飞书-Codex 中继</div>
-          <Field label={<><Tag kind="opt">可选</Tag>飞书-Codex 中继 DB</>} hint={<>跑了 feishu-codex-relay 才需要填，默认 <code>~/feishu-codex-relay/.codex-home/state_5.sqlite</code></>}>
-            <TxtInput value={vals.feishu_codex_db as string} onChange={v => set("feishu_codex_db", v)} placeholder="~/feishu-codex-relay/.codex-home/state_5.sqlite" />
-            <TestButton settingKey="feishu_codex_db" value={vals.feishu_codex_db} label="测试 DB" />
-          </Field>
-
-          <div className="hs-field-group-title" style={{ marginTop: 12 }}>PATH 扩展</div>
-          <Field label={<><Tag kind="opt">可选</Tag>Hermes 内置 Node 目录</>} hint={<>默认 <code>~/.hermes/node/bin</code>。子进程报 node not found 时填。</>}>
-            <TxtInput value={vals.hermes_node_bin as string} onChange={v => set("hermes_node_bin", v)} placeholder="~/.hermes/node/bin" />
-            <TestButton settingKey="hermes_node_bin" value={vals.hermes_node_bin} label="测试目录" />
-          </Field>
-          <Field label={<><Tag kind="opt">可选</Tag>Bun 运行时目录</>} hint={<>默认 <code>~/.bun/bin</code>。子进程报 bun not found 时填。</>}>
-            <TxtInput value={vals.bun_bin as string} onChange={v => set("bun_bin", v)} placeholder="~/.bun/bin" />
-            <TestButton settingKey="bun_bin" value={vals.bun_bin} label="测试目录" />
-          </Field>
+          <div className="hs-field-group-title" style={{ marginTop: 12 }}>Kiro · 飞书-Codex · PATH</div>
+          <div className="hs-row3">
+            <Field label="kiro-cli 路径">
+              <TxtInput value={vals.kiro_cli_bin as string} onChange={v => set("kiro_cli_bin", v)} placeholder="PATH 自动发现" />
+            </Field>
+            <Field label="Hermes Node 目录">
+              <TxtInput value={vals.hermes_node_bin as string} onChange={v => set("hermes_node_bin", v)} placeholder="~/.hermes/node/bin" />
+            </Field>
+            <Field label="Bun 目录">
+              <TxtInput value={vals.bun_bin as string} onChange={v => set("bun_bin", v)} placeholder="~/.bun/bin" />
+            </Field>
+          </div>
+          <div className="hs-row3">
+            <Field label="Kiro Gateway DB">
+              <TxtInput value={vals.kiro_gateway_db as string} onChange={v => set("kiro_gateway_db", v)} placeholder="~/kiro-gateway/usage.db" />
+            </Field>
+            <Field label="Kiro CLI DB">
+              <TxtInput value={vals.kiro_cli_db as string} onChange={v => set("kiro_cli_db", v)} placeholder="~/.local/share/kiro-cli/data.sqlite3" />
+            </Field>
+            <Field label="飞书-Codex 中继 DB">
+              <TxtInput value={vals.feishu_codex_db as string} onChange={v => set("feishu_codex_db", v)} placeholder="~/feishu-codex-relay/..." />
+            </Field>
+          </div>
         </Section>
 
       </AdvancedBlock>
@@ -703,14 +613,12 @@ export default function HubSettings() {
       {/* ── 账号安全 ── */}
       <ChangePassword />
 
-      {/* ── Skill Studio ── */}
+      {/* ── Skill Studio 跳转 ── */}
       <div className="hs-section hs-section-link">
         <div className="hs-section-hd">
           <div>
             <div className="hs-section-title">Skill Studio 配置</div>
-            <div className="hs-section-desc">
-              管理 Hermes / Claude Skill 文件的编辑器专属设置（快照保留、编辑器主题、Git 导入策略等）。
-            </div>
+            <div className="hs-section-desc">快照保留策略、编辑器主题、Git 导入设置等。</div>
           </div>
           <Link to="/skill/settings" className="hs-save-btn" style={{ textDecoration: "none" }}>
             前往配置 →
