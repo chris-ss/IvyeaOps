@@ -47,6 +47,39 @@ Sections in the UI:
 - **账号安全** — change password (writes new hash to `password_hash` in
   hub_settings.json, taking precedence over `OPSHUB_PASSWORD_HASH` env)
 
+### GBrain semantic search (embedding)
+
+The knowledge base works out of the box with **keyword search**. For
+**semantic search** (finds related content even with different wording) you
+need an embedding model. Two paths:
+
+**A. Local & free — Ollama (recommended).** `setup.sh` offers to do all of
+this; to do it by hand:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull nomic-embed-text          # 768-dim, ~274MB
+```
+
+Then in the UI: `系统配置 → 智能体 → 知识库语义检索`, pick **Ollama** and save.
+
+**B. Hosted API.** Pick a provider in the same UI panel (Zhipu / DashScope /
+MiniMax / OpenAI / Voyage / Google), fill its API key. The key is written to
+`~/.hermes/.env`; the provider/model go to `~/.gbrain/config.json`.
+
+> **Two gotchas the UI + sync handle for you, but worth knowing:**
+> 1. GBrain reads `embedding_model` from `~/.gbrain/config.json` in
+>    `provider:model` form (e.g. `ollama:nomic-embed-text`). `gbrain config
+>    set` alone does **not** work — it writes a different store. ops-hub's
+>    sync writes config.json directly and auto-prefixes the provider.
+> 2. The pglite vector column is created `vector(1536)` (OpenAI's dim).
+>    Switching to a different-dim model (nomic = 768) requires migrating the
+>    column. ops-hub's sync runs the migration automatically; manual users
+>    see `docs/embedding-migrations.md` in the gbrain package.
+
+After configuring, embed existing notes: `cd ~/brain && gbrain embed --all`,
+then verify with `gbrain doctor` (look for `embedding_provider ✓ DB aligned`).
+
 ### Precedence
 
 For any runtime value `X`:

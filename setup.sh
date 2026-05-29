@@ -181,6 +181,82 @@ install_gbrain() {
     else
         warn "Hermes not found — skipping GBrain MCP registration. Run after installing Hermes: hermes mcp add gbrain --command gbrain --args serve"
     fi
+
+    # Optional: local semantic-search embedding via Ollama (free, offline).
+    # Without it GBrain falls back to keyword search — usable but no semantic.
+    echo ""
+    read -p "  Enable GBrain semantic search via local Ollama? (downloads ~400MB) (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        setup_gbrain_embedding
+    else
+        warn "Skipping semantic search. GBrain will use keyword search only."
+        warn "  To enable later: install ollama, 'ollama pull nomic-embed-text',"
+        warn "  then set embedding in ops-hub 系统配置 → 智能体 → 知识库语义检索."
+    fi
+}
+
+# ── Configure GBrain local embedding (Ollama + nomic-embed-text) ──────────
+setup_gbrain_embedding() {
+    # 1. Install Ollama if missing.
+    if ! has ollama; then
+        log "Installing Ollama..."
+        curl -fsSL https://ollama.com/install.sh | sh 2>&1 | tail -2 || {
+            err "Ollama install failed. Skipping semantic search."
+            return 1
+        }
+    fi
+    # Ensure the service is up.
+    if ! curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+        (ollama serve >/dev/null 2>&1 &) ; sleep 3
+    fi
+
+    # 2. Pull the embedding model (768-dim, ~274MB).
+    log "Pulling nomic-embed-text embedding model..."
+    ollama pull nomic-embed-text 2>&1 | tail -1
+
+    # 3. Point GBrain at it: embedding_model MUST be provider:model in config.json
+    #    (gbrain config set writes the DB, not config.json — won't take effect).
+    local GCONF="$HOME/.gbrain/config.json"
+    if [[ -f "$GCONF" ]] && has python3; then
+        python3 - "$GCONF" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["embedding_model"] = "ollama:nomic-embed-text"
+d["embedding_dimensions"] = 768
+json.dump(d, open(p, "w"), indent=2)
+print("  GBrain embedding_model -> ollama:nomic-embed-text (768-dim)")
+PY
+    fi
+
+    # 4. Migrate the pglite vector column 1536 -> 768 (default is OpenAI's 1536).
+    local GBRAIN_PKG="$HOME/.bun/install/global/node_modules/gbrain"
+    local DBPATH="$HOME/.gbrain/brain.pglite"
+    if [[ -d "$GBRAIN_PKG" && -d "$DBPATH" ]] && has bun; then
+        log "Aligning GBrain vector column to 768-dim..."
+        (cd "$GBRAIN_PKG" && bun -e "
+import { PGlite } from '@electric-sql/pglite';
+import { vector } from '@electric-sql/pglite/vector';
+import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
+const db = new PGlite('$DBPATH', { extensions: { vector, pg_trgm } });
+await db.waitReady;
+const r = await db.query(\"SELECT atttypmod FROM pg_attribute WHERE attrelid='content_chunks'::regclass AND attname='embedding'\");
+if (r.rows[0]?.atttypmod !== 768) {
+  await db.exec(\`DROP INDEX IF EXISTS idx_chunks_embedding;
+    ALTER TABLE content_chunks ALTER COLUMN embedding TYPE vector(768);
+    UPDATE content_chunks SET embedding=NULL, embedded_at=NULL;
+    CREATE INDEX idx_chunks_embedding ON content_chunks USING hnsw (embedding vector_cosine_ops);\`);
+}
+await db.close();
+" 2>/dev/null) && ok "Vector column aligned" || warn "Vector migration skipped (no notes yet is fine)"
+    fi
+
+    # 5. Embed existing notes.
+    if [[ -d "$HOME/brain" ]]; then
+        (cd "$HOME/brain" && gbrain embed --all >/dev/null 2>&1) && ok "Existing notes embedded" || true
+    fi
+    ok "GBrain semantic search enabled (Ollama + nomic-embed-text)"
 }
 
 # ── Install Hermes ────────────────────────────────

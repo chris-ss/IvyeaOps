@@ -229,41 +229,136 @@ def sync_llm_model(
     _save(cfg)
 
 
-def sync_gbrain_embedding(provider: str, model: str, api_key: str) -> None:
-    """Configure GBrain semantic-search embedding.
+# Known embedding model → native dimension. Used to keep GBrain's pglite
+# vector column in sync (it's created vector(1536) by default for OpenAI).
+_EMBED_MODEL_DIMS = {
+    "nomic-embed-text": 768, "mxbai-embed-large": 1024, "all-minilm": 384,
+    "text-embedding-3-large": 1536, "text-embedding-3-small": 1536,
+    "embedding-3": 1024,                # zhipu
+    "text-embedding-v3": 1024,          # dashscope
+    "embo-01": 1536,                    # minimax
+    "voyage-3": 1024, "voyage-3-large": 1024,
+    "text-embedding-004": 768,          # google
+}
+_GBRAIN_CONFIG = Path.home() / ".gbrain" / "config.json"
 
-    - API key → ~/.hermes/.env (GBrain serve inherits Hermes' env)
-    - provider + model → `gbrain config set` (stored in GBrain's own DB)
+
+def _gbrain_bin() -> str | None:
+    for cand in ("/usr/local/bin/gbrain", str(Path.home() / ".bun" / "bin" / "gbrain")):
+        if Path(cand).exists():
+            return cand
+    return None
+
+
+def _migrate_gbrain_dims(new_dims: int) -> bool:
+    """ALTER the pglite embedding column to ``new_dims`` if it differs.
+
+    GBrain refuses to embed when the model's dim != the column's dim. We run
+    the official migration recipe (drop index → alter type → null vectors →
+    recreate index) via GBrain's own pglite + vector extension. Idempotent.
     """
+    import json
+    import subprocess
+    cfg_path = _GBRAIN_CONFIG
+    if not cfg_path.exists():
+        return False
+    try:
+        cfg = json.loads(cfg_path.read_text())
+    except Exception:
+        return False
+    db_path = cfg.get("database_path")
+    if not db_path or not Path(db_path).exists():
+        return False
+
+    gbrain_pkg = Path.home() / ".bun" / "install" / "global" / "node_modules" / "gbrain"
+    if not gbrain_pkg.exists():
+        return False
+
+    script = f"""
+import {{ PGlite }} from "@electric-sql/pglite";
+import {{ vector }} from "@electric-sql/pglite/vector";
+import {{ pg_trgm }} from "@electric-sql/pglite/contrib/pg_trgm";
+const db = new PGlite({json.dumps(db_path)}, {{ extensions: {{ vector, pg_trgm }} }});
+await db.waitReady;
+const r = await db.query(`SELECT atttypmod FROM pg_attribute
+  WHERE attrelid='content_chunks'::regclass AND attname='embedding'`);
+const cur = r.rows[0]?.atttypmod;
+if (cur === {new_dims}) {{ console.log("noop"); await db.close(); process.exit(0); }}
+await db.exec(`DROP INDEX IF EXISTS idx_chunks_embedding;
+  ALTER TABLE content_chunks ALTER COLUMN embedding TYPE vector({new_dims});
+  UPDATE content_chunks SET embedding=NULL, embedded_at=NULL;
+  CREATE INDEX idx_chunks_embedding ON content_chunks USING hnsw (embedding vector_cosine_ops);`);
+console.log("migrated");
+await db.close();
+"""
+    bun = str(Path.home() / ".bun" / "bin" / "bun")
+    if not Path(bun).exists():
+        return False
+    try:
+        proc = subprocess.run([bun, "-e", script], cwd=str(gbrain_pkg),
+                              capture_output=True, text=True, timeout=120)
+        return "migrated" in proc.stdout or "noop" in proc.stdout
+    except Exception:
+        return False
+
+
+def sync_gbrain_embedding(provider: str, model: str, api_key: str) -> None:
+    """Configure GBrain semantic-search embedding — the version that actually works.
+
+    Three things, learned the hard way:
+      1. API key → ~/.hermes/.env (the `gbrain serve` subprocess inherits it).
+      2. embedding_model MUST be written to ~/.gbrain/config.json in
+         ``provider:model`` form. `gbrain config set` writes the pglite DB,
+         but loadConfig() reads config.json — they don't agree, so set is a
+         no-op for this key. Bare model names fall back to OpenAI.
+      3. The pglite vector column dim must match the model; ALTER it if not.
+    """
+    import json
     provider = (provider or "").strip()
     model = (model or "").strip()
     api_key = (api_key or "").strip()
     if not provider:
         return
 
+    # 1. API key into Hermes env.
     env_var = _GBRAIN_EMBED_ENV.get(provider, "")
     if env_var and api_key:
         _write_env_file({env_var: api_key})
 
-    # Push provider/model into GBrain's config via its CLI.
-    import subprocess
-    from pathlib import Path as _P
-    gbrain = None
-    for cand in ("/usr/local/bin/gbrain", str(_P.home() / ".bun" / "bin" / "gbrain")):
-        if _P(cand).exists():
-            gbrain = cand
-            break
-    if not gbrain:
+    if not model:
         return
-    env = {**os.environ, "PATH": f"{_P.home()}/.bun/bin:" + os.environ.get("PATH", "")}
-    try:
-        subprocess.run([gbrain, "config", "set", "embedding_provider", provider],
-                       env=env, capture_output=True, timeout=20)
-        if model:
-            subprocess.run([gbrain, "config", "set", "embedding_model", model],
+
+    # 2. Write embedding_model (provider:model) + dimensions into config.json.
+    full_model = model if ":" in model else f"{provider}:{model}"
+    bare_model = full_model.split(":", 1)[1]
+    dims = _EMBED_MODEL_DIMS.get(bare_model)
+
+    if _GBRAIN_CONFIG.exists():
+        try:
+            cfg = json.loads(_GBRAIN_CONFIG.read_text())
+        except Exception:
+            cfg = {}
+        cfg["embedding_model"] = full_model
+        if dims:
+            cfg["embedding_dimensions"] = dims
+        tmp = _GBRAIN_CONFIG.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(cfg, indent=2))
+        tmp.replace(_GBRAIN_CONFIG)
+
+    # 3. Migrate the vector column dimension if the model needs it.
+    if dims:
+        _migrate_gbrain_dims(dims)
+
+    # Also push via CLI (harmless; some GBrain read paths use it).
+    gbrain = _gbrain_bin()
+    if gbrain:
+        import subprocess
+        env = {**os.environ, "PATH": f"{Path.home()}/.bun/bin:" + os.environ.get("PATH", "")}
+        try:
+            subprocess.run([gbrain, "config", "set", "embedding_model", full_model],
                            env=env, capture_output=True, timeout=20)
-    except Exception:
-        pass
+        except Exception:
+            pass
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
