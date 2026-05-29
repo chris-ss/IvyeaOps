@@ -41,6 +41,8 @@ export interface HubSettings {
   claude_projects_dir: string;
   hermes_node_bin: string;
   bun_bin: string;
+  // Auto bug-fix toggle (admin-only feature)
+  autofix_enabled: boolean;
   // Account (password_hash not exposed to frontend)
 }
 

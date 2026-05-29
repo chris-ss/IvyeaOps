@@ -352,6 +352,7 @@ const EMPTY: HubSettings = {
   hermes_db: "", codex_db: "", feishu_codex_db: "",
   kiro_gateway_db: "", kiro_cli_db: "", kiro_cli_sessions_dir: "",
   claude_projects_dir: "", hermes_node_bin: "", bun_bin: "",
+  autofix_enabled: false,
 };
 
 export default function HubSettings() {
@@ -479,6 +480,28 @@ export default function HubSettings() {
         >
           <TxtInput value={vals.claude_bin} onChange={v => set("claude_bin", v)} placeholder="留空 = PATH 自动发现" />
           <TestButton settingKey="claude_bin" value={vals.claude_bin} label="测试路径" />
+        </Field>
+      </Section>
+
+      {/* ── 自动修复 Bug ── */}
+      <Section
+        title="自动修复 Bug"
+        desc={<>开启后，任意功能在服务端报错（5xx）时会弹窗询问是否修复，AI（hermes）在<strong>隔离副本</strong>中排查并给出改动，由你审核 diff 后再应用并重启。默认关闭，仅管理员可见，关闭时零开销。</>}
+        keys={["autofix_enabled"]}
+        vals={vals} onSave={save}
+      >
+        <Field
+          label={<><Tag kind="opt">默认关闭</Tag>启用自动修复</>}
+          hint={<>仅在你信任 AI 改动当前生产代码时开启。修复全程审核制：应用前展示 diff；需重启时弹窗确认，<strong>60 秒</strong>无确认自动重启；改坏可一键回滚。</>}
+        >
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--t2)", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={vals.autofix_enabled}
+              onChange={e => set("autofix_enabled", e.target.checked)}
+            />
+            {vals.autofix_enabled ? "已开启（记得点右上角“保存”）" : "已关闭"}
+          </label>
         </Field>
       </Section>
 

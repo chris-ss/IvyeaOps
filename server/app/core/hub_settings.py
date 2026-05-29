@@ -47,6 +47,10 @@ _DEFAULTS: Dict[str, Any] = {
     # First-run setup wizard completion flag.
     # False/absent = wizard has not been completed; True = skip wizard on next login.
     "setup_done": False,
+    # Auto bug-fix: when a feature/tool operation fails, offer to launch an AI
+    # repair flow (hermes in an isolated worktree, review-first). Off by default
+    # — when off the frontend interceptor and backend engine never fire.
+    "autofix_enabled": False,
     # --- External-integration paths ----------------------------------------
     # Optional: ops-hub works standalone without any of these, but the
     # monitor page and agent picker light up when you point at the right
