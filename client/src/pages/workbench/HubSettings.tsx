@@ -373,7 +373,7 @@ function LLMModelBlock({
       />
 
       {provider && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10, alignItems: "end" }}>
           <Field label="模型名称">
             <TxtInput
               value={model}
@@ -707,8 +707,8 @@ export default function HubSettings() {
           AI 生图
           <span style={{ fontWeight: 400, color: "var(--t3)", marginLeft: 8 }}>留空用默认 Apimart gpt-image-2</span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <Field label="模型名称">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignItems: "end" }}>
+          <Field label="模型名称" hint="默认 gpt-image-2">
             <TxtInput value={vals.image_model} onChange={v => set("image_model", v)} placeholder="gpt-image-2" />
           </Field>
           <Field label="API Key" hint="留空复用 Apimart key">
