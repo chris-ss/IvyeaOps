@@ -198,18 +198,62 @@ function SecretInput({ value, onChange, placeholder }: { value: string; onChange
 
 // ── LLM model block ───────────────────────────────────────────────────────────
 
-const PROVIDERS: { id: string; label: string; defaultModel: string; envVar: string }[] = [
-  { id: "deepseek",   label: "DeepSeek",    defaultModel: "deepseek-chat",          envVar: "DEEPSEEK_API_KEY" },
-  { id: "anthropic",  label: "Anthropic",   defaultModel: "claude-sonnet-4-6",      envVar: "ANTHROPIC_API_KEY" },
-  { id: "openai",     label: "OpenAI",      defaultModel: "gpt-4o",                 envVar: "OPENAI_API_KEY" },
-  { id: "openrouter", label: "OpenRouter",  defaultModel: "anthropic/claude-sonnet-4-6", envVar: "OPENROUTER_API_KEY" },
-  { id: "google",     label: "Google",      defaultModel: "gemini-2.0-flash",       envVar: "GOOGLE_GENERATIVE_AI_API_KEY" },
-  { id: "groq",       label: "Groq",        defaultModel: "llama-3.3-70b-versatile", envVar: "GROQ_API_KEY" },
-  { id: "together",   label: "Together AI", defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo", envVar: "TOGETHER_API_KEY" },
-  { id: "kimi",       label: "Kimi / Moonshot", defaultModel: "kimi-k2.5",          envVar: "KIMI_API_KEY" },
-  { id: "minimax",    label: "MiniMax",     defaultModel: "mimo-v2.5-pro",          envVar: "MINIMAX_CN_API_KEY" },
-  { id: "custom",     label: "自定义（OpenAI 兼容）", defaultModel: "",             envVar: "" },
+type ProviderDef = { id: string; label: string; defaultModel: string; envVar: string; hint?: string };
+
+const PROVIDERS: ProviderDef[] = [
+  { id: "deepseek",   label: "DeepSeek",   defaultModel: "deepseek-chat",                      envVar: "DEEPSEEK_API_KEY",            hint: "国内可直连，性价比高" },
+  { id: "xiaomi",     label: "MiMo",        defaultModel: "mimo-v2.5-pro",                      envVar: "XIAOMI_API_KEY",              hint: "小米大模型，国内可用" },
+  { id: "anthropic",  label: "Anthropic",  defaultModel: "claude-sonnet-4-6",                  envVar: "ANTHROPIC_API_KEY",           hint: "Claude 系列" },
+  { id: "openai",     label: "OpenAI",     defaultModel: "gpt-4o",                             envVar: "OPENAI_API_KEY" },
+  { id: "openrouter", label: "OpenRouter", defaultModel: "anthropic/claude-sonnet-4-6",        envVar: "OPENROUTER_API_KEY",          hint: "聚合多家，一个 key 换模型" },
+  { id: "google",     label: "Google",     defaultModel: "gemini-2.0-flash",                   envVar: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { id: "kimi",       label: "Kimi",       defaultModel: "kimi-k2.5",                          envVar: "KIMI_API_KEY",                hint: "国内可用" },
+  { id: "groq",       label: "Groq",       defaultModel: "llama-3.3-70b-versatile",            envVar: "GROQ_API_KEY",                hint: "超快推理速度" },
+  { id: "together",   label: "Together",   defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo", envVar: "TOGETHER_API_KEY" },
+  { id: "custom",     label: "自定义",     defaultModel: "",                                   envVar: "",                            hint: "OpenAI 兼容接口" },
 ];
+
+function ProviderPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (id: string, defaultModel: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {PROVIDERS.map(p => {
+        const active = value === p.id;
+        return (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => onChange(p.id, p.defaultModel)}
+            style={{
+              padding: "5px 11px",
+              borderRadius: 5,
+              border: active ? "1px solid var(--acc)" : "1px solid var(--b)",
+              background: active ? "color-mix(in srgb, var(--acc) 15%, var(--bg2))" : "var(--bg2)",
+              color: active ? "var(--acc)" : "var(--t2)",
+              fontSize: 11,
+              fontFamily: "var(--font)",
+              cursor: "pointer",
+              transition: "all .12s",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {p.label}
+            {p.hint && (
+              <span style={{ color: active ? "var(--acc)" : "var(--t3)", marginLeft: 5, fontSize: 10 }}>
+                · {p.hint}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function LLMModelBlock({
   title, hint,
@@ -226,67 +270,52 @@ function LLMModelBlock({
   const model    = (vals[modelKey]    as string) || "";
   const apiKey   = (vals[apiKeyKey]   as string) || "";
   const baseUrl  = (vals[baseUrlKey]  as string) || "";
-
-  const info = PROVIDERS.find(p => p.id === provider);
+  const info     = PROVIDERS.find(p => p.id === provider);
 
   return (
     <div>
-      <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 600, marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 600, marginBottom: 10 }}>
         {title}
         {hint && <span style={{ fontWeight: 400, color: "var(--t3)", marginLeft: 8 }}>{hint}</span>}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <div>
-          <div className="hs-label" style={{ fontSize: 10, marginBottom: 3 }}>Provider</div>
-          <select
-            className="hs-input"
-            value={provider}
-            onChange={e => {
-              const p = e.target.value;
-              set(providerKey, p as HubSettings[typeof providerKey]);
-              const pInfo = PROVIDERS.find(x => x.id === p);
-              if (pInfo && !model) {
-                set(modelKey, pInfo.defaultModel as HubSettings[typeof modelKey]);
-              }
-            }}
-          >
-            <option value="">-- 选择 provider --</option>
-            {PROVIDERS.map(p => (
-              <option key={p.id} value={p.id}>{p.label}</option>
-            ))}
-          </select>
+
+      <div className="hs-label" style={{ marginBottom: 6 }}>选择 Provider</div>
+      <ProviderPicker
+        value={provider}
+        onChange={(id, defaultModel) => {
+          set(providerKey, id as HubSettings[typeof providerKey]);
+          if (!model && defaultModel)
+            set(modelKey, defaultModel as HubSettings[typeof modelKey]);
+        }}
+      />
+
+      {provider && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+          <Field label="模型名称">
+            <TxtInput
+              value={model}
+              onChange={v => set(modelKey, v as HubSettings[typeof modelKey])}
+              placeholder={info?.defaultModel || "模型名称"}
+            />
+          </Field>
+          <Field label={info?.envVar || "API Key"}>
+            <SecretInput
+              value={apiKey}
+              onChange={v => set(apiKeyKey, v as HubSettings[typeof apiKeyKey])}
+              placeholder={info?.envVar || "API Key"}
+            />
+          </Field>
+          {(provider === "custom" || baseUrl) && (
+            <Field label="Base URL" hint="自定义地址才需填，其他 provider 留空">
+              <TxtInput
+                value={baseUrl}
+                onChange={v => set(baseUrlKey, v as HubSettings[typeof baseUrlKey])}
+                placeholder="https://api.example.com/v1"
+              />
+            </Field>
+          )}
         </div>
-        <div>
-          <div className="hs-label" style={{ fontSize: 10, marginBottom: 3 }}>
-            Model {info && <span style={{ color: "var(--t3)" }}>({info.envVar || "自定义"})</span>}
-          </div>
-          <TxtInput
-            value={model}
-            onChange={v => set(modelKey, v as HubSettings[typeof modelKey])}
-            placeholder={info?.defaultModel || "模型名称"}
-          />
-        </div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-        <div>
-          <div className="hs-label" style={{ fontSize: 10, marginBottom: 3 }}>API Key</div>
-          <SecretInput
-            value={apiKey}
-            onChange={v => set(apiKeyKey, v as HubSettings[typeof apiKeyKey])}
-            placeholder={info?.envVar ? `${info.envVar}` : "API Key"}
-          />
-        </div>
-        <div>
-          <div className="hs-label" style={{ fontSize: 10, marginBottom: 3 }}>
-            Base URL <span style={{ color: "var(--t3)" }}>（默认留空）</span>
-          </div>
-          <TxtInput
-            value={baseUrl}
-            onChange={v => set(baseUrlKey, v as HubSettings[typeof baseUrlKey])}
-            placeholder="留空 = 使用 provider 默认地址"
-          />
-        </div>
-      </div>
+      )}
     </div>
   );
 }

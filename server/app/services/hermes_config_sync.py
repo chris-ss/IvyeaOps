@@ -36,6 +36,7 @@ _PROVIDER_ENV: Dict[str, tuple[str, str]] = {
     "minimax":    ("MINIMAX_API_KEY",                ""),
     "zhipu":      ("ZHIPUAI_API_KEY",                ""),
     "kimi":       ("KIMI_API_KEY",                   "https://api.kimi.com/coding/v1"),
+    "xiaomi":     ("XIAOMI_API_KEY",                 "https://token-plan-sgp.xiaomimimo.com/v1"),
     "custom":     ("",                               ""),
 }
 
