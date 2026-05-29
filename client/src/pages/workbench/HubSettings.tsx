@@ -222,6 +222,7 @@ function ProviderPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const selected = PROVIDERS.find(p => p.id === value);
@@ -265,22 +266,27 @@ function ProviderPicker({
         onClick={toggle}
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "7px 10px", borderRadius: 4,
+          padding: "8px 12px", borderRadius: 6,
           border: open ? "1px solid var(--acc)" : "1px solid var(--b)",
           background: "var(--bg2)",
           color: selected ? "var(--t)" : "var(--t3)",
-          fontSize: 12, fontFamily: "var(--font)", cursor: "pointer",
-          outline: "none", transition: "border .12s",
+          fontSize: 12.5, fontFamily: "var(--font)", cursor: "pointer",
+          outline: "none", transition: "border .12s, box-shadow .12s",
+          boxShadow: open ? "0 0 0 3px color-mix(in srgb, var(--acc) 14%, transparent)" : "none",
         }}
       >
-        <span>
-          {selected ? selected.label : "选择 Provider"}
+        <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span style={{ fontWeight: selected ? 500 : 400 }}>
+            {selected ? selected.label : "选择 Provider"}
+          </span>
           {selected?.hint && (
-            <span style={{ color: "var(--t3)", marginLeft: 8, fontSize: 11 }}>· {selected.hint}</span>
+            <span style={{ color: "var(--t3)", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {selected.hint}
+            </span>
           )}
         </span>
         <span style={{
-          color: "var(--t3)", fontSize: 10, display: "inline-block",
+          color: "var(--t3)", fontSize: 9, marginLeft: 8, flexShrink: 0, display: "inline-block",
           transition: "transform .15s", transform: open ? "rotate(180deg)" : "none",
         }}>▼</span>
       </button>
@@ -293,34 +299,49 @@ function ProviderPicker({
           left: rect.left,
           width: rect.width,
           zIndex: 9999,
-          background: "var(--bg2)",
+          background: "var(--bg1, var(--bg2))",
           border: "1px solid var(--b)",
-          borderRadius: 4,
-          boxShadow: "0 4px 20px rgba(0,0,0,.32)",
-          maxHeight: 280,
+          borderRadius: 8,
+          boxShadow: "0 8px 28px rgba(0,0,0,.4)",
+          maxHeight: 300,
           overflowY: "auto",
           WebkitOverflowScrolling: "touch",
+          padding: 5,
         }}>
           {PROVIDERS.map(p => {
             const pick = () => { onChange(p.id, p.defaultModel); setOpen(false); };
+            const isSel = value === p.id;
+            const isHover = hovered === p.id;
             return (
               <div
                 key={p.id}
                 role="button"
                 tabIndex={0}
                 onClick={pick}
+                onMouseEnter={() => setHovered(p.id)}
+                onMouseLeave={() => setHovered(h => (h === p.id ? null : h))}
                 style={{
-                  width: "100%", display: "flex", alignItems: "center", gap: 8,
-                  padding: "10px 12px",
-                  background: value === p.id ? "color-mix(in srgb, var(--acc) 12%, var(--bg2))" : "transparent",
-                  color: value === p.id ? "var(--acc)" : "var(--t2)",
-                  fontSize: 12, fontFamily: "var(--font)", cursor: "pointer", textAlign: "left",
-                  userSelect: "none",
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "9px 11px", borderRadius: 6, marginBottom: 1,
+                  background: isSel
+                    ? "color-mix(in srgb, var(--acc) 16%, transparent)"
+                    : isHover
+                    ? "color-mix(in srgb, var(--t) 7%, transparent)"
+                    : "transparent",
+                  color: isSel ? "var(--acc)" : "var(--t)",
+                  fontSize: 12.5, fontFamily: "var(--font)", cursor: "pointer",
+                  userSelect: "none", transition: "background .1s",
                 }}
               >
-                <span style={{ flex: 1 }}>{p.label}</span>
-                {p.hint && <span style={{ color: "var(--t3)", fontSize: 10 }}>{p.hint}</span>}
-                {value === p.id && <span style={{ color: "var(--acc)", fontSize: 10 }}>✓</span>}
+                <span style={{ flex: 1, fontWeight: isSel ? 500 : 400 }}>{p.label}</span>
+                {p.hint && (
+                  <span style={{ color: isSel ? "color-mix(in srgb, var(--acc) 70%, var(--t3))" : "var(--t3)", fontSize: 10.5 }}>
+                    {p.hint}
+                  </span>
+                )}
+                <span style={{ width: 12, textAlign: "center", color: "var(--acc)", fontSize: 11, flexShrink: 0 }}>
+                  {isSel ? "✓" : ""}
+                </span>
               </div>
             );
           })}
