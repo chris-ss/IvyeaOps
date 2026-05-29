@@ -103,6 +103,7 @@ export default function Brain() {
   const [tab, setTabState] = useState<Tab>(getInitialTab);
   const [overview, setOverview] = useState<BrainOverview | null>(null);
   const [files, setFiles] = useState<BrainFileItem[]>([]);
+  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
   const [selectedPath, setSelectedPath] = useState<string>("");
   const [content, setContent] = useState("");
   const [query, setQuery] = useState("");
@@ -588,14 +589,39 @@ export default function Brain() {
       {tab === "pages" && (
         <div className="g2" style={{ alignItems: "start" }}>
           <div className="card" style={{ maxHeight: 620, overflow: "auto" }}>
-            <div className="ct">FILES ({files.length})</div>
-            <input className="inp" placeholder="筛选..." id="brain-filter" style={{ marginBottom: 8 }} onChange={(e) => { (e.target as any)._v = e.target.value; e.target.closest('.card')?.querySelectorAll('[data-file]').forEach((el: any) => { el.style.display = el.dataset.file.includes(e.target.value) ? '' : 'none'; }); }} />
             {(() => {
               const grouped: Record<string, typeof files> = {};
               files.forEach((f) => { (grouped[f.category] ??= []).push(f); });
-              return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([cat, items]) => (
+              const cats = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+              const allCollapsed = cats.length > 0 && cats.every((c) => collapsedCats[c]);
+              return (
+                <>
+                  <div className="ct" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>FILES ({files.length})</span>
+                    {cats.length > 1 && (
+                      <button className="tbtn" style={{ fontSize: 9, padding: "2px 6px" }}
+                        onClick={() => {
+                          const next: Record<string, boolean> = {};
+                          if (!allCollapsed) cats.forEach((c) => { next[c] = true; });
+                          setCollapsedCats(next);
+                        }}>
+                        {allCollapsed ? "全部展开" : "全部收起"}
+                      </button>
+                    )}
+                  </div>
+                  <input className="inp" placeholder="筛选..." id="brain-filter" style={{ marginBottom: 8 }} onChange={(e) => { (e.target as any)._v = e.target.value; e.target.closest('.card')?.querySelectorAll('[data-file]').forEach((el: any) => { el.style.display = el.dataset.file.includes(e.target.value) ? '' : 'none'; }); }} />
+                  {cats.map((cat) => {
+                    const items = grouped[cat];
+                    const collapsed = !!collapsedCats[cat];
+                    return (
                 <div key={cat} style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 9, color: "var(--t3)", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4, paddingBottom: 3, borderBottom: "1px solid var(--b)" }}>{cat} ({items.length})</div>
+                  <div
+                    onClick={() => setCollapsedCats((m) => ({ ...m, [cat]: !m[cat] }))}
+                    style={{ fontSize: 9, color: "var(--t3)", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4, paddingBottom: 3, borderBottom: "1px solid var(--b)", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, userSelect: "none" }}>
+                    <span style={{ display: "inline-block", transition: "transform .12s", transform: collapsed ? "rotate(-90deg)" : "none", fontSize: 8 }}>▼</span>
+                    <span style={{ flex: 1 }}>{cat} ({items.length})</span>
+                  </div>
+                  {!collapsed && (
                   <div style={{ display: "grid", gap: 3 }}>
                     {items.map((f) => (
                       <div key={f.path} data-file={f.path + " " + f.name} style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -607,8 +633,12 @@ export default function Brain() {
                       </div>
                     ))}
                   </div>
+                  )}
                 </div>
-              ));
+                    );
+                  })}
+                </>
+              );
             })()}
           </div>
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
