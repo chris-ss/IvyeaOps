@@ -221,27 +221,47 @@ function ProviderPicker({
   onChange: (id: string, defaultModel: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const selected = PROVIDERS.find(p => p.id === value);
 
+  // Close on outside tap/click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    if (!open) return;
+    const handler = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current && !triggerRef.current.contains(target)) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+    document.addEventListener("touchstart", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (!open && triggerRef.current)
+      setRect(triggerRef.current.getBoundingClientRect());
+    setOpen(o => !o);
+  };
+
+  // Position: below trigger if space, otherwise above
+  const dropTop = rect
+    ? (rect.bottom + 4 + 280 < window.innerHeight ? rect.bottom + 4 : rect.top - 284)
+    : 0;
 
   return (
-    <div ref={ref} style={{ position: "relative", width: "100%" }}>
-      {/* trigger */}
+    <>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={toggle}
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "7px 10px", borderRadius: 4,
-          border: "1px solid var(--b)", background: "var(--bg2)",
+          border: open ? "1px solid var(--acc)" : "1px solid var(--b)",
+          background: "var(--bg2)",
           color: selected ? "var(--t)" : "var(--t3)",
           fontSize: 12, fontFamily: "var(--font)", cursor: "pointer",
           outline: "none", transition: "border .12s",
@@ -253,24 +273,37 @@ function ProviderPicker({
             <span style={{ color: "var(--t3)", marginLeft: 8, fontSize: 11 }}>· {selected.hint}</span>
           )}
         </span>
-        <span style={{ color: "var(--t3)", fontSize: 10, transition: "transform .15s", display: "inline-block", transform: open ? "rotate(180deg)" : "none" }}>▼</span>
+        <span style={{
+          color: "var(--t3)", fontSize: 10, display: "inline-block",
+          transition: "transform .15s", transform: open ? "rotate(180deg)" : "none",
+        }}>▼</span>
       </button>
 
-      {/* dropdown */}
-      {open && (
+      {/* fixed-position dropdown — not clipped by any parent overflow */}
+      {open && rect && (
         <div style={{
-          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 200,
-          background: "var(--bg2)", border: "1px solid var(--b)", borderRadius: 4,
-          boxShadow: "0 4px 16px rgba(0,0,0,.25)", overflow: "hidden",
+          position: "fixed",
+          top: dropTop,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 9999,
+          background: "var(--bg2)",
+          border: "1px solid var(--b)",
+          borderRadius: 4,
+          boxShadow: "0 4px 20px rgba(0,0,0,.32)",
+          maxHeight: 280,
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
         }}>
           {PROVIDERS.map(p => (
             <button
               key={p.id}
               type="button"
+              onMouseDown={e => e.preventDefault()}   // prevent blur on desktop
               onClick={() => { onChange(p.id, p.defaultModel); setOpen(false); }}
               style={{
                 width: "100%", display: "flex", alignItems: "center", gap: 8,
-                padding: "8px 12px", border: "none",
+                padding: "10px 12px", border: "none",
                 background: value === p.id ? "color-mix(in srgb, var(--acc) 12%, var(--bg2))" : "transparent",
                 color: value === p.id ? "var(--acc)" : "var(--t2)",
                 fontSize: 12, fontFamily: "var(--font)", cursor: "pointer", textAlign: "left",
@@ -283,7 +316,7 @@ function ProviderPicker({
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
