@@ -16,7 +16,7 @@ router = APIRouter()
 
 _SECRET_KEYS: List[str] = [
     "apimart_key", "sorftime_key", "sif_key", "sellersprite_key",
-    "hermes_api_key", "hermes_fallback_api_key",
+    "hermes_api_key", "hermes_fallback_api_key", "gbrain_embed_api_key",
     "alert_app_secret", "alert_webhook", "openai_api_key",
 ]
 
@@ -26,6 +26,7 @@ _HERMES_SYNC_KEYS = {
     "hermes_provider", "hermes_model", "hermes_api_key", "hermes_base_url",
     "hermes_fallback_provider", "hermes_fallback_model",
     "hermes_fallback_api_key", "hermes_fallback_base_url",
+    "gbrain_embed_provider", "gbrain_embed_model", "gbrain_embed_api_key",
 }
 
 

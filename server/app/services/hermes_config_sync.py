@@ -40,6 +40,19 @@ _PROVIDER_ENV: Dict[str, tuple[str, str]] = {
     "custom":     ("",                               ""),
 }
 
+# GBrain embedding providers → env var name (key is read from the environment
+# by the `gbrain serve` subprocess, which inherits Hermes' env). ollama needs
+# no key (local).
+_GBRAIN_EMBED_ENV: Dict[str, str] = {
+    "openai":    "OPENAI_API_KEY",
+    "zhipu":     "ZHIPUAI_API_KEY",
+    "dashscope": "DASHSCOPE_API_KEY",
+    "minimax":   "MINIMAX_API_KEY",
+    "voyage":    "VOYAGE_API_KEY",
+    "google":    "GOOGLE_GENERATIVE_AI_API_KEY",
+    "ollama":    "",
+}
+
 
 # ── YAML helpers (round-trip preserving comments as best as PyYAML can) ──────
 
@@ -216,6 +229,43 @@ def sync_llm_model(
     _save(cfg)
 
 
+def sync_gbrain_embedding(provider: str, model: str, api_key: str) -> None:
+    """Configure GBrain semantic-search embedding.
+
+    - API key → ~/.hermes/.env (GBrain serve inherits Hermes' env)
+    - provider + model → `gbrain config set` (stored in GBrain's own DB)
+    """
+    provider = (provider or "").strip()
+    model = (model or "").strip()
+    api_key = (api_key or "").strip()
+    if not provider:
+        return
+
+    env_var = _GBRAIN_EMBED_ENV.get(provider, "")
+    if env_var and api_key:
+        _write_env_file({env_var: api_key})
+
+    # Push provider/model into GBrain's config via its CLI.
+    import subprocess
+    from pathlib import Path as _P
+    gbrain = None
+    for cand in ("/usr/local/bin/gbrain", str(_P.home() / ".bun" / "bin" / "gbrain")):
+        if _P(cand).exists():
+            gbrain = cand
+            break
+    if not gbrain:
+        return
+    env = {**os.environ, "PATH": f"{_P.home()}/.bun/bin:" + os.environ.get("PATH", "")}
+    try:
+        subprocess.run([gbrain, "config", "set", "embedding_provider", provider],
+                       env=env, capture_output=True, timeout=20)
+        if model:
+            subprocess.run([gbrain, "config", "set", "embedding_model", model],
+                           env=env, capture_output=True, timeout=20)
+    except Exception:
+        pass
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 _LLM_KEYS = {
@@ -223,6 +273,7 @@ _LLM_KEYS = {
     "hermes_fallback_provider", "hermes_fallback_model",
     "hermes_fallback_api_key", "hermes_fallback_base_url",
 }
+_GBRAIN_EMBED_KEYS = {"gbrain_embed_provider", "gbrain_embed_model", "gbrain_embed_api_key"}
 
 
 def on_settings_saved(updates: Dict[str, Any]) -> None:
@@ -262,3 +313,13 @@ def on_settings_saved(updates: Dict[str, Any]) -> None:
             sync_sellersprite((updates.get("sellersprite_key") or "").strip())
         except Exception as exc:  # noqa: BLE001
             _log.warning("hermes sellersprite sync failed: %s", exc)
+
+    if _GBRAIN_EMBED_KEYS & updates.keys():
+        try:
+            sync_gbrain_embedding(
+                provider=updates.get("gbrain_embed_provider", ""),
+                model=updates.get("gbrain_embed_model", ""),
+                api_key=updates.get("gbrain_embed_api_key", ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("gbrain embedding sync failed: %s", exc)

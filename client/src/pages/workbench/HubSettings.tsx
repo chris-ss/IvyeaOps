@@ -552,6 +552,7 @@ const EMPTY: HubSettings = {
   hermes_fallback_api_key: "", hermes_fallback_base_url: "",
   assistant_provider: "", assistant_model: "", assistant_api_key: "", assistant_base_url: "",
   image_model: "", image_api_key: "", image_base_url: "",
+  gbrain_embed_provider: "", gbrain_embed_model: "", gbrain_embed_api_key: "",
   apimart_key: "", apimart_base: "https://api.apimart.ai/v1",
   text_ai_providers: "hermes,codex,claude",
   sorftime_key: "", sif_key: "", sellersprite_key: "",
@@ -724,7 +725,9 @@ export default function HubSettings() {
       <Section
         title="智能体"
         desc={<>Hermes、Claude、GBrain 均从系统 PATH <strong>自动发现</strong>，绿色即代表可用，无需手动配置路径。</>}
-        keys={["hermes_bin", "codex_bin", "claude_bin", "text_ai_providers", "autofix_enabled"]}
+        keys={["hermes_bin", "codex_bin", "claude_bin", "text_ai_providers", "autofix_enabled",
+          "gbrain_bin", "brain_root",
+          "gbrain_embed_provider", "gbrain_embed_model", "gbrain_embed_api_key"]}
         vals={vals} onSave={save}
       >
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
@@ -770,10 +773,50 @@ export default function HubSettings() {
             <Field label={<><Tag kind="opt">可选</Tag>知识库根目录</>} hint={<>GBrain 笔记目录，留空 = <code>~/brain</code>。</>}>
               <TxtInput value={vals.brain_root} onChange={v => set("brain_root", v)} placeholder="~/brain" />
             </Field>
-            <Field label={<><Tag kind="opt">可选</Tag>知识库 Embedding Key</>}
-              hint="用于语义检索（gbrain embed），留空则退化为关键词检索，不影响对话功能。">
-              <SecretInput value={vals.openai_api_key} onChange={v => set("openai_api_key", v)} placeholder="OpenAI / 兼容服务的 API Key" />
+            <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--b)", margin: "4px 0 2px", paddingTop: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 600, marginBottom: 2 }}>
+                知识库语义检索（Embedding）
+              </div>
+              <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 8 }}>
+                配置后知识库支持语义检索；留空则仅关键词检索（不影响对话）。注意：deepseek 等纯对话模型不提供 embedding。
+              </div>
+            </div>
+            <Field label={<><Tag kind="opt">可选</Tag>Embedding 服务商</>}
+              hint={<>支持 embedding 的服务商。<code>ollama</code> 本地免费（需先 pull 模型），其余需对应 API Key。</>}>
+              <select className="hs-input" value={vals.gbrain_embed_provider}
+                onChange={e => {
+                  const p = e.target.value;
+                  set("gbrain_embed_provider", p);
+                  if (p && !vals.gbrain_embed_model) {
+                    const dm: Record<string, string> = {
+                      openai: "text-embedding-3-large", zhipu: "embedding-3",
+                      dashscope: "text-embedding-v3", minimax: "embo-01",
+                      voyage: "voyage-3", google: "text-embedding-004",
+                      ollama: "nomic-embed-text",
+                    };
+                    if (dm[p]) set("gbrain_embed_model", dm[p]);
+                  }
+                }}>
+                <option value="">未配置（关键词检索）</option>
+                <option value="ollama">Ollama（本地免费）</option>
+                <option value="zhipu">智谱 Zhipu</option>
+                <option value="dashscope">阿里 DashScope</option>
+                <option value="minimax">MiniMax</option>
+                <option value="openai">OpenAI</option>
+                <option value="voyage">Voyage</option>
+                <option value="google">Google</option>
+              </select>
             </Field>
+            {vals.gbrain_embed_provider && (
+              <Field label="Embedding 模型" hint="已按服务商预填默认值，可改">
+                <TxtInput value={vals.gbrain_embed_model} onChange={v => set("gbrain_embed_model", v)} placeholder="模型名" />
+              </Field>
+            )}
+            {vals.gbrain_embed_provider && vals.gbrain_embed_provider !== "ollama" && (
+              <Field label="Embedding API Key" hint="保存后写入 Hermes 环境，GBrain 自动读取">
+                <SecretInput value={vals.gbrain_embed_api_key} onChange={v => set("gbrain_embed_api_key", v)} placeholder="对应服务商的 API Key" />
+              </Field>
+            )}
           </div>
         )}
 

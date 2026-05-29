@@ -44,6 +44,11 @@ _DEFAULTS: Dict[str, Any] = {
     "image_model": "",            # default gpt-image-2
     "image_api_key": "",          # empty = reuse apimart_key
     "image_base_url": "",         # empty = reuse apimart_base
+    # GBrain 语义检索 embedding — provider key written to ~/.hermes/.env,
+    # model/provider pushed via `gbrain config set`. Empty = keyword search only.
+    "gbrain_embed_provider": "",  # openai | zhipu | dashscope | minimax | voyage | ollama
+    "gbrain_embed_model": "",
+    "gbrain_embed_api_key": "",
     # Market data
     "sorftime_key": "",      # sorftime.com — 市场调研、关键词趋势
     "sif_key": "",           # sif.com — 深度分析工具箱（独立账号和 key）

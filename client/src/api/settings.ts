@@ -20,6 +20,10 @@ export interface HubSettings {
   image_model: string;
   image_api_key: string;
   image_base_url: string;
+  // GBrain 语义检索 embedding
+  gbrain_embed_provider: string;
+  gbrain_embed_model: string;
+  gbrain_embed_api_key: string;
   // AI synthesis (Apimart for images)
   apimart_key: string;
   apimart_base: string;
