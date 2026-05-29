@@ -426,7 +426,7 @@ export default function Brain() {
   };
 
   return (
-    <div>
+    <div className={tab === "chat" ? "brain-page-chat" : undefined}>
       <div className="ptitle">/ GBrain 知识库</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -445,7 +445,7 @@ export default function Brain() {
       </div>
 
       {tab === "chat" && (
-        <div style={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr)", gap: 10, height: "calc(100vh - 180px)", minHeight: 360 }} className="brain-chat-grid">
+        <div style={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr)", gap: 10, minHeight: 320, flex: 1 }} className="brain-chat-grid">
           <div className="card" style={{ overflow: "auto" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
               <div className="ct" style={{ margin: 0, flex: 1 }}>SESSIONS</div>

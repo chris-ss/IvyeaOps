@@ -1879,6 +1879,10 @@ body::after{
 .hs-eye:hover{color:var(--t)}
 @media(max-width:600px){.hs-row3{grid-template-columns:1fr}.hs-page{padding:16px 14px 48px}}
 
+/* ── GBrain chat: fill content height so input pins to bottom ── */
+.content:has(.brain-page-chat){overflow:hidden;display:flex;flex-direction:column}
+.brain-page-chat{flex:1;min-height:0;display:flex;flex-direction:column}
+
 /* ── Freight quote tool ── */
 .fq-input{width:100%;background:var(--bg2);border:1px solid var(--b);color:var(--t);font-family:var(--font);font-size:12px;padding:7px 10px;border-radius:6px;outline:none;transition:border .12s;box-sizing:border-box}
 .fq-input:focus{border-color:var(--acc)}
