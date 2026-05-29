@@ -157,14 +157,14 @@ def _cleanup_old(keep_days: int = _KEEP_DAYS) -> int:
 
 
 def _trigger_cron() -> tuple[bool, str]:
-    """Fire the digest cronjob in the background. Best-effort.
+    """Fire the digest cron job in the background. Best-effort.
 
-    We use ``hermes cronjob run <id>`` and don't wait — the job takes ~30s
-    and we don't want to block the HTTP request. A stale job_id returns
-    non-zero which we surface as a friendly message.
+    We use ``hermes cron run <id>`` and don't wait — it queues the job for the
+    next gateway scheduler tick (~seconds), so we don't block the HTTP request.
+    A stale job_id returns non-zero which we surface as a friendly message.
     """
     if not _CRON_JOB_ID:
-        return False, "cronjob id 未配置，无法触发"
+        return False, "cron job id 未配置，无法触发"
     from app.core import integrations
     hermes = integrations.hermes_bin()
     if not hermes:
@@ -172,7 +172,7 @@ def _trigger_cron() -> tuple[bool, str]:
     try:
         # Fire-and-forget: use Popen so we return immediately
         subprocess.Popen(
-            [hermes, "cronjob", "run", _CRON_JOB_ID],
+            [hermes, "cron", "run", _CRON_JOB_ID],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,

@@ -127,6 +127,8 @@ AGENT_DEFS: dict[str, AgentDef] = {
             "anthropic/deepseek-3.2",
             "anthropic/qwen3-coder-next",
             "anthropic/glm-5",
+            "mimo-v2.5-pro",
+            "mimo-v2.5",
         ],
         # Interactive: just `hermes chat`. We pass --model when given.
         cli_args=["chat"],

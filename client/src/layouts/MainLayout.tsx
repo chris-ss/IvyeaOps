@@ -10,6 +10,7 @@ type NavItem = {
   label: string;
   badge?: string;
   admin?: boolean;        // true = visible to admin only
+  key?: string;           // grantable module key; non-admins see it if granted
 };
 
 type NavSection = {
@@ -24,10 +25,9 @@ const NAV: NavSection[] = [
       { to: "/", icon: "⌂", label: "首页" },
       { to: "/market", icon: "◈", label: "市场调研" },
       { to: "/playbook", icon: "◎", label: "打法推荐" },
-      { to: "/freight", icon: "⊞", label: "头程比价" },
-      { to: "/listing", icon: "◧", label: "Listing工作台", admin: true },
-      { to: "/tools", icon: "⊕", label: "工具箱", admin: true },
-      { to: "/skill-hub", icon: "✦", label: "Skill 中心", admin: true },
+      { to: "/listing", icon: "◧", label: "Listing工作台", admin: true, key: "listing" },
+      { to: "/tools", icon: "⊕", label: "分析工具", admin: true, key: "tools" },
+      { to: "/skill-hub", icon: "✦", label: "Skill 中心", admin: true, key: "skill-hub" },
     ],
   },
   {
@@ -35,10 +35,16 @@ const NAV: NavSection[] = [
     items: [
       { to: "/assistant", icon: "⊡", label: "AI 问答" },
       { to: "/imagegen", icon: "▦", label: "AI 生图" },
-      { to: "/agents", icon: "◉", label: "智能体会话", admin: true },
-      { to: "/brain", icon: "▣", label: "GBrain 知识库", admin: true },
-      { to: "/terminal", icon: "▶", label: "服务器终端", admin: true },
-      { to: "/servmon", icon: "⊙", label: "服务器监控", admin: true },
+      { to: "/agents", icon: "◉", label: "智能体会话", admin: true, key: "agents" },
+      { to: "/brain", icon: "▣", label: "GBrain 知识库", admin: true, key: "brain" },
+      { to: "/terminal", icon: "▶", label: "服务器终端", admin: true, key: "terminal" },
+      { to: "/servmon", icon: "⊙", label: "服务器监控", admin: true, key: "servmon" },
+    ],
+  },
+  {
+    title: "小工具",
+    items: [
+      { to: "/freight", icon: "⊞", label: "头程比价" },
     ],
   },
   {
@@ -46,14 +52,14 @@ const NAV: NavSection[] = [
     items: [
       { to: "/users", icon: "⊗", label: "用户管理", admin: true },
       { to: "/hub-settings", icon: "⚙", label: "系统配置", admin: true },
-      { to: "/news", icon: "≡", label: "资讯", admin: true },
+      { to: "/news", icon: "≡", label: "资讯", admin: true, key: "news" },
     ],
   },
 ];
 
 const PATH_LABEL: Record<string, string> = {
   "/": "~/首页",
-  "/tools": "~/工具箱",
+  "/tools": "~/分析工具",
   "/listing": "~/Listing工作台",
   "/freight": "~/头程比价",
   "/market": "~/市场调研",
@@ -79,11 +85,13 @@ const PATH_LABEL: Record<string, string> = {
 export default function MainLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, permissions } = useAuth();
   const isAdmin = role === "admin";
-  // Registered (non-admin) users only see the safe, allowed modules.
+  // Visibility: admin sees all; everyone sees non-admin modules; a non-admin
+  // also sees an admin module if its key is in their granted permissions.
+  const canSee = (it: NavItem) => isAdmin || !it.admin || (!!it.key && permissions.includes(it.key));
   const navSections = NAV
-    .map((sec) => ({ ...sec, items: sec.items.filter((it) => isAdmin || !it.admin) }))
+    .map((sec) => ({ ...sec, items: sec.items.filter(canSee) }))
     .filter((sec) => sec.items.length > 0);
   const [termMounted, setTermMounted] = useState(false);
   const THEMES = [
@@ -238,9 +246,9 @@ export default function MainLayout() {
           </button>
         </div>
         <nav>
-          {navSections.map((sec) => (
+          {navSections.map((sec, si) => (
             <div key={sec.title}>
-              <div className="ns">{sec.title}</div>
+              {si > 0 && <div style={{height:1,background:"var(--b)",margin:"4px 12px"}} />}
               {sec.items.map((it) => (
                 <NavLink
                   key={it.to}

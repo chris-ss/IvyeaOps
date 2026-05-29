@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.core.security import require_admin
+from app.core.security import require_admin, require_module
 from app.core.skill_paths import (
     SKILLS_ROOT,
     ensure_studio_dirs,
@@ -30,6 +30,7 @@ from app.routers import setup as setup_router
 from app.routers import freight as freight_router
 from app.routers import deep_analysis as deep_analysis_router
 from app.routers import skill_tools as skill_tools_router
+from app.routers import autofix as autofix_router
 
 
 # Methods that can mutate state; anything not in this set is exempt from the
@@ -302,26 +303,30 @@ _ADMIN = [Depends(require_admin)]
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 # --- Admin-only (code-exec / filesystem / config / server) ---
-app.include_router(amazon.router, prefix="/api/amazon", tags=["amazon"], dependencies=_ADMIN)
-app.include_router(ad_audit.router, prefix="/api/ad-audit", tags=["ad-audit"], dependencies=_ADMIN)
-app.include_router(monitor.router, prefix="/api/monitor", tags=["monitor"], dependencies=_ADMIN)
-app.include_router(skill.router, prefix="/api/skill", tags=["skill"], dependencies=_ADMIN)
-app.include_router(news.router, prefix="/api/news", tags=["news"], dependencies=_ADMIN)
-app.include_router(brain.router, prefix="/api/brain", tags=["brain"], dependencies=_ADMIN)
-app.include_router(listing_router.router, prefix="/api/listing", tags=["listing"], dependencies=_ADMIN)
-app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"], dependencies=_ADMIN)
-app.include_router(agent_hub.router, prefix="/api", tags=["agent-hub"], dependencies=_ADMIN)
+# Grantable modules: admin OR a user granted the matching module key. The four
+# "分析工具" backends share the "tools" key.
+app.include_router(amazon.router, prefix="/api/amazon", tags=["amazon"], dependencies=[Depends(require_module("tools"))])
+app.include_router(ad_audit.router, prefix="/api/ad-audit", tags=["ad-audit"], dependencies=[Depends(require_module("tools"))])
+app.include_router(monitor.router, prefix="/api/monitor", tags=["monitor"], dependencies=[Depends(require_module("servmon"))])
+app.include_router(skill.router, prefix="/api/skill", tags=["skill"], dependencies=[Depends(require_module("skill-hub"))])
+app.include_router(news.router, prefix="/api/news", tags=["news"], dependencies=[Depends(require_module("news"))])
+app.include_router(brain.router, prefix="/api/brain", tags=["brain"], dependencies=[Depends(require_module("brain"))])
+app.include_router(listing_router.router, prefix="/api/listing", tags=["listing"], dependencies=[Depends(require_module("listing"))])
+app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"], dependencies=[Depends(require_module("terminal"))])
+app.include_router(agent_hub.router, prefix="/api", tags=["agent-hub"], dependencies=[Depends(require_module("agents"))])
+app.include_router(deep_analysis_router.router, prefix="/api/deep-analysis", tags=["deep-analysis"], dependencies=[Depends(require_module("tools"))])
+app.include_router(skill_tools_router.router, prefix="/api/skill-tools", tags=["skill-tools"], dependencies=[Depends(require_module("tools"))])
+# --- Admin-only: config / other users / infra (never grantable) ---
 app.include_router(hub_settings_router.router, prefix="/api", tags=["settings"], dependencies=_ADMIN)
 app.include_router(projects_router.router, prefix="/api", tags=["projects"], dependencies=_ADMIN)
 app.include_router(git_router.router, prefix="/api", tags=["git"], dependencies=_ADMIN)
 app.include_router(setup_router.router, prefix="/api", tags=["setup"], dependencies=_ADMIN)
-# --- Open to registered users (analytical; AI forced HTTP-only) ---
+app.include_router(autofix_router.router, prefix="/api", tags=["autofix"], dependencies=_ADMIN)
+# --- Open to all registered users (analytical; AI forced HTTP-only) ---
 app.include_router(market_router.router, prefix="/api/market", tags=["market"])
 app.include_router(playbook_router.router, prefix="/api/playbook", tags=["playbook"])
 app.include_router(home_router.router, prefix="/api/home", tags=["home"])
 app.include_router(freight_router.router, prefix="/api/freight", tags=["freight"])
-app.include_router(deep_analysis_router.router, prefix="/api/deep-analysis", tags=["deep-analysis"], dependencies=_ADMIN)
-app.include_router(skill_tools_router.router, prefix="/api/skill-tools", tags=["skill-tools"], dependencies=_ADMIN)
 app.include_router(assistant_router.router, prefix="/api/assistant", tags=["assistant"])
 
 

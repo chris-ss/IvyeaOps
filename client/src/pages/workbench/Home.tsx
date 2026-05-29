@@ -8,11 +8,12 @@ import MarketTraffic from "./home/MarketTraffic";
 const STORAGE_MKT = "opshub-pulse-marketplace";
 const STORAGE_TAB = "opshub-home-tab";
 
+const FLAG_URL = (code: string) => `https://flagcdn.com/w20/${code === "UK" ? "gb" : code.toLowerCase()}.png`;
 const MARKETPLACES = [
-  { code: "US", flag: "🇺🇸", name: "美国" }, { code: "UK", flag: "🇬🇧", name: "英国" },
-  { code: "DE", flag: "🇩🇪", name: "德国" }, { code: "JP", flag: "🇯🇵", name: "日本" },
-  { code: "CA", flag: "🇨🇦", name: "加拿大" }, { code: "FR", flag: "🇫🇷", name: "法国" },
-  { code: "AU", flag: "🇦🇺", name: "澳大利亚" }, { code: "IT", flag: "🇮🇹", name: "意大利" },
+  { code: "US", name: "美国" }, { code: "UK", name: "英国" },
+  { code: "DE", name: "德国" }, { code: "JP", name: "日本" },
+  { code: "CA", name: "加拿大" }, { code: "FR", name: "法国" },
+  { code: "AU", name: "澳大利亚" }, { code: "IT", name: "意大利" },
 ];
 
 type HomeTab = "keyword" | "competitor" | "own" | "category" | "market";
@@ -57,7 +58,7 @@ export default function Home() {
         </span>
         <div className="market-mkt-wrap" ref={pickerRef}>
           <button className="market-mkt-btn" onClick={() => setPickerOpen(o => !o)} title="选择站点">
-            <span className="market-mkt-flag">{currentMkt.flag}</span>
+            <span className="market-mkt-flag"><img src={FLAG_URL(currentMkt.code)} alt={currentMkt.code} style={{width:16,height:12,verticalAlign:"middle"}} /></span>
             <span className="market-mkt-code">{currentMkt.code}</span>
             <span className="market-mkt-arrow">{pickerOpen ? "▴" : "▾"}</span>
           </button>
@@ -69,7 +70,7 @@ export default function Home() {
                   className={"market-mkt-option" + (marketplace === m.code ? " active" : "")}
                   onClick={() => { setMarketplace(m.code); setPickerOpen(false); }}
                 >
-                  <span>{m.flag}</span>
+                  <span><img src={FLAG_URL(m.code)} alt={m.code} style={{width:16,height:12,verticalAlign:"middle"}} /></span>
                   <span className="market-mkt-option-code">{m.code}</span>
                   <span className="market-mkt-option-name">{m.name}</span>
                 </button>
@@ -123,7 +124,7 @@ export default function Home() {
                   className={"market-sheet-item" + (marketplace === m.code ? " active" : "")}
                   onClick={() => { setMarketplace(m.code); setPickerOpen(false); }}
                 >
-                  <span className="market-sheet-flag">{m.flag}</span>
+                  <span className="market-sheet-flag"><img src={FLAG_URL(m.code)} alt={m.code} style={{width:16,height:12,verticalAlign:"middle"}} /></span>
                   <span className="market-sheet-code">{m.code}</span>
                   <span className="market-sheet-name">{m.name}</span>
                 </button>

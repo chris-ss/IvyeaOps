@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import MainLayout from "./layouts/MainLayout";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ConfirmProvider } from "./components/ConfirmDialog";
+import AutoFixProvider from "./components/AutoFixProvider";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Home from "./pages/workbench/Home";
@@ -39,7 +40,7 @@ import { getSetupStatus, type SetupChecks } from "./api/setup";
 // ---------------------------------------------------------------------------
 
 export type Role = "admin" | "user";
-const AuthCtx = createContext<{ role: Role; username: string }>({ role: "user", username: "" });
+const AuthCtx = createContext<{ role: Role; username: string; permissions: string[] }>({ role: "user", username: "", permissions: [] });
 export const useAuth = () => useContext(AuthCtx);
 
 // ---------------------------------------------------------------------------
@@ -51,12 +52,12 @@ type AuthState = "loading" | "setup" | "ok" | "no";
 function RequireAuth({ children }: { children: JSX.Element }) {
   const [state, setState] = useState<AuthState>("loading");
   const [setupChecks, setSetupChecks] = useState<SetupChecks | null>(null);
-  const [auth, setAuth] = useState<{ role: Role; username: string }>({ role: "user", username: "" });
+  const [auth, setAuth] = useState<{ role: Role; username: string; permissions: string[] }>({ role: "user", username: "", permissions: [] });
 
   useEffect(() => {
     me()
       .then(async (u) => {
-        setAuth({ role: u.role, username: u.username });
+        setAuth({ role: u.role, username: u.username, permissions: u.permissions || [] });
         // First-run wizard is admin-only; registered users skip it.
         if (u.role !== "admin") {
           setState("ok");
@@ -99,7 +100,11 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   }
   if (state === "no") return <Navigate to="/login" replace />;
   if (state === "setup" && setupChecks) return <Setup checks={setupChecks} />;
-  return <AuthCtx.Provider value={auth}>{children}</AuthCtx.Provider>;
+  return (
+    <AuthCtx.Provider value={auth}>
+      <AutoFixProvider>{children}</AutoFixProvider>
+    </AuthCtx.Provider>
+  );
 }
 
 export default function App() {

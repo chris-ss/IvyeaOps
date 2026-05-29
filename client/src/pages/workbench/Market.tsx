@@ -162,17 +162,18 @@ function DeepAnalysisPanel({
   );
 }
 
-const MARKETPLACES: { code: string; flag: string; name: string }[] = [
-  { code: "US", flag: "🇺🇸", name: "美国" },
-  { code: "UK", flag: "🇬🇧", name: "英国" },
-  { code: "DE", flag: "🇩🇪", name: "德国" },
-  { code: "FR", flag: "🇫🇷", name: "法国" },
-  { code: "CA", flag: "🇨🇦", name: "加拿大" },
-  { code: "JP", flag: "🇯🇵", name: "日本" },
-  { code: "ES", flag: "🇪🇸", name: "西班牙" },
-  { code: "IT", flag: "🇮🇹", name: "意大利" },
-  { code: "MX", flag: "🇲🇽", name: "墨西哥" },
-  { code: "AU", flag: "🇦🇺", name: "澳大利亚" },
+const FLAG_URL = (code: string) => `https://flagcdn.com/w20/${code === "UK" ? "gb" : code.toLowerCase()}.png`;
+const MARKETPLACES: { code: string; name: string }[] = [
+  { code: "US", name: "美国" },
+  { code: "UK", name: "英国" },
+  { code: "DE", name: "德国" },
+  { code: "FR", name: "法国" },
+  { code: "CA", name: "加拿大" },
+  { code: "JP", name: "日本" },
+  { code: "ES", name: "西班牙" },
+  { code: "IT", name: "意大利" },
+  { code: "MX", name: "墨西哥" },
+  { code: "AU", name: "澳大利亚" },
 ];
 
 const EXAMPLE_QUERIES: Record<ResearchMode, string[]> = {
@@ -485,7 +486,7 @@ export default function Market() {
             onClick={() => setPickerOpen((o) => !o)}
             title="选择站点"
           >
-            <span className="market-mkt-flag">{currentMkt.flag}</span>
+            <span className="market-mkt-flag"><img src={FLAG_URL(currentMkt.code)} alt={currentMkt.code} style={{width:16,height:12,verticalAlign:"middle"}} /></span>
             <span className="market-mkt-code">{currentMkt.code}</span>
             <span className="market-mkt-arrow">{pickerOpen ? "▴" : "▾"}</span>
           </button>
@@ -498,7 +499,7 @@ export default function Market() {
                   className={"market-mkt-option" + (marketplace === m.code ? " active" : "")}
                   onClick={() => { setMarketplace(m.code); setPickerOpen(false); }}
                 >
-                  <span>{m.flag}</span>
+                  <span><img src={FLAG_URL(m.code)} alt={m.code} style={{width:16,height:12,verticalAlign:"middle"}} /></span>
                   <span className="market-mkt-option-code">{m.code}</span>
                   <span className="market-mkt-option-name">{m.name}</span>
                 </button>
@@ -530,7 +531,7 @@ export default function Market() {
                   className={"market-sheet-item" + (marketplace === m.code ? " active" : "")}
                   onClick={() => { setMarketplace(m.code); setPickerOpen(false); }}
                 >
-                  <span className="market-sheet-flag">{m.flag}</span>
+                  <span className="market-sheet-flag"><img src={FLAG_URL(m.code)} alt={m.code} style={{width:16,height:12,verticalAlign:"middle"}} /></span>
                   <span className="market-sheet-code">{m.code}</span>
                   <span className="market-sheet-name">{m.name}</span>
                 </button>
@@ -720,7 +721,7 @@ export default function Market() {
                     </button>
                   </div>
                   <div className="market-history-item-meta">
-                    <span>{mkt?.flag} {entry.marketplace}</span>
+                    <span><img src={FLAG_URL(mkt?.code || "US")} alt="" style={{width:16,height:12,verticalAlign:"middle"}} /> {entry.marketplace}</span>
                     {entry.provider && <span>{entry.provider}</span>}
                     {entry.elapsedS > 0 && <span>{entry.elapsedS}s</span>}
                     <span className="market-history-item-time">{relativeTime(entry.ts)}</span>

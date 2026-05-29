@@ -6,6 +6,7 @@ status='pending' until an admin approves them.
 """
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import time
@@ -38,9 +39,17 @@ def init_db() -> None:
                 role          TEXT NOT NULL DEFAULT 'user',
                 status        TEXT NOT NULL DEFAULT 'pending',
                 created_at    INTEGER NOT NULL,
-                approved_at   INTEGER
+                approved_at   INTEGER,
+                position      TEXT NOT NULL DEFAULT '',
+                permissions   TEXT NOT NULL DEFAULT '[]'
             )
         """)
+        # Migration for databases created before module authorization existed.
+        for col, default in (("position", "''"), ("permissions", "'[]'")):
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
 
 def _hash(pw: str) -> str:
@@ -50,6 +59,16 @@ def _hash(pw: str) -> str:
 def _row(r: sqlite3.Row) -> Dict[str, Any]:
     d = dict(r)
     d.pop("password_hash", None)
+    # permissions is stored as a JSON array string; expose it as a list.
+    raw = d.get("permissions")
+    if isinstance(raw, str):
+        try:
+            d["permissions"] = json.loads(raw) if raw else []
+        except (ValueError, TypeError):
+            d["permissions"] = []
+    elif raw is None:
+        d["permissions"] = []
+    d.setdefault("position", "")
     return d
 
 
@@ -130,3 +149,16 @@ def reset_password(uid: int, new_password: str) -> None:
 def delete_user(uid: int) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM users WHERE id=?", (uid,))
+
+
+def set_permissions(uid: int, position: str, permissions: List[str]) -> Dict[str, Any]:
+    """Set a user's position label and granted module list. Only known grantable
+    keys are stored (sanitized by the caller / permissions catalog)."""
+    pos = (position or "").strip()
+    perms_json = json.dumps(list(permissions or []), ensure_ascii=False)
+    with _connect() as conn:
+        cur = conn.execute("UPDATE users SET position=?, permissions=? WHERE id=?", (pos, perms_json, uid))
+        if cur.rowcount == 0:
+            raise ValueError("用户不存在")
+        r = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    return _row(r)

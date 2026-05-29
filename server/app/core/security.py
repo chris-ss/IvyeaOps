@@ -55,7 +55,13 @@ def _resolve_session_principal(session: str) -> Dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid session")
     if u.get("status") != "active":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号未激活或已停用")
-    return {"id": u["id"], "role": u.get("role", "user"), "email": u["email"]}
+    return {
+        "id": u["id"],
+        "role": u.get("role", "user"),
+        "email": u["email"],
+        "permissions": u.get("permissions", []) or [],
+        "position": u.get("position", ""),
+    }
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -162,3 +168,28 @@ def require_admin(
     if cu.get("role") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
     return cu["email"]
+
+
+def require_module(module_key: str):
+    """Dependency factory gating a router/route behind a grantable module.
+
+    Admin passes unconditionally; a registered user passes only if the module
+    key is in their granted permissions. Used at the router level in main.py so
+    granted users reach the module's API while others get 403."""
+
+    def _dep(
+        session: Optional[str] = Cookie(default=None, alias=settings.session_cookie_name),
+    ) -> str:
+        # No cookie → trust an upstream require_user override (test fixtures),
+        # matching require_admin's behavior.
+        if not session:
+            return require_user(session)
+        cu = _resolve_session_principal(session)
+        current_user.set(cu)
+        if cu.get("role") == "admin":
+            return cu["email"]
+        if module_key in (cu.get("permissions") or []):
+            return cu["email"]
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无该板块访问权限")
+
+    return _dep

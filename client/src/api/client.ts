@@ -15,11 +15,29 @@ api.interceptors.response.use(
         window.location.href = "/login";
       }
     }
+    // Auto bug-fix hook: a 5xx means a feature/tool operation failed on the
+    // server. Hand it to the repair sink (a no-op unless the feature is on for
+    // an admin). Lazy import to avoid a load-order cycle with autofix.ts.
+    const status = err.response?.status;
+    if (status && status >= 500) {
+      import("./autofix").then(({ reportApiError }) => {
+        reportApiError({
+          endpoint: err.config?.url || "",
+          method: (err.config?.method || "").toUpperCase(),
+          status,
+          detail:
+            err.response?.data?.detail ||
+            (typeof err.response?.data === "string" ? err.response.data : "") ||
+            err.message ||
+            "",
+        });
+      });
+    }
     return Promise.reject(err);
   },
 );
 
-export type AuthUser = { username: string; role: "admin" | "user" };
+export type AuthUser = { username: string; role: "admin" | "user"; permissions?: string[]; position?: string };
 
 export async function login(username: string, password: string) {
   const { data } = await api.post<AuthUser>("/auth/login", { username, password });
@@ -49,7 +67,12 @@ export type ManagedUser = {
   status: "pending" | "active" | "suspended";
   created_at: number;
   approved_at: number | null;
+  position?: string;
+  permissions?: string[];
 };
+
+export type PermModule = { key: string; label: string; sensitive: boolean };
+export type PermissionsCatalog = { modules: PermModule[]; positions: Record<string, string[]> };
 
 export async function adminListUsers() {
   const { data } = await api.get<ManagedUser[]>("/auth/admin/users");
@@ -69,6 +92,16 @@ export async function adminResetUserPassword(uid: number, newPassword: string) {
 export async function adminDeleteUser(uid: number) {
   const { data } = await api.delete(`/auth/admin/users/${uid}`);
   return data;
+}
+
+export async function adminPermissionsCatalog() {
+  const { data } = await api.get<PermissionsCatalog>("/auth/admin/permissions-catalog");
+  return data;
+}
+
+export async function adminSetUserPermissions(uid: number, position: string, permissions: string[]) {
+  const { data } = await api.post(`/auth/admin/users/${uid}/permissions`, { position, permissions });
+  return data as { ok: boolean; position: string; permissions: string[] };
 }
 
 export async function asinInspect(asin: string) {

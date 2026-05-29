@@ -250,6 +250,14 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
         if (Array.isArray(saved.aplus)) setAplusSlots(saved.aplus);
       } catch {}
     }
+
+    // Restore the most recent advanced-copy result saved on this project,
+    // so generated copy survives a page refresh / project re-selection.
+    if (p.copy_result) {
+      try {
+        setAdvCopyJob({ id: p.copy_job_id || null, status: "done", result: JSON.parse(p.copy_result) });
+      } catch { /* ignore malformed copy_result */ }
+    }
   }
 
   const scrapeData = useMemo(() => {
@@ -421,6 +429,7 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
           product_type: productInfo.product_name || project.asin || "product",
           asins: project.asin ? [project.asin] : [],
           product_notes: notes,
+          project_id: activeId,
         }),
       });
       if (!r.ok) throw new Error((await r.json()).detail || "创建失败");

@@ -42,6 +42,8 @@ class LoginBody(BaseModel):
 class LoginOk(BaseModel):
     username: str
     role: str
+    permissions: List[str] = []
+    position: str = ""
 
 
 @router.post("/login", response_model=LoginOk)
@@ -61,7 +63,12 @@ def login(body: LoginBody, response: Response) -> LoginOk:
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     _set_cookie(response, issue_session(u["id"], u.get("role", "user")))
-    return LoginOk(username=u["email"], role=u.get("role", "user"))
+    return LoginOk(
+        username=u["email"],
+        role=u.get("role", "user"),
+        permissions=u.get("permissions", []) or [],
+        position=u.get("position", ""),
+    )
 
 
 class RegisterBody(BaseModel):
@@ -90,7 +97,12 @@ def logout(response: Response) -> dict:
 
 @router.get("/me", response_model=LoginOk)
 def me(cu: dict = Depends(require_user_info)) -> LoginOk:
-    return LoginOk(username=cu["email"], role=cu.get("role", "user"))
+    return LoginOk(
+        username=cu["email"],
+        role=cu.get("role", "user"),
+        permissions=cu.get("permissions", []) or [],
+        position=cu.get("position", ""),
+    )
 
 
 class ChangePasswordBody(BaseModel):
@@ -153,3 +165,28 @@ def admin_reset_password(uid: int, body: ResetPwBody, _user: str = Depends(requi
 def admin_delete_user(uid: int, _user: str = Depends(require_admin)) -> dict:
     users_service.delete_user(uid)
     return {"ok": True}
+
+
+# ── Admin: module authorization ───────────────────────────────────────────────
+
+@router.get("/admin/permissions-catalog")
+def admin_permissions_catalog(_user: str = Depends(require_admin)) -> dict:
+    """Grantable modules + position presets — the source of truth for the UI."""
+    from app.core import permissions as perm
+    return {"modules": perm.MODULE_CATALOG, "positions": perm.POSITION_PRESETS}
+
+
+class PermissionsBody(BaseModel):
+    position: str = ""
+    permissions: List[str] = []
+
+
+@router.post("/admin/users/{uid}/permissions")
+def admin_set_permissions(uid: int, body: PermissionsBody, _user: str = Depends(require_admin)) -> dict:
+    from app.core import permissions as perm
+    clean = perm.sanitize_permissions(body.permissions)
+    try:
+        u = users_service.set_permissions(uid, body.position, clean)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"ok": True, "position": u.get("position", ""), "permissions": u.get("permissions", [])}

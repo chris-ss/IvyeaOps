@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   adminListUsers, adminSetUserStatus, adminResetUserPassword, adminDeleteUser,
-  type ManagedUser,
+  adminPermissionsCatalog, adminSetUserPermissions,
+  type ManagedUser, type PermissionsCatalog,
 } from "../../api/client";
 import { useAuth } from "../../App";
 
@@ -17,6 +18,13 @@ export default function Users() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [catalog, setCatalog] = useState<PermissionsCatalog | null>(null);
+
+  // Permission editor state
+  const [editing, setEditing] = useState<ManagedUser | null>(null);
+  const [editPos, setEditPos] = useState("");
+  const [editPerms, setEditPerms] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -25,7 +33,11 @@ export default function Users() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { if (role === "admin") load(); else setLoading(false); }, [role]);
+  useEffect(() => {
+    if (role !== "admin") { setLoading(false); return; }
+    load();
+    adminPermissionsCatalog().then(setCatalog).catch(() => {});
+  }, [role]);
 
   if (role !== "admin") {
     return <div className="market-page"><div className="market-error">需要管理员权限</div></div>;
@@ -47,6 +59,33 @@ export default function Users() {
     load();
   };
 
+  const openEdit = (u: ManagedUser) => {
+    setEditing(u);
+    setEditPos(u.position || "");
+    setEditPerms(u.permissions || []);
+  };
+  const applyPreset = (pos: string) => {
+    setEditPos(pos);
+    if (catalog && catalog.positions[pos]) setEditPerms([...catalog.positions[pos]]);
+  };
+  const togglePerm = (key: string) => {
+    setEditPerms((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  };
+  const savePerms = async () => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      await adminSetUserPermissions(editing.id, editPos, editPerms);
+      setEditing(null);
+      load();
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const labelOf = (key: string) => catalog?.modules.find((m) => m.key === key)?.label || key;
   const fmt = (ts: number | null) => ts ? new Date(ts).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 
   return (
@@ -64,15 +103,24 @@ export default function Users() {
       ) : (
         <div className="cat-table-wrap">
           <table className="cat-table">
-            <thead><tr><th>邮箱</th><th>角色</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead>
+            <thead><tr><th>邮箱</th><th>角色</th><th>状态</th><th>职位 / 已授权板块</th><th>注册时间</th><th>操作</th></tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.id}>
                   <td>{u.email}</td>
                   <td>{u.role}</td>
                   <td><span style={{ color: STATUS_COLOR[u.status] }}>{STATUS_LABEL[u.status] || u.status}</span></td>
+                  <td style={{ maxWidth: 280 }}>
+                    {u.position && <span style={{ fontWeight: 600, marginRight: 6 }}>{u.position}</span>}
+                    <span style={{ fontSize: 12, color: "var(--t3)" }}>
+                      {(u.permissions && u.permissions.length)
+                        ? u.permissions.map(labelOf).join("、")
+                        : "（仅基础板块）"}
+                    </span>
+                  </td>
                   <td>{fmt(u.created_at)}</td>
                   <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button className="tbtn tbtn-acc" onClick={() => openEdit(u)}>授权</button>
                     {u.status !== "active" && <button className="tbtn tbtn-acc" onClick={() => setStatus(u, "active")}>启用</button>}
                     {u.status === "active" && <button className="tbtn" onClick={() => setStatus(u, "suspended")}>停用</button>}
                     <button className="tbtn" onClick={() => resetPw(u)}>重置密码</button>
@@ -82,6 +130,45 @@ export default function Users() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {editing && catalog && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "grid", placeItems: "center" }}
+          onClick={() => !saving && setEditing(null)}
+        >
+          <div
+            style={{ background: "var(--bg, #fff)", border: "1px solid var(--b, #ddd)", borderRadius: 8, padding: 24, width: 460, maxWidth: "92vw", maxHeight: "86vh", overflow: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>授权板块</div>
+            <div style={{ fontSize: 12, color: "var(--t3)", marginBottom: 16 }}>{editing.email}</div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, color: "var(--t2)", display: "block", marginBottom: 6 }}>按职位套用预设</label>
+              <select value={editPos} onChange={(e) => applyPreset(e.target.value)} style={{ width: "100%", padding: "7px 10px", borderRadius: 4, border: "1px solid var(--b, #ccc)", background: "transparent", color: "inherit" }}>
+                <option value="">自定义（不套用职位）</option>
+                {Object.keys(catalog.positions).map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+
+            <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 8 }}>可访问板块（基础板块默认全员可用，这里只授权更高权限板块）</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 18 }}>
+              {catalog.modules.map((m) => (
+                <label key={m.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", padding: "6px 8px", border: "1px solid var(--b, #eee)", borderRadius: 4 }}>
+                  <input type="checkbox" checked={editPerms.includes(m.key)} onChange={() => togglePerm(m.key)} />
+                  <span>{m.label}</span>
+                  {m.sensitive && <span title="敏感板块" style={{ fontSize: 10, color: "var(--red, #c0392b)", border: "1px solid currentColor", borderRadius: 3, padding: "0 4px" }}>敏感</span>}
+                </label>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="tbtn" disabled={saving} onClick={() => setEditing(null)}>取消</button>
+              <button className="tbtn tbtn-acc" disabled={saving} onClick={savePerms}>{saving ? "保存中…" : "保存授权"}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

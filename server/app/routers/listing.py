@@ -77,7 +77,7 @@ def _db():
 _db().close()
 
 # Migration: add columns if missing
-for _col in ["image_slots TEXT", "templates TEXT"]:
+for _col in ["image_slots TEXT", "templates TEXT", "copy_result TEXT", "copy_job_id TEXT"]:
     try:
         conn = _db()
         conn.execute(f"ALTER TABLE listing_projects ADD COLUMN {_col}")
@@ -495,7 +495,7 @@ async def _review_single_prompt(
     """Self-check and optimize one generated image prompt — cosmetic fixes only, no invented content."""
     color_rule = (
         f"\n- MUST keep the color scheme '{color_scheme}' if already present; do not remove it."
-        if color_scheme else ""
+        if color_scheme and color_scheme.strip().lower() != "auto" else ""
     )
     review_prompt = f"""You are a prompt EDITOR. Your ONLY job is cosmetic syntax improvements — you must NOT invent or change any facts.
 
@@ -537,7 +537,7 @@ async def _review_batch_prompts(
     slot_map = {s["id"]: s for s in slot_details}
     color_rule = (
         f"\n- MANDATORY: Maintain the '{color_scheme}' color scheme throughout all prompts."
-        if color_scheme else ""
+        if color_scheme and color_scheme.strip().lower() != "auto" else ""
     )
 
     prompts_block = "\n\n".join(
@@ -932,14 +932,17 @@ async def generate_all_prompts(project_id: str, body: dict, _user: str = Depends
         ("aplus_3", "A+模块3"), ("aplus_4", "A+对比"), ("brand_story", "品牌故事"),
     ]
 
-    color_scheme_rule = f"\n- MANDATORY COLOR SCHEME: All images must use '{color_scheme}' as the dominant color palette. Backgrounds, props, lighting gels, and color grading must align with this palette." if color_scheme else ""
+    color_directive = _color_directive(color_scheme, analysis_data)
+    approved = _approved_copy(row)
+    approved_block = (f"\n\n## APPROVED LISTING COPY (use these EXACT words for any on-image text / callouts)\n{approved}"
+                      if approved else "")
 
     prompt = f"""You are an Amazon listing image strategist. Complete ALL steps below in one response.
 
 IMPORTANT: Do NOT use web search. Do NOT look up any information online. Work ONLY with the product information provided below. Respond immediately with the JSON output.
 
 ## PRODUCT INFO
-{product_context}
+{product_context}{approved_block}
 
 ## REFERENCE IMAGES (only source of truth for product appearance)
 {ref_urls_text}
@@ -960,13 +963,13 @@ IMPORTANT: Do NOT use web search. Do NOT look up any information online. Work ON
 - For lifestyle scenes: "shot on Sony A7IV", "editorial photography", "National Geographic style"
 - For main image: "commercial product photography", "phase-one medium format quality", "razor sharp focus"
 - AVOID flat infographic style. Instead of "infographic background with callouts", use "premium 3D render environment with floating glass panels containing text" or "cinematic split-screen composition"
-- Text overlays should be described as: "bold modern sans-serif typography, large point size, high contrast against background"
-{color_scheme_rule}
+{color_directive}
+{_TEXT_RULE}
+{_FIDELITY_RULE}
 
 ## CRITICAL RULES:
 - Main image: pure white background, product 85%, no text, studio lighting that reveals every texture
 - Every prompt MUST start with the product appearance description (same across all 13)
-- Every prompt MUST include this reference URL: {ref_images[0] if ref_images else 'none'}
 - Do NOT invent specs not in product info
 - For images with text: describe text as part of a premium graphic design composition, not cheap stickers
 - Keep product consistent across ALL images
@@ -1044,6 +1047,77 @@ def _slot_details_from_body(body: dict, default_slots: list[str]) -> list[dict]:
     return [{"id": sid, "label": sid, "size": str(sizes.get(sid, "")).strip()} for sid in default_slots]
 
 
+def _color_directive(color_scheme: str, analysis_data: dict) -> str:
+    """Color instruction shared by all prompt builders.
+
+    - explicit scheme  → lock to it across every slot
+    - empty / 'auto'   → reuse a palette already locked on the project, else
+                         tell the model to pick ONE palette and emit exact hex codes
+    Keeping the palette identical across slots (and across single-slot
+    regeneration) is what stops the color drift between generated images.
+    """
+    cs = (color_scheme or "").strip()
+    saved = str((analysis_data or {}).get("palette") or (analysis_data or {}).get("visual_style") or "").strip()
+    if cs and cs.lower() != "auto":
+        return (f"- MANDATORY COLOR PALETTE: Use '{cs}' as the dominant palette for EVERY image — same "
+                f"backgrounds, props, lighting and color grading. Express it as 4-6 explicit HEX codes in "
+                f"visual_style and reuse those exact codes in every prompt.")
+    if saved:
+        return (f"- MANDATORY COLOR PALETTE (locked for consistency): {saved}\n  Reuse these EXACT colors in "
+                f"every prompt. Do not introduce a new dominant color.")
+    return ("- COLOR PALETTE: Choose ONE cohesive palette for the whole set, express it as 4-6 explicit HEX "
+            "codes inside visual_style, and apply that SAME hex palette to EVERY image so the set looks unified.")
+
+
+# Reproduce the real product instead of re-imagining it. The reference photos are
+# sent to the image model as actual image inputs at generation time, so URLs in the
+# text prompt are useless noise and are explicitly forbidden here.
+_FIDELITY_RULE = (
+    "- PRODUCT FIDELITY: The real product photos are supplied to the image model directly as image inputs. "
+    "Reproduce the product EXACTLY as shown there — identical shape, proportions, colors, materials, logos and "
+    "any text printed on the product. Do NOT redesign, recolor, relabel or restyle the product itself; only "
+    "change the background, scene, props and lighting. Never put a URL inside the prompt."
+)
+
+# Make on-image text real and legible: pull verbatim callouts from the copy and tell
+# the generator to render that exact string (gpt-image renders supplied text fairly
+# reliably, but only when the exact words are given).
+_TEXT_RULE = (
+    "- ON-IMAGE TEXT: For feature / detail / specs / A+ slots, choose 2-5 word callouts taken VERBATIM from the "
+    "APPROVED LISTING COPY section if present (otherwise from the selling points / bullets above), and embed them "
+    "in the prompt as: render the exact text \"<words>\" in bold modern sans-serif, large, high-contrast, correctly "
+    "spelled. Use the product's real attributes — do not invent claims. The white-background main image must have NO text."
+)
+
+
+def _persist_visual_anchor(project_id: str, row, result: dict) -> None:
+    """Save product_lock / visual_style / palette onto the project's analysis_data
+    so later single-slot regenerations reuse the same product description and colors."""
+    if not isinstance(result, dict):
+        return
+    lock = str(result.get("product_lock") or "").strip()
+    style = str(result.get("visual_style") or "").strip()
+    if not lock and not style:
+        return
+    try:
+        conn = _db()
+        cur = conn.execute("SELECT analysis_data FROM listing_projects WHERE id = ?", (project_id,)).fetchone()
+        existing = json.loads(cur["analysis_data"]) if cur and cur["analysis_data"] else {}
+        if lock:
+            existing["product_lock"] = lock
+        if style:
+            existing["visual_style"] = style
+            existing["palette"] = style
+        conn.execute(
+            "UPDATE listing_projects SET analysis_data = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(existing, ensure_ascii=False), time.time(), project_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 async def _generate_prompts_for_slots(project_id: str, slots: list[str], body: dict):
     """Shared logic for generating prompts for a subset of slots."""
     conn = _db()
@@ -1067,7 +1141,13 @@ async def _generate_prompts_for_slots(project_id: str, slots: list[str], body: d
     )
 
     color_scheme = body.get("color_scheme", "")
-    color_scheme_rule = f"\n- MANDATORY COLOR SCHEME: All images must use '{color_scheme}' as the dominant color palette. Backgrounds, props, lighting gels, and color grading must align with this palette." if color_scheme else ""
+    color_directive = _color_directive(color_scheme, analysis_data)
+    locked_product = str(analysis_data.get("product_lock") or "").strip()
+    locked_hint = (f"\n## EXISTING PRODUCT LOCK (reuse this exact description, do not contradict it)\n{locked_product}"
+                   if locked_product else "")
+    approved = _approved_copy(row)
+    approved_block = (f"\n\n## APPROVED LISTING COPY (use these EXACT words for any on-image text / callouts)\n{approved}"
+                      if approved else "")
 
     slots_json = ", ".join(f'"{s}":"prompt..."' for s in slot_ids)
 
@@ -1077,8 +1157,9 @@ IMPORTANT: Do NOT use web search. Work ONLY with the product information provide
 
 ## PRODUCT INFO
 {product_context}
+{locked_hint}{approved_block}
 
-## REFERENCE IMAGES
+## REFERENCE IMAGES (the real product — supplied to the image model as image inputs)
 {ref_urls_text}
 
 ## TARGET SLOTS, LABELS, AND CANVAS SIZES
@@ -1092,13 +1173,13 @@ IMPORTANT: Do NOT use web search. Work ONLY with the product information provide
 - For lifestyle scenes: "shot on Sony A7IV", "editorial photography"
 - For main image: "commercial product photography", "phase-one medium format quality", "razor sharp focus"
 - AVOID flat infographic style
-- Text overlays: "bold modern sans-serif typography, large point size, high contrast"
-{color_scheme_rule}
+{color_directive}
+{_TEXT_RULE}
+{_FIDELITY_RULE}
 
 ## CRITICAL RULES:
 - Main image (if included): pure white background, product 85%, no text
-- Every prompt MUST start with product appearance description
-- Every prompt MUST include reference URL: {ref_images[0] if ref_images else 'none'}
+- Every prompt MUST start with the product appearance description (identical wording across all slots)
 - Each prompt MUST be composed for its target_canvas size. Mention the exact canvas size and layout orientation inside the prompt.
 - For Amazon main images, use a high-resolution square canvas suitable for 1400x1400+ delivery when requested.
 - For Premium A+ modules, respect desktop 1464x600 and mobile 600x450 layouts when requested.
@@ -1106,7 +1187,7 @@ IMPORTANT: Do NOT use web search. Work ONLY with the product information provide
 - Each scene should feel like a $10,000 commercial photoshoot
 
 ## OUTPUT FORMAT (valid JSON, no other text):
-{{"product_lock":"strict appearance description","visual_style":"style + color palette","prompts":{{{slots_json}}}}}"""
+{{"product_lock":"strict appearance description","visual_style":"style + the 4-6 HEX color palette used everywhere","prompts":{{{slots_json}}}}}"""
 
     try:
         content = await _call_ai(prompt, max_tokens=8000, web_search=False)
@@ -1116,6 +1197,10 @@ IMPORTANT: Do NOT use web search. Work ONLY with the product information provide
 
     if not result or not result.get("prompts"):
         raise HTTPException(502, f"提示词生成失败，AI没有返回可用JSON: {content[:500]}")
+
+    # Persist the product lock + palette so single-slot regeneration and later
+    # batches reuse the SAME product description and colors (consistency anchor).
+    _persist_visual_anchor(project_id, row, result)
 
     prompts = result.get("prompts", {})
     if isinstance(prompts, dict):
@@ -1436,6 +1521,9 @@ async def generate_image_prompt(project_id: str, body: dict, _user: str = Depend
     visual_style = analysis_data.get("visual_style", "")
     image_tasks = analysis_data.get("image_tasks", {})
     slot_task = image_tasks.get(slot, "")
+    approved = _approved_copy(row)
+    approved_block = (f"\n\n## APPROVED LISTING COPY (use these EXACT words for any on-image text / callouts)\n{approved}"
+                      if approved else "")
 
     # Reference images
     ref_images = scrape_data.get("reference_images", []) or scrape_data.get("imageUrls", [])
@@ -1484,36 +1572,38 @@ async def generate_image_prompt(project_id: str, body: dict, _user: str = Depend
 {slot_task if slot_task else "Attract buyer attention and communicate product value."}
 
 ## PRODUCT LOCK (you MUST start your prompt with this — do not change the product appearance)
-{product_lock if product_lock else "Describe the product exactly as shown in reference images. Do not alter its design."}
+{product_lock if product_lock else "Describe the product exactly as shown in the reference photos. Do not alter its design."}
 
-## VISUAL STYLE
+## VISUAL STYLE (reuse exactly — this keeps every image in the set consistent)
 {visual_style if visual_style else "Professional Amazon product photography style appropriate for this category."}
-{"" if not color_scheme else f"MANDATORY COLOR SCHEME: Use '{color_scheme}' as the dominant color palette for backgrounds, props, lighting, and color grading."}
+{_color_directive(color_scheme, analysis_data)}
 
 ## PRODUCT INFORMATION
-{product_context}
+{product_context}{approved_block}
 
-## REFERENCE IMAGES (include these URLs in your prompt so the image generator can see the real product)
+## REFERENCE IMAGES (the real product — sent to the image model as image inputs, NOT as text)
 {ref_urls_text if ref_urls_text else "No reference images available."}
 
+{_FIDELITY_RULE}
+{_TEXT_RULE}
+
 ## PROMPT STRUCTURE (follow this exactly):
-1. Product appearance lock — exact physical description from product lock above
-2. Reference image instruction — "Reference: [URL]" (use actual URL from above)
-3. Image goal — what this image must communicate (from sales task)
-4. Scene/background — specific environment or background
-5. Composition — product position, size in frame, camera angle
-6. Canvas/layout — compose for target canvas {slot_size or "not specified"} and mention that exact size in the prompt
-7. Text/callouts — specific text to show on image (English, short, impactful) OR "no text" for main image
-8. Style/lighting — colors, lighting setup, mood
-9. Negative constraints — what NOT to include
+1. Product appearance lock — exact physical description from product lock above (first sentence)
+2. Image goal — what this image must communicate (from sales task)
+3. Scene/background — specific environment or background
+4. Composition — product position, size in frame, camera angle
+5. Canvas/layout — compose for target canvas {slot_size or "not specified"} and mention that exact size in the prompt
+6. On-image text — the EXACT words to render (taken verbatim from the selling points), OR "no text" for the white main image
+7. Style/lighting — the locked color palette, lighting setup, mood
+8. Negative constraints — what NOT to include
 
 ## RULES
 - Output ONLY the prompt text, no explanations, no prefixes
 - 100-200 words
 - First sentence MUST be the product lock (exact appearance description)
-- MUST include at least one reference image URL
+- Never put a URL in the prompt — the reference photos are already given to the model
 - MUST respect the current slot label and target canvas
-- For infographic images: include specific text callouts that communicate the selling point
+- For feature/infographic images: include the EXACT short text to render (verbatim from selling points)
 - Do NOT invent specs not mentioned in product info
 - Do NOT use generic language like "high quality" or "professional" alone"""
 
@@ -1580,8 +1670,10 @@ async def generate_single_image(project_id: str, body: ImageGenReq, _user: str =
                     b64_refs.append(f"data:{mime};base64,{_b64.b64encode(raw).decode()}")
                 except Exception:
                     pass
-        # Uploaded images first (user's own product photos), then scraped
-        ref_urls = (b64_refs + list(scraped_urls))[:4]
+        # Uploaded images first (user's own product photos), then scraped.
+        # Cap at 2: passing many conflicting angles to gpt-image makes it blend
+        # them into a deformed hybrid. Fewer, cleaner references = higher fidelity.
+        ref_urls = (b64_refs + list(scraped_urls))[:2]
 
     if not _apimart_key():
         raise HTTPException(
@@ -1589,27 +1681,49 @@ async def generate_single_image(project_id: str, body: ImageGenReq, _user: str =
             "Apimart 密钥未配置 — 请在「系统配置 → AI 服务」填入有 gpt-image-2 权限的密钥。",
         )
 
+    # Deterministic product-fidelity preamble: the per-slot prompt is LLM-written and
+    # may drift, so we always prepend a hard "reproduce the real product exactly"
+    # instruction whenever reference photos are attached. This is the main lever for
+    # keeping the generated product consistent with the user's real product.
+    full_prompt = body.prompt
+    if ref_urls:
+        full_prompt = (
+            "CRITICAL — PRODUCT FIDELITY: The attached reference image(s) show the EXACT real product. "
+            "Reproduce that product identically — same shape, proportions, colors, materials, logos, buttons, "
+            "labels and any printed text. Do NOT redesign, recolor, relabel, restyle, or add/remove parts. "
+            "Only build the background, scene and lighting around the unchanged product.\n\n"
+        ) + body.prompt
+
+    base_body = {"model": "gpt-image-2", "prompt": full_prompt, "n": 1, "size": body.size}
+    if ref_urls:
+        base_body["image_urls"] = ref_urls[:2]
+
+    # gpt-image's `input_fidelity:"high"` preserves details of the input image (the
+    # real product). Apimart may or may not pass it through, so try high-fidelity
+    # first and gracefully fall back to a plain request if it is rejected.
+    attempts = [{**base_body, "input_fidelity": "high"}, base_body] if ref_urls else [base_body]
+
     try:
         async with httpx.AsyncClient(timeout=180) as client:
-            req_body = {
-                "model": "gpt-image-2",
-                "prompt": body.prompt,
-                "n": 1,
-                "size": body.size,
-            }
-            if ref_urls:
-                req_body["image_urls"] = ref_urls[:4]
-
             import logging
-            logging.info(f"[generate-image] slot={body.slot} ref_urls={len(ref_urls)} image_urls={req_body.get('image_urls', 'NONE')}")
+            logging.info(f"[generate-image] slot={body.slot} ref_urls={len(ref_urls)} fidelity={'high' if ref_urls else 'n/a'}")
 
-            resp = await client.post(
-                f"{_apimart_base()}/images/generations",
-                headers={"Authorization": f"Bearer {_apimart_key()}", "Content-Type": "application/json"},
-                json=req_body,
-            )
-            if resp.status_code != 200:
-                raise HTTPException(502, f"图片生成提交失败: {resp.text[:300]}")
+            resp = None
+            for idx, attempt in enumerate(attempts):
+                resp = await client.post(
+                    f"{_apimart_base()}/images/generations",
+                    headers={"Authorization": f"Bearer {_apimart_key()}", "Content-Type": "application/json"},
+                    json=attempt,
+                )
+                if resp.status_code == 200:
+                    if idx > 0:
+                        logging.info(f"[generate-image] input_fidelity=high rejected, fell back to plain (slot={body.slot})")
+                    elif "input_fidelity" in attempt:
+                        logging.info(f"[generate-image] input_fidelity=high accepted (slot={body.slot})")
+                    break  # accepted (with or without high fidelity)
+                logging.info(f"[generate-image] attempt {idx} -> HTTP {resp.status_code}: {resp.text[:160]}")
+            if resp is None or resp.status_code != 200:
+                raise HTTPException(502, f"图片生成提交失败: {resp.text[:300] if resp is not None else 'no response'}")
 
             submit_data = resp.json()
             task_id = submit_data.get("data", [{}])[0].get("task_id")
@@ -1617,19 +1731,23 @@ async def generate_single_image(project_id: str, body: ImageGenReq, _user: str =
                 raise HTTPException(502, f"未返回task_id: {resp.text[:300]}")
 
             url = await _poll_task(client, task_id)
-            if url:
-                return {"slot": body.slot, "url": url}
-            raise HTTPException(504, "图片生成超时(120s)")
+            return {"slot": body.slot, "url": url}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(502, f"图片生成失败: {str(e)}")
 
 
-async def _poll_task(client: httpx.AsyncClient, task_id: str) -> Optional[str]:
-    """Poll APIMart task until completion."""
-    for _ in range(24):
-        await asyncio.sleep(5)
+async def _poll_task(client: httpx.AsyncClient, task_id: str, max_polls: int = 54, interval: float = 5.0) -> str:
+    """Poll APIMart task until completion.
+
+    Budget = max_polls * interval = 270s, kept under the nginx proxy_read_timeout
+    (300s) so our own 504 (with the task's last status) returns instead of nginx's
+    generic gateway timeout. gpt-image-2 with reference images often needs >120s.
+    """
+    last_status = "unknown"
+    for _ in range(max_polls):
+        await asyncio.sleep(interval)
         poll = await client.get(
             f"{_apimart_base()}/tasks/{task_id}",
             headers={"Authorization": f"Bearer {_apimart_key()}"},
@@ -1637,8 +1755,8 @@ async def _poll_task(client: httpx.AsyncClient, task_id: str) -> Optional[str]:
         if poll.status_code != 200:
             continue
         task_data = poll.json().get("data", {})
-        status = task_data.get("status")
-        if status == "completed":
+        last_status = task_data.get("status") or last_status
+        if last_status == "completed":
             images = task_data.get("result", {}).get("images", [])
             if images and images[0].get("url"):
                 url = images[0]["url"]
@@ -1646,9 +1764,13 @@ async def _poll_task(client: httpx.AsyncClient, task_id: str) -> Optional[str]:
                     url = url[0]
                 return url
             raise HTTPException(502, "任务完成但未返回图片URL")
-        elif status == "failed":
+        elif last_status == "failed":
             raise HTTPException(502, f"图片生成失败: {task_data}")
-    return None
+    raise HTTPException(
+        504,
+        f"图片生成超时({int(max_polls * interval)}s)，任务最后状态: {last_status}。"
+        f"多为模型仍在处理（尤其带参考图/大尺寸），可重试或稍后再生成。",
+    )
 
 
 # ─── PSD Download ─────────────────────────────────────────────────────────────
@@ -1878,6 +2000,43 @@ def _build_product_context(row, scrape_data: dict, analysis_data: dict) -> str:
             if imgf.get("sorftimeData"):
                 parts.append(f"Sorftime Trends: {str(imgf['sorftimeData'])[:200]}")
 
+    return "\n".join(parts)
+
+
+def _approved_copy(row) -> str:
+    """The user's confirmed listing copy, used as the verbatim source for on-image
+    text/callouts so the images match the real listing. Prefers the advanced
+    copy-job result, falls back to the simple per-field copy. Returns '' if none."""
+    cols = set(row.keys()) if hasattr(row, "keys") else set()
+    lines: list[str] = []
+
+    cr = None
+    if "copy_result" in cols and row["copy_result"]:
+        try:
+            cr = json.loads(row["copy_result"])
+        except Exception:
+            cr = None
+
+    if isinstance(cr, dict):
+        titles = cr.get("titles") or ([] if not cr.get("title") else [cr["title"]])
+        if titles:
+            lines.append(f"Title: {str(titles[0]).strip()}")
+        bullets = (cr.get("bullets_a") or []) + (cr.get("bullets_b") or [])
+        for b in bullets[:6]:
+            if str(b).strip():
+                lines.append(f"- {str(b).strip()}")
+    else:
+        if "title" in cols and row["title"]:
+            first = str(row["title"]).splitlines()[0].strip()
+            if first:
+                lines.append(f"Title: {first}")
+        if "bullets" in cols and row["bullets"]:
+            for b in str(row["bullets"]).splitlines()[:6]:
+                if b.strip():
+                    lines.append(f"- {b.strip()}")
+
+    return "\n".join(lines).strip()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # NEW-PRODUCT LISTING COPY GENERATOR
@@ -1942,6 +2101,7 @@ def _copy_job_db():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("""CREATE TABLE IF NOT EXISTS copy_jobs (
         id TEXT PRIMARY KEY,
+        project_id TEXT,
         status TEXT DEFAULT 'pending',
         stage INTEGER DEFAULT 0,
         stage_msg TEXT DEFAULT '',
@@ -1963,12 +2123,22 @@ def _copy_job_db():
 
 _copy_job_db().close()
 
+# Migration: link copy jobs to a listing project so the result can be restored
+try:
+    _cjc = _copy_job_db()
+    _cjc.execute("ALTER TABLE copy_jobs ADD COLUMN project_id TEXT")
+    _cjc.commit()
+    _cjc.close()
+except Exception:
+    pass
+
 
 class CopyJobReq(BaseModel):
     marketplace: str = "US"
     product_type: str
     asins: list[str] = []
     product_notes: str = ""
+    project_id: Optional[str] = None
 
 
 async def _analyze_images_vision(image_paths: list[str], product_type: str) -> dict:
@@ -2218,13 +2388,28 @@ async def _run_copy_job(job_id: str) -> None:
         if not parsed_result:
             parsed_result = {"raw": result_text}
 
+        result_json = json.dumps(parsed_result, ensure_ascii=False)
         conn = _copy_job_db()
         conn.execute(
             "UPDATE copy_jobs SET status='done', stage=3, stage_msg='文案生成完成', result=?, updated_at=? WHERE id=?",
-            (json.dumps(parsed_result, ensure_ascii=False), time.time(), job_id),
+            (result_json, time.time(), job_id),
         )
         conn.commit()
         conn.close()
+
+        # Persist the result onto the linked project so it survives page refresh.
+        project_id = row.get("project_id")
+        if project_id:
+            try:
+                pconn = _db()
+                pconn.execute(
+                    "UPDATE listing_projects SET copy_result=?, copy_job_id=?, updated_at=? WHERE id=?",
+                    (result_json, job_id, time.time(), project_id),
+                )
+                pconn.commit()
+                pconn.close()
+            except Exception:
+                pass
 
     except Exception as exc:
         conn = _copy_job_db()
@@ -2256,9 +2441,9 @@ async def create_copy_job(body: CopyJobReq, _user: str = Depends(require_user)):
     asins = [a.strip().upper() for a in body.asins if a.strip()][:10]
     conn = _copy_job_db()
     conn.execute(
-        "INSERT INTO copy_jobs (id, status, stage, stage_msg, marketplace, product_type, "
-        "asins, product_notes, image_paths, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (job_id, "pending", 0, "等待开始", body.marketplace,
+        "INSERT INTO copy_jobs (id, project_id, status, stage, stage_msg, marketplace, product_type, "
+        "asins, product_notes, image_paths, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (job_id, body.project_id, "pending", 0, "等待开始", body.marketplace,
          body.product_type.strip(), json.dumps(asins),
          body.product_notes.strip(), "[]", now, now),
     )
