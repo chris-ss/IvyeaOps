@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { listTools, runTool, pinTool, type SkillToolMeta, type SkillInput, type SseEvent } from "../../api/skillTools";
+import { deleteSkill } from "../../api/skill";
+import { useConfirm } from "../../components/ConfirmDialog";
 
 export default function SkillTools() {
   const [tools, setTools] = useState<SkillToolMeta[]>([]);
@@ -10,6 +12,28 @@ export default function SkillTools() {
   const [loading, setLoading] = useState(true);
   const [activeTool, setActiveTool] = useState<SkillToolMeta | null>(null);
   const routerLoc = useLocation();
+  const confirm = useConfirm();
+
+  const handleDelete = useCallback(async (tool: SkillToolMeta, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const ok = await confirm({
+      title: "删除工具",
+      message: `确定删除「${tool.description_zh || tool.name.split("/").pop()}」？\n该 Skill 会移入回收站，7 天内可在 Skill 管理中恢复。`,
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      // Unpin first so it leaves the sidebar, then trash the skill.
+      if (tool.pinned) {
+        try { await pinTool(tool.name, false); } catch { /* ignore */ }
+      }
+      await deleteSkill(tool.name);
+      window.dispatchEvent(new CustomEvent("opshub:pinned-changed"));
+      if (activeTool?.name === tool.name) setActiveTool(null);
+      await loadTools();
+    } catch { /* surfaced by reload */ }
+  }, [confirm, activeTool]);
 
   const loadTools = useCallback(async () => {
     setLoading(true);
@@ -44,9 +68,15 @@ export default function SkillTools() {
   if (activeTool) {
     return (
       <div>
-        <button className="tbtn" onClick={() => setActiveTool(null)} style={{ marginBottom: 12, fontSize: 11 }}>
-          ← 返回运营商店
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <button className="tbtn" onClick={() => setActiveTool(null)} style={{ fontSize: 11 }}>
+            ← 返回运营商店
+          </button>
+          <button className="tbtn" onClick={() => handleDelete(activeTool)}
+            style={{ fontSize: 11, marginLeft: "auto", color: "var(--red)", borderColor: "rgba(248,113,113,.35)" }}>
+            🗑 删除工具
+          </button>
+        </div>
         <ToolPanel tool={activeTool} />
       </div>
     );
@@ -124,6 +154,11 @@ export default function SkillTools() {
                         {t.inputs.length} 参数
                       </span>
                     )}
+                    <button
+                      onClick={(e) => handleDelete(t, e)}
+                      title="删除工具（移入回收站）"
+                      style={{ marginLeft: t.inputs.length > 0 ? 4 : "auto", background: "transparent", border: "none", color: "var(--t3)", cursor: "pointer", fontSize: 12, padding: "0 2px", lineHeight: 1 }}
+                    >✕</button>
                   </div>
                   <div style={{ fontSize: 10, color: "var(--t3)", lineHeight: 1.5 }}>
                     {t.description_zh || t.description || "无描述"}
