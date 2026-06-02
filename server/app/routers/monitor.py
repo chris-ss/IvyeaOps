@@ -207,6 +207,7 @@ _SERVICE_CATALOG: dict[str, tuple[str, str, str]] = {
     "hermes-dashboard": ("Hermes 监控/仪表盘 Web 服务", "on-demand", "Hermes 仪表盘不可访问"),
     "cloudcli-ui": ("Claude Code UI / CloudCLI Web 界面", "on-demand", "Web AI 编码界面不可用"),
     "ttyd": ("Web 服务器终端服务，嵌入 /terminal 页面", "on-demand", "网页终端不可用，SSH 不受影响"),
+    "agy": ("Antigravity AI 终端", "on-demand", "Antigravity CLI 功能停止"),
 }
 
 
@@ -279,6 +280,7 @@ _PROC_CATALOG: dict[str, tuple[str, str, str]] = {
     "ops-hub": ("运维控制台后端", "critical", "当前管理面板不可用"),
     # ── 按需运行 ──
     "hermes": ("Hermes AI助手主进程", "on-demand", "AI对话/飞书机器人停止，不影响网站"),
+    "agy": ("Antigravity AI终端", "on-demand", "Antigravity CLI 操作停止"),
     "python": ("Hermes/ops-hub Python进程", "on-demand", "对应服务停止"),
     "tsserver": ("TypeScript语言服务器", "on-demand", "代码补全/检查停止，省~150MB/个"),
     "pyright": ("Python语言服务器", "on-demand", "Python代码检查停止，省~60MB"),
@@ -342,6 +344,7 @@ _CMDLINE_IDENTIFY: list[tuple[str, str, str, str, str]] = [
     # Substring match against `ps` cmdline; "/bin/hermes" catches both
     # /usr/local/bin/hermes and ~/.local/bin/hermes without needing config.
     ("/bin/hermes", "Hermes主进程", "Hermes AI助手核心", "on-demand", "所有Hermes功能停止"),
+    ("/bin/agy", "Antigravity", "Antigravity AI助手", "on-demand", "Antigravity功能停止"),
     ("feishu-codex-relay/relay.js", "飞书中继(node)", "飞书消息转发服务", "on-demand", "飞书AI对话停止"),
     ("dist-server/server/index.js", "Claude Code UI", "Web版Claude Code界面", "on-demand", "Web AI界面不可用"),
     ("amazon-image-workflow/backend", "imgflow后端", "Amazon图片工作流API", "on-demand", "图片处理不可用"),

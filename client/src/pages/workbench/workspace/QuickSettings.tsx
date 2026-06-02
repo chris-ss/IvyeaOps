@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getSession, updateSession, type AgentSession } from "../../../api/agents";
+import { getSession, updateSession, setSessionTools, setSessionPermissionMode, CLAUDE_TOOLS, PERMISSION_MODES, type AgentSession } from "../../../api/agents";
 import { refreshProjects, type Project, type ProjectSession } from "../../../api/projects";
 
 type Props = {
@@ -11,6 +11,7 @@ type Props = {
   project: Project | null;
   session: ProjectSession | null;
   onAfterRefresh: () => void;
+  onOpenMCP: () => void;
 };
 
 /**
@@ -23,7 +24,7 @@ type Props = {
  *   – Link to full /hub-settings (deep link to the relevant section)
  */
 export default function QuickSettings({
-  open, onClose, anchorRect, project, session, onAfterRefresh,
+  open, onClose, anchorRect, project, session, onAfterRefresh, onOpenMCP,
 }: Props) {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
@@ -92,6 +93,38 @@ export default function QuickSettings({
     setRefreshing(false);
   };
 
+  // Per-session tool toggles. A tool in `disallowed_tools` is OFF (denied).
+  const disallowed: string[] = (hubSession?.meta?.disallowed_tools as string[]) || [];
+  const toggleTool = async (tool: string) => {
+    if (!hubSession) return;
+    const next = disallowed.includes(tool)
+      ? disallowed.filter((t) => t !== tool)
+      : [...disallowed, tool];
+    // Optimistic local update so the checkbox flips immediately.
+    setHubSession({ ...hubSession, meta: { ...hubSession.meta, disallowed_tools: next } });
+    try {
+      const saved = await setSessionTools(hubSession.id, next);
+      setHubSession((s) => (s ? { ...s, meta: { ...s.meta, disallowed_tools: saved } } : s));
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || "保存工具设置失败");
+      setHubSession((s) => (s ? { ...s, meta: { ...s.meta, disallowed_tools: disallowed } } : s));
+    }
+  };
+
+  const permissionMode: string = (hubSession?.meta?.permission_mode as string) || "acceptEdits";
+  const changePermissionMode = async (mode: string) => {
+    if (!hubSession) return;
+    const prev = permissionMode;
+    setHubSession({ ...hubSession, meta: { ...hubSession.meta, permission_mode: mode } });
+    try {
+      const saved = await setSessionPermissionMode(hubSession.id, mode);
+      setHubSession((s) => (s ? { ...s, meta: { ...s.meta, permission_mode: saved } } : s));
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || "保存权限模式失败");
+      setHubSession((s) => (s ? { ...s, meta: { ...s.meta, permission_mode: prev } } : s));
+    }
+  };
+
   return (
     <div className="qs-popover" style={style} ref={ref}>
       <div className="qs-head">
@@ -125,7 +158,45 @@ export default function QuickSettings({
           )}
           {err && <div className="qs-err">⚠ {err}</div>}
         </section>
-      ) : session ? (
+      ) : null}
+
+      {/* Per-session permission mode (hub sessions only) */}
+      {session?.source === "hub" && hubSession ? (
+        <section className="qs-section">
+          <div className="qs-section-title">权限模式</div>
+          <select
+            className="qs-input"
+            style={{ width: "100%", marginTop: 6 }}
+            value={permissionMode}
+            onChange={(e) => void changePermissionMode(e.target.value)}
+          >
+            {PERMISSION_MODES.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+        </section>
+      ) : null}
+
+      {/* Per-session tool toggles (hub sessions only) */}
+      {session?.source === "hub" && hubSession ? (
+        <section className="qs-section">
+          <div className="qs-section-title">工具权限</div>
+          <div className="qs-faint">取消勾选即在本会话禁用该工具（默认全部启用）。</div>
+          <div className="qs-tools">
+            {CLAUDE_TOOLS.map((tool) => {
+              const enabled = !disallowed.includes(tool);
+              return (
+                <label key={tool} className="qs-tool">
+                  <input type="checkbox" checked={enabled} onChange={() => toggleTool(tool)} />
+                  <span>{tool}</span>
+                </label>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {session && session.source !== "hub" ? (
         <section className="qs-section">
           <div className="qs-section-title">当前会话</div>
           <div className="qs-faint">
@@ -143,6 +214,15 @@ export default function QuickSettings({
         </div>
         <button className="tbtn" onClick={refresh} disabled={refreshing} style={{ marginTop: 8 }}>
           {refreshing ? "刷新中…" : "↻ 重扫项目"}
+        </button>
+      </section>
+
+      {/* MCP servers */}
+      <section className="qs-section">
+        <div className="qs-section-title">MCP 服务器</div>
+        <div className="qs-faint">管理 Claude Code 的 MCP 服务器（stdio / http），保存到用户级配置。</div>
+        <button className="tbtn" onClick={() => { onClose(); onOpenMCP(); }} style={{ marginTop: 8 }}>
+          ⊞ 管理 MCP 服务器
         </button>
       </section>
 

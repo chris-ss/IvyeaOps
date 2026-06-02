@@ -76,3 +76,23 @@ export async function getGitLog(projectId: string, limit: number = 20): Promise<
   });
   return data.commits;
 }
+
+export interface GitBranches {
+  branches: string[];
+  current: string;
+}
+
+export async function getGitBranches(projectId: string, signal?: AbortSignal): Promise<GitBranches> {
+  const { data } = await api.get<GitBranches>("/git/branches", { params: { project_id: projectId }, signal });
+  return data;
+}
+
+export async function checkoutBranch(projectId: string, name: string): Promise<{ ok: boolean; current: string }> {
+  const { data } = await api.post("/git/checkout", { project_id: projectId, name });
+  return data;
+}
+
+export async function createBranch(projectId: string, name: string): Promise<{ ok: boolean; current: string }> {
+  const { data } = await api.post("/git/create-branch", { project_id: projectId, name });
+  return data;
+}

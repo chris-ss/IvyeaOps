@@ -73,11 +73,9 @@ export default function ChatPane({ session, showCli = false, showInherited = fal
   const submit = async () => {
     const content = input.trim();
     if (!content || streaming) return;
-    // Append attachment paths to the message
-    let fullContent = content;
-    if (attachments.length > 0) {
-      fullContent += "\n\n[附件]\n" + attachments.map(a => `- ${a}`).join("\n");
-    }
+    // Attachments are sent structurally (images become real multimodal blocks
+    // for claude; other agents get the paths appended server-side).
+    const sentAttachments = attachments;
     setInput("");
     setAttachments([]);
     setStreaming(true);
@@ -94,13 +92,18 @@ export default function ChatPane({ session, showCli = false, showInherited = fal
 
     let acc = "";
     try {
-      for await (const ev of sendChat(session.id, fullContent)) {
+      for await (const ev of sendChat(session.id, content, { attachments: sentAttachments })) {
         if (ev.type === "user_message") {
           setMessages((prev) => [...prev, ev.payload]);
         } else if (ev.type === "token") {
           acc += ev.payload.text;
           setPartial(acc);
         } else if (ev.type === "assistant_message") {
+          setPartial("");
+          setMessages((prev) => [...prev, ev.payload]);
+        } else if (ev.type === "tool_call" || ev.type === "tool_result") {
+          // Structured agentic events (claude stream-json): drop them in-line
+          // so the tool call + its result render between text turns.
           setPartial("");
           setMessages((prev) => [...prev, ev.payload]);
         } else if (ev.type === "warning") {
@@ -249,10 +252,143 @@ export default function ChatPane({ session, showCli = false, showInherited = fal
   );
 }
 
+const TOOL_GLYPHS: Record<string, string> = {
+  Edit: "✏️", MultiEdit: "✏️", Write: "📝", Read: "📖", Bash: "⌘",
+  Glob: "🔍", Grep: "🔍", TodoWrite: "☑", WebFetch: "🌐", WebSearch: "🌐",
+  Task: "🤖", NotebookEdit: "📓",
+};
+
+function shortPath(p?: string): string {
+  if (!p) return "";
+  const parts = p.split("/").filter(Boolean);
+  return parts.length <= 2 ? p : "…/" + parts.slice(-2).join("/");
+}
+
+function DiffView({ oldStr, newStr }: { oldStr?: string; newStr?: string }) {
+  return (
+    <div className="agent-diff">
+      {(oldStr ?? "").split("\n").map((l, i) => (
+        <div key={"o" + i} className="diff-line diff-del">- {l}</div>
+      ))}
+      {(newStr ?? "").split("\n").map((l, i) => (
+        <div key={"n" + i} className="diff-line diff-add">+ {l}</div>
+      ))}
+    </div>
+  );
+}
+
+function TodoView({ todos }: { todos: any[] }) {
+  return (
+    <div className="agent-todo">
+      {todos.map((t, i) => {
+        const status = t?.status || "pending";
+        const mark = status === "completed" ? "☑" : status === "in_progress" ? "▶" : "☐";
+        const label = t?.content || t?.activeForm || "";
+        return (
+          <div key={i} className={"todo-item todo-" + status}>
+            <span className="todo-mark">{mark}</span>
+            <span className="todo-text">{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// One-line summary of the most relevant arg, shown next to the tool name.
+function toolSummary(name: string, input: any): string {
+  if (!input || typeof input !== "object") return "";
+  switch (name) {
+    case "Bash": return input.command || "";
+    case "Read": case "Edit": case "MultiEdit": case "Write": case "NotebookEdit":
+      return shortPath(input.file_path);
+    case "Glob": case "Grep": return input.pattern || "";
+    case "WebFetch": case "WebSearch": return input.url || input.query || "";
+    case "Task": return input.description || "";
+    default: return "";
+  }
+}
+
+// Rich detail body per tool type (null = no expandable detail).
+function toolDetail(name: string, input: any): React.ReactNode {
+  if (!input || typeof input !== "object") {
+    return input != null ? <pre className="agent-tool-input">{String(input)}</pre> : null;
+  }
+  if ((name === "Edit" || name === "MultiEdit") && (input.old_string || input.new_string)) {
+    return <DiffView oldStr={input.old_string} newStr={input.new_string} />;
+  }
+  if (name === "Write" && typeof input.content === "string") {
+    return <DiffView newStr={input.content} />;
+  }
+  if (name === "TodoWrite" && Array.isArray(input.todos)) {
+    return <TodoView todos={input.todos} />;
+  }
+  return <pre className="agent-tool-input">{JSON.stringify(input, null, 2)}</pre>;
+}
+
+function ToolCallCard({ m }: { m: AgentMessage }) {
+  const name = m.meta?.name || m.content || "工具";
+  const input = m.meta?.input;
+  const isTodo = name === "TodoWrite" && Array.isArray(input?.todos);
+  // Todo lists are most useful expanded by default; everything else collapsed.
+  const [open, setOpen] = useState(isTodo);
+  const glyph = TOOL_GLYPHS[name] || "🔧";
+  const summary = toolSummary(name, input);
+  const detail = toolDetail(name, input);
+
+  return (
+    <div className="agent-tool-call">
+      <button className="agent-tool-head" onClick={() => detail && setOpen((o) => !o)} disabled={!detail}>
+        <span className="agent-tool-icon">{glyph}</span>
+        <span className="agent-tool-name">{name}</span>
+        {summary && <span className="agent-tool-summary">{summary}</span>}
+        {detail && <span className="agent-tool-toggle">{open ? "▾" : "▸"}</span>}
+      </button>
+      {open && detail}
+    </div>
+  );
+}
+
+function ToolResultCard({ m }: { m: AgentMessage }) {
+  const isError = !!m.meta?.is_error;
+  const text = m.content || "";
+  const long = text.length > 400;
+  const [open, setOpen] = useState(!long);
+  const shown = open ? text : text.slice(0, 400);
+  return (
+    <div className={"agent-tool-result" + (isError ? " err" : "")}>
+      <div className="agent-tool-result-head">
+        <span>{isError ? "⚠ 工具错误" : "▣ 结果"}</span>
+        {long && (
+          <button onClick={() => setOpen((o) => !o)}>{open ? "收起" : "展开全部"}</button>
+        )}
+      </div>
+      {text && <pre>{shown}{!open && long ? "\n…" : ""}</pre>}
+    </div>
+  );
+}
+
+function ThinkingCard({ m }: { m: AgentMessage }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="agent-thinking">
+      <button className="agent-thinking-head" onClick={() => setOpen((o) => !o)}>
+        <span>💭 思考过程</span>
+        <span className="agent-tool-toggle">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && <div className="agent-thinking-body">{m.content}</div>}
+    </div>
+  );
+}
+
 function Bubble({ m }: { m: AgentMessage }) {
   const isUser = m.role === "user";
   const isSystem = m.role === "system";
   const isCli = m.kind === "cli_frame";
+
+  if (m.kind === "tool_call") return <ToolCallCard m={m} />;
+  if (m.kind === "tool_result") return <ToolResultCard m={m} />;
+  if (m.role === "assistant" && m.meta?.thinking) return <ThinkingCard m={m} />;
 
   if (isSystem && m.kind === "summary") {
     return (
@@ -269,10 +405,18 @@ function Bubble({ m }: { m: AgentMessage }) {
   else cls += "assistant";
   if (m.inherited) cls += " inherited";
 
+  const atts: string[] = Array.isArray(m.meta?.attachments) ? m.meta.attachments : [];
   return (
     <div className={cls} title={m.inherited ? "继承自父会话" : `seq=${m.seq} · ${m.created_at}`}>
       {isCli && <div className="msg-tag">▣ CLI 输出</div>}
       <div>{m.content}</div>
+      {isUser && atts.length > 0 && (
+        <div className="agent-msg-attachments">
+          {atts.map((a, i) => (
+            <span key={i} className="agent-att-chip">📎 {a.split("/").pop()}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

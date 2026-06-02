@@ -13,7 +13,9 @@ re-uses the same cookie verification at upgrade time.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import os
 import re
 import time
 from typing import Any
@@ -141,6 +143,34 @@ def delete_session(sid: str, _user: str = Depends(require_user)) -> dict[str, An
     return {"ok": True}
 
 
+class SessionToolsBody(BaseModel):
+    disallowed_tools: list[str] = Field(default_factory=list)
+
+
+@router.put("/agent-sessions/{sid}/tools")
+def set_session_tools(sid: str, body: SessionToolsBody, _user: str = Depends(require_user)) -> dict[str, Any]:
+    """Set the per-session disallowed tool list (empty = all tools allowed)."""
+    clean = [t.strip() for t in body.disallowed_tools if t and t.strip()]
+    sess = svc.update_session(sid, meta_patch={"disallowed_tools": clean})
+    return {"ok": True, "disallowed_tools": (sess.get("meta") or {}).get("disallowed_tools", [])}
+
+
+_PERMISSION_MODES = {"acceptEdits", "plan", "default", "bypassPermissions"}
+
+
+class PermissionModeBody(BaseModel):
+    mode: str
+
+
+@router.put("/agent-sessions/{sid}/permission-mode")
+def set_permission_mode(sid: str, body: PermissionModeBody, _user: str = Depends(require_user)) -> dict[str, Any]:
+    """Set the per-session permission mode (acceptEdits / plan / default / bypassPermissions)."""
+    if body.mode not in _PERMISSION_MODES:
+        raise HTTPException(status_code=400, detail="非法权限模式")
+    sess = svc.update_session(sid, meta_patch={"permission_mode": body.mode})
+    return {"ok": True, "permission_mode": (sess.get("meta") or {}).get("permission_mode")}
+
+
 @router.get("/agent-sessions/{sid}/messages")
 def list_messages(
     sid: str,
@@ -194,6 +224,10 @@ class ChatBody(BaseModel):
     # If true, force PTY restart (e.g. user wants a clean slate without
     # creating a new session).  Default is to attach to the existing PTY.
     reset_pty: bool = False
+    # Absolute paths of uploaded attachments. Images are sent to claude as
+    # real multimodal image blocks (stream-json input); other agents get the
+    # paths appended to the prompt text.
+    attachments: list[str] = Field(default_factory=list)
 
 
 def _sse(event: str, data: Any) -> bytes:
@@ -245,11 +279,21 @@ async def chat_message(sid: str, body: ChatBody, _user: str = Depends(require_us
     # turn twice. We also add it before the subprocess starts so the row is
     # visible if the client cancels mid-stream.
     full_prompt_context = _build_chat_context(sid, body.content)
-    user_msg = svc.add_message(sid, role="user", kind="text", source="chat", content=body.content)
+    # Non-multimodal agents can't ingest images structurally; mention the
+    # paths in the prompt so they can Read them.
+    if body.attachments and not adef.chat_stream_json:
+        full_prompt_context += "\n\n[附件]\n" + "\n".join(f"- {a}" for a in body.attachments)
+    user_msg = svc.add_message(
+        sid, role="user", kind="text", source="chat", content=body.content,
+        meta={"attachments": body.attachments} if body.attachments else None,
+    )
 
     # Pick implementation:
-    #   Has chat_args  -> oneshot subprocess (clean stdout, stateless).
-    #   No chat_args   -> fall back to writing into the per-session PTY.
+    #   stream-json  -> structured handler surfacing tool calls/results (claude).
+    #   Has chat_args -> oneshot subprocess (clean stdout, stateless).
+    #   No chat_args  -> fall back to writing into the per-session PTY.
+    if adef.chat_stream_json:
+        return await _chat_stream_json(sid, sess, adef, body.content, user_msg, body.attachments)
     if adef.chat_args is not None:
         return await _chat_oneshot(sid, sess, adef, body.content, user_msg, full_prompt_context)
     return await _chat_via_pty(sid, sess, adef, body.content, user_msg, body.reset_pty)
@@ -381,6 +425,248 @@ async def _chat_oneshot(
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+def _flatten_tool_result(content: Any) -> str:
+    """A stream-json tool_result `content` is either a plain string or a list
+    of content blocks ({type:text,text:...}); normalize to displayable text."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for b in content:
+            if isinstance(b, dict):
+                if b.get("type") == "text":
+                    parts.append(b.get("text", ""))
+                elif b.get("content") is not None:
+                    parts.append(str(b.get("content")))
+            else:
+                parts.append(str(b))
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
+async def _spawn_chat_proc(
+    argv: list[str], env_extra: dict[str, str], sess: dict[str, Any],
+    stdin_pipe: bool = False,
+) -> "asyncio.subprocess.Process":
+    """Spawn an agent chat subprocess with a sane env/PATH/cwd. stderr is
+    folded into stdout. stdin_pipe=True opens a writable stdin (used to feed
+    stream-json input). Mirrors the spawn logic used by _chat_oneshot."""
+    env = os.environ.copy()
+    env.update(env_extra)
+    env.setdefault("TERM", "dumb")
+    env.setdefault("FORCE_COLOR", "0")
+    env.setdefault("NO_COLOR", "1")
+    bin_dir = os.path.dirname(argv[0])
+    from app.core import integrations
+    extra_paths = [bin_dir, *integrations.extra_path_dirs()]
+    cur_path = env.get("PATH", "")
+    env["PATH"] = ":".join([p for p in extra_paths if p] + ([cur_path] if cur_path else []))
+    cwd = sess.get("workdir") if sess.get("workdir") and os.path.isdir(sess["workdir"]) else os.path.expanduser("~")
+    return await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.PIPE if stdin_pipe else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        cwd=cwd,
+        env=env,
+    )
+
+
+_IMAGE_MEDIA_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp",
+}
+
+
+def _build_input_message(user_text: str, attachments: list[str] | None) -> dict[str, Any]:
+    """Build a stream-json `user` message. Image attachments become real
+    base64 image content blocks; non-images are mentioned as text paths."""
+    content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
+    for path in attachments or []:
+        media_type = _IMAGE_MEDIA_TYPES.get(os.path.splitext(path)[1].lower())
+        if media_type:
+            try:
+                with open(path, "rb") as f:
+                    data = base64.standard_b64encode(f.read()).decode()
+                content.append({"type": "image", "source": {
+                    "type": "base64", "media_type": media_type, "data": data}})
+                continue
+            except Exception:
+                pass  # fall through to a text mention
+        content.append({"type": "text", "text": f"[附件文件: {path}]"})
+    return {"type": "user", "message": {"role": "user", "content": content}}
+
+
+async def _chat_stream_json(
+    sid: str,
+    sess: dict[str, Any],
+    adef: registry.AgentDef,
+    user_text: str,
+    user_msg: dict[str, Any],
+    attachments: list[str] | None = None,
+) -> StreamingResponse:
+    """Run claude with `--output-format stream-json` and translate its
+    newline-delimited event stream into structured chat messages:
+
+      system/init   -> persist claude's native session_id (for --resume)
+      assistant text-> stream as tokens, flushed to a `text` message
+      assistant tool_use  -> a `tool_call` message
+      user tool_result    -> a `tool_result` message
+      result        -> flush trailing text + finish
+
+    Continuity is claude-native: we pass --resume <session_id> so claude keeps
+    its own history instead of us stuffing prior turns into the prompt.
+    """
+    meta = sess.get("meta") or {}
+    resume_id = meta.get("claude_session_id")
+    try:
+        argv, env_extra = registry.build_argv(
+            adef.id, mode="chat", model=sess.get("model"),
+            prompt=user_text, resume_id=resume_id,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"无法构造命令: {e}")
+    # Per-session permission mode (default acceptEdits keeps prior behavior).
+    _VALID_MODES = {"acceptEdits", "plan", "default", "bypassPermissions", "auto", "dontAsk"}
+    pmode = meta.get("permission_mode") or "acceptEdits"
+    if pmode not in _VALID_MODES:
+        pmode = "acceptEdits"
+    argv.extend(["--permission-mode", pmode])
+    # Per-session tool restrictions (empty = all tools available).
+    disallowed = meta.get("disallowed_tools") or []
+    if isinstance(disallowed, list) and disallowed:
+        argv.extend(["--disallowedTools", *[str(t) for t in disallowed]])
+    try:
+        proc = await _spawn_chat_proc(argv, env_extra, sess, stdin_pipe=True)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=f"agent binary 不存在: {e}")
+
+    # Feed the turn as a stream-json user message (text + any image blocks),
+    # then close stdin so claude processes it and exits.
+    try:
+        input_msg = _build_input_message(user_text, attachments)
+        assert proc.stdin is not None
+        proc.stdin.write((json.dumps(input_msg, ensure_ascii=False) + "\n").encode("utf-8"))
+        await proc.stdin.drain()
+        proc.stdin.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入 agent 输入失败: {e}")
+
+    async def gen() -> Any:
+        yield _sse("user_message", user_msg)
+        cur_text: list[str] = []  # buffer for the current assistant text run
+
+        def flush_text() -> dict[str, Any] | None:
+            joined = "".join(cur_text).strip()
+            cur_text.clear()
+            if not joined:
+                return None
+            return svc.add_message(sid, role="assistant", kind="text", source="chat", content=joined)
+
+        assert proc.stdout is not None
+        try:
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                etype = ev.get("type")
+
+                if etype == "system" and ev.get("subtype") == "init":
+                    csid = ev.get("session_id")
+                    if csid:
+                        try:
+                            svc.update_session(sid, meta_patch={"claude_session_id": csid})
+                        except Exception:
+                            pass
+
+                elif etype == "assistant":
+                    for block in ev.get("message", {}).get("content", []) or []:
+                        bt = block.get("type")
+                        if bt == "thinking":
+                            # Extended-thinking text. In -p mode the final
+                            # message often carries an empty `thinking` (the
+                            # prose streams only as partial deltas), so we only
+                            # surface it when non-empty — graceful degradation.
+                            think = (block.get("thinking") or "").strip()
+                            if think:
+                                flushed = flush_text()
+                                if flushed:
+                                    yield _sse("assistant_message", flushed)
+                                kmsg = svc.add_message(
+                                    sid, role="assistant", kind="text", source="chat",
+                                    content=think, meta={"thinking": True},
+                                )
+                                yield _sse("assistant_message", kmsg)
+                        elif bt == "text":
+                            t = block.get("text", "")
+                            if t:
+                                cur_text.append(t)
+                                yield _sse("token", {"text": t})
+                        elif bt == "tool_use":
+                            flushed = flush_text()
+                            if flushed:
+                                yield _sse("assistant_message", flushed)
+                            tmsg = svc.add_message(
+                                sid, role="assistant", kind="tool_call", source="chat",
+                                content=block.get("name", ""),
+                                meta={"tool_use_id": block.get("id"),
+                                      "name": block.get("name"),
+                                      "input": block.get("input")},
+                            )
+                            yield _sse("tool_call", tmsg)
+
+                elif etype == "user":
+                    for block in ev.get("message", {}).get("content", []) or []:
+                        if block.get("type") == "tool_result":
+                            rmsg = svc.add_message(
+                                sid, role="system", kind="tool_result", source="chat",
+                                content=_flatten_tool_result(block.get("content")),
+                                meta={"tool_use_id": block.get("tool_use_id"),
+                                      "is_error": bool(block.get("is_error"))},
+                            )
+                            yield _sse("tool_result", rmsg)
+
+                elif etype == "result":
+                    flushed = flush_text()
+                    if flushed:
+                        yield _sse("assistant_message", flushed)
+                    if ev.get("is_error"):
+                        yield _sse("warning", {"detail": ev.get("result") or "agent 返回错误"})
+        except asyncio.CancelledError:
+            proc.terminate()
+            raise
+
+        # Drain any trailing text if the process ended without a result event.
+        flushed = flush_text()
+        if flushed:
+            yield _sse("assistant_message", flushed)
+        rc = await proc.wait()
+        if rc != 0:
+            yield _sse("warning", {"detail": f"agent 进程返回非 0 退出码 ({rc})"})
+        try:
+            comp = compactor.maybe_auto_compact(sid)
+            if comp:
+                yield _sse("auto_compacted", {"summary_id": comp["id"]})
+        except Exception:
+            pass
+        yield _sse("done", {"ok": True})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
 
 
@@ -763,3 +1049,54 @@ def rename(
         raise HTTPException(409, "同名条目已存在")
     source.rename(target)
     return {"ok": True, "path": str(target)}
+
+
+_MAX_EDIT_BYTES = 1024 * 1024  # 1MB — files larger than this aren't editable inline
+
+
+@router.get("/agent-files/read")
+def read_file(
+    path: str = Query(...),
+    _user: str = Depends(require_user),
+) -> dict[str, Any]:
+    """Return a text file's content for the inline editor. Binary or
+    oversized files return a flag instead of content (UI offers download)."""
+    target = _Path(path).resolve()
+    for prefix in _FORBIDDEN_PREFIXES:
+        if str(target).startswith(prefix):
+            raise HTTPException(403, "禁止访问系统目录")
+    if not target.is_file():
+        raise HTTPException(404, "文件不存在")
+    size = target.stat().st_size
+    if size > _MAX_EDIT_BYTES:
+        return {"path": str(target), "content": "", "size": size, "too_large": True}
+    raw = target.read_bytes()
+    if b"\x00" in raw[:8192]:
+        return {"path": str(target), "content": "", "size": size, "binary": True}
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"path": str(target), "content": "", "size": size, "binary": True}
+    return {"path": str(target), "content": text, "size": size}
+
+
+class WriteFileBody(BaseModel):
+    path: str = Field(..., min_length=1)
+    content: str = Field(..., max_length=5_000_000)
+
+
+@router.post("/agent-files/write")
+def write_file(
+    body: WriteFileBody,
+    _user: str = Depends(require_user),
+) -> dict[str, Any]:
+    """Save edited text content back to a file."""
+    target = _Path(body.path).resolve()
+    for prefix in _FORBIDDEN_PREFIXES:
+        if str(target).startswith(prefix):
+            raise HTTPException(403, "禁止访问系统目录")
+    if target.is_dir():
+        raise HTTPException(400, "目标是目录")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body.content, encoding="utf-8")
+    return {"ok": True, "path": str(target), "size": len(body.content.encode("utf-8"))}

@@ -34,6 +34,8 @@ export type AgentSession = {
   // populated by GET /agent-sessions/:id
   children?: AgentSession[];
   live?: boolean;
+  // free-form session metadata (claude_session_id, disallowed_tools, …)
+  meta?: Record<string, any>;
 };
 
 export type AgentMessage = {
@@ -125,6 +127,37 @@ export async function compactSession(sid: string): Promise<{ id: string; content
   return data;
 }
 
+// Common Claude Code tools the user can selectively disable per session.
+export const CLAUDE_TOOLS = [
+  "Bash", "Edit", "Write", "Read", "Glob", "Grep",
+  "WebFetch", "WebSearch", "Task", "TodoWrite", "NotebookEdit",
+] as const;
+
+export async function setSessionTools(sid: string, disallowed: string[]): Promise<string[]> {
+  const { data } = await api.put<{ ok: boolean; disallowed_tools: string[] }>(
+    `/agent-sessions/${sid}/tools`,
+    { disallowed_tools: disallowed },
+  );
+  return data.disallowed_tools;
+}
+
+// Per-session permission策略. acceptEdits=自动执行, plan=只读规划,
+// default=按默认规则, bypassPermissions=完全放开.
+export const PERMISSION_MODES = [
+  { value: "acceptEdits", label: "自动执行（默认）" },
+  { value: "plan", label: "只读规划（不改动）" },
+  { value: "default", label: "默认规则" },
+  { value: "bypassPermissions", label: "完全放开" },
+] as const;
+
+export async function setSessionPermissionMode(sid: string, mode: string): Promise<string> {
+  const { data } = await api.put<{ ok: boolean; permission_mode: string }>(
+    `/agent-sessions/${sid}/permission-mode`,
+    { mode },
+  );
+  return data.permission_mode;
+}
+
 export async function stopSessionPty(sid: string): Promise<void> {
   await api.post(`/agent-sessions/${sid}/stop`);
 }
@@ -137,6 +170,8 @@ export type ChatEvent =
   | { type: "user_message"; payload: AgentMessage }
   | { type: "token"; payload: { text: string } }
   | { type: "assistant_message"; payload: AgentMessage }
+  | { type: "tool_call"; payload: AgentMessage }
+  | { type: "tool_result"; payload: AgentMessage }
   | { type: "exit"; payload: { code: number | null } }
   | { type: "warning"; payload: { detail: string } }
   | { type: "error"; payload: { detail: string } }
@@ -146,7 +181,7 @@ export type ChatEvent =
 export async function* sendChat(
   sid: string,
   content: string,
-  opts?: { resetPty?: boolean; signal?: AbortSignal },
+  opts?: { resetPty?: boolean; signal?: AbortSignal; attachments?: string[] },
 ): AsyncGenerator<ChatEvent, void, void> {
   const resp = await fetch(`/api/agent-chat/sessions/${sid}/messages`, {
     method: "POST",
@@ -155,7 +190,11 @@ export async function* sendChat(
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ content, reset_pty: opts?.resetPty ?? false }),
+    body: JSON.stringify({
+      content,
+      reset_pty: opts?.resetPty ?? false,
+      attachments: opts?.attachments ?? [],
+    }),
     signal: opts?.signal,
   });
   if (!resp.ok) {

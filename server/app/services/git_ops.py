@@ -349,3 +349,47 @@ def get_log(project_id: str, limit: int = 20) -> dict[str, Any]:
                 "subject": parts[3],
             })
     return {"commits": commits}
+
+
+# ─── Branches ───────────────────────────────────────────────────────────────
+
+def _validate_branch_name(name: str) -> str:
+    name = (name or "").strip()
+    bad = (" ", "~", "^", ":", "?", "*", "[", "\\", "..")
+    if not name or name.startswith("-") or any(c in name for c in bad):
+        raise GitError(f"非法分支名: {name or '(空)'}")
+    return name
+
+
+def list_branches(project_id: str) -> dict[str, Any]:
+    cwd = _project_cwd(project_id)
+    if not is_repo(cwd):
+        raise GitError("不是 git 仓库")
+    cp = _run_git(cwd, ["branch", "--format=%(refname:short)"], check=False)
+    branches = [b.strip() for b in cp.stdout.splitlines() if b.strip()]
+    head = _run_git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"], check=False)
+    current = head.stdout.strip() if head.returncode == 0 else ""
+    return {"branches": branches, "current": current}
+
+
+def checkout_branch(project_id: str, name: str) -> dict[str, Any]:
+    cwd = _project_cwd(project_id)
+    if not is_repo(cwd):
+        raise GitError("不是 git 仓库")
+    name = _validate_branch_name(name)
+    cp = _run_git(cwd, ["checkout", name], check=False)
+    if cp.returncode != 0:
+        # Most common: uncommitted changes would be overwritten.
+        raise GitError((cp.stderr or cp.stdout or "切换分支失败").strip()[:300])
+    return {"ok": True, "current": name}
+
+
+def create_branch(project_id: str, name: str) -> dict[str, Any]:
+    cwd = _project_cwd(project_id)
+    if not is_repo(cwd):
+        raise GitError("不是 git 仓库")
+    name = _validate_branch_name(name)
+    cp = _run_git(cwd, ["checkout", "-b", name], check=False)
+    if cp.returncode != 0:
+        raise GitError((cp.stderr or cp.stdout or "创建分支失败").strip()[:300])
+    return {"ok": True, "current": name}

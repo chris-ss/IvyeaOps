@@ -9,6 +9,19 @@ import {
   formatTime,
   iconForFile,
 } from "./fileUtils";
+import { api } from "../../../../api/client";
+import CodeEditor from "../../../skill/CodeEditor";
+
+type EditorState = {
+  path: string;
+  name: string;
+  content: string;
+  dirty: boolean;
+  saving: boolean;
+  loading: boolean;
+  loadError?: string;
+  notEditable?: "binary" | "too_large";
+};
 
 type Props = {
   initialPath?: string;
@@ -83,6 +96,45 @@ export default function AgentFiles({ initialPath }: Props) {
   }, [edit.mode]);
 
   const join = (base: string, name: string) => (base.endsWith("/") ? base + name : base + "/" + name);
+
+  // ── Inline file editor (view / edit / save) ──
+  const [editor, setEditor] = useState<EditorState | null>(null);
+
+  const openFile = useCallback(async (name: string) => {
+    const full = join(path, name);
+    setEditor({ path: full, name, content: "", dirty: false, saving: false, loading: true });
+    try {
+      const { data } = await api.get("/agent-files/read", { params: { path: full } });
+      setEditor((e) => {
+        if (!e || e.path !== full) return e;  // user navigated away
+        if (data.binary) return { ...e, loading: false, notEditable: "binary" };
+        if (data.too_large) return { ...e, loading: false, notEditable: "too_large" };
+        return { ...e, loading: false, content: data.content ?? "" };
+      });
+    } catch (err: any) {
+      setEditor((e) => (e && e.path === full
+        ? { ...e, loading: false, loadError: err?.response?.data?.detail || "读取失败" }
+        : e));
+    }
+  }, [path]);
+
+  const saveFile = useCallback(async () => {
+    setEditor((cur) => {
+      if (!cur || cur.saving || !cur.dirty) return cur;
+      api.post("/agent-files/write", { path: cur.path, content: cur.content })
+        .then(() => { setEditor((e) => (e ? { ...e, dirty: false, saving: false } : e)); setInfoFlash("已保存"); refresh(); })
+        .catch((err) => { setError(err?.response?.data?.detail || "保存失败"); setEditor((e) => (e ? { ...e, saving: false } : e)); });
+      return { ...cur, saving: true };
+    });
+  }, [refresh, setInfoFlash]);
+
+  const closeEditor = useCallback(async () => {
+    if (editor?.dirty) {
+      const ok = await confirm({ title: "放弃修改", message: "有未保存的修改，确定关闭？", confirmText: "放弃", cancelText: "继续编辑", danger: true });
+      if (!ok) return;
+    }
+    setEditor(null);
+  }, [editor, confirm]);
 
   const goUp = () => {
     if (path === "/") return;
@@ -256,7 +308,11 @@ export default function AgentFiles({ initialPath }: Props) {
             <div
               key={it.name}
               className={"agent-files-row" + (isEditing ? " editing" : "")}
-              onClick={() => !isEditing && it.is_dir && enterDir(it.name)}
+              onClick={() => {
+                if (isEditing) return;
+                if (it.is_dir) enterDir(it.name);
+                else openFile(it.name);
+              }}
               onDoubleClick={() => handleRowDoubleClick(it)}
             >
               <span className="agent-files-icon" style={{ color: icon.color }}>{icon.glyph}</span>
@@ -295,6 +351,40 @@ export default function AgentFiles({ initialPath }: Props) {
           <div className="agent-files-empty">空目录</div>
         )}
       </div>
+
+      {editor && (
+        <div className="agent-files-editor">
+          <div className="agent-files-editor-head">
+            <span className="agent-files-editor-name" title={editor.path}>
+              {editor.name}{editor.dirty ? " ●" : ""}
+            </span>
+            {!editor.notEditable && !editor.loadError && !editor.loading && (
+              <button className="tbtn" onClick={saveFile} disabled={editor.saving || !editor.dirty}>
+                {editor.saving ? "保存中…" : "保存"}
+              </button>
+            )}
+            <button className="tbtn" onClick={closeEditor}>✕ 关闭</button>
+          </div>
+          <div className="agent-files-editor-body">
+            {editor.loading ? (
+              <div className="agent-files-empty">加载中…</div>
+            ) : editor.loadError ? (
+              <div className="agent-files-msg err" style={{ margin: 12 }}>{editor.loadError}</div>
+            ) : editor.notEditable === "binary" ? (
+              <div className="agent-files-empty">二进制文件，无法内联编辑。可用 ⬇ 下载查看。</div>
+            ) : editor.notEditable === "too_large" ? (
+              <div className="agent-files-empty">文件过大（&gt; 1MB），无法内联编辑。</div>
+            ) : (
+              <CodeEditor
+                value={editor.content}
+                path={editor.path}
+                onChange={(v) => setEditor((e) => (e ? { ...e, content: v, dirty: true } : e))}
+                onSaveShortcut={saveFile}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

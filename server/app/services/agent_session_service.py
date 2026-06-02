@@ -146,6 +146,8 @@ def init_db() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(agent_sessions)").fetchall()}
         if "resume_target" not in cols:
             conn.execute("ALTER TABLE agent_sessions ADD COLUMN resume_target TEXT")
+        if "meta_json" not in cols:
+            conn.execute("ALTER TABLE agent_sessions ADD COLUMN meta_json TEXT NOT NULL DEFAULT '{}'")
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +274,10 @@ def get_session(session_id: str) -> dict[str, Any]:
         raise AgentSessionError("会话不存在")
     d = dict(row)
     d["archived"] = bool(d["archived"])
+    try:
+        d["meta"] = json.loads(d.get("meta_json") or "{}")
+    except Exception:
+        d["meta"] = {}
     return d
 
 
@@ -284,6 +290,7 @@ def update_session(
     status: str | None = None,
     last_summary_id: str | None = None,
     workdir: str | None = None,
+    meta_patch: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     sets: list[str] = []
     params: list[Any] = []
@@ -305,6 +312,13 @@ def update_session(
     if workdir is not None:
         sets.append("workdir = ?")
         params.append(workdir)
+    if meta_patch:
+        # Merge into existing meta_json rather than overwrite, so unrelated
+        # keys (e.g. claude_session_id) survive independent updates.
+        current = get_session(session_id).get("meta", {})
+        current.update(meta_patch)
+        sets.append("meta_json = ?")
+        params.append(json.dumps(current, ensure_ascii=False))
     if not sets:
         return get_session(session_id)
     sets.append("updated_at = ?")

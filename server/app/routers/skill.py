@@ -670,3 +670,99 @@ async def generate_from_idea(
         body=body_text,
         preview=full_text,
     )
+
+
+# ---------------------------------------------------------------------------
+# Skill Architect — rigorous multi-stage generation pipeline
+#
+# Replaces the single-shot generate_from_idea above with a staged pipeline
+# (understand → plan → review → optimize → render → validate+repair). Heavy
+# lifting lives in app.services.skill_architect; this is request shaping only.
+# ---------------------------------------------------------------------------
+
+
+class ArchitectValidation(BaseModel):
+    ok: bool
+    attempts: int = 0
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ArchitectGeneratedResponse(GenerateFromIdeaResponse):
+    """Generated skill plus self-check results."""
+    validation: ArchitectValidation
+    plan: dict | None = None
+
+
+class ArchitectPlanBody(BaseModel):
+    idea: str = Field(..., min_length=2, description="一句话描述你的想法")
+    category: str | None = None
+    ref_skill: str | None = None
+    clarifications: dict[str, str] | None = Field(
+        None, description="用户对澄清问题的回答：{question: answer}"
+    )
+
+
+class ArchitectPlanResponse(BaseModel):
+    stage: str                       # "clarify" | "plan"
+    clarifications: list[dict] | None = None
+    understanding: dict | None = None
+    plan: dict | None = None
+    review: dict | None = None
+
+
+class ArchitectGenerateBody(BaseModel):
+    plan: dict = Field(..., description="确认后的方案对象")
+
+
+class ArchitectOneshotBody(BaseModel):
+    idea: str = Field(..., min_length=2)
+    category: str | None = None
+    ref_skill: str | None = None
+
+
+@router.post("/architect/plan", response_model=ArchitectPlanResponse)
+async def architect_plan(body: ArchitectPlanBody) -> ArchitectPlanResponse:
+    """Rigorous mode phase 1: understand → (clarify?) → plan → review → optimize."""
+    from app.services import skill_architect
+    try:
+        result = await skill_architect.run_plan(
+            body.idea.strip(), body.category or None,
+            body.ref_skill or None, body.clarifications,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"方案生成失败: {exc}")
+    return ArchitectPlanResponse(**result)
+
+
+@router.post("/architect/generate", response_model=ArchitectGeneratedResponse)
+async def architect_generate(body: ArchitectGenerateBody) -> ArchitectGeneratedResponse:
+    """Rigorous mode phase 2: render the confirmed plan into a validated SKILL.md."""
+    from app.services import skill_architect
+    if not body.plan or not isinstance(body.plan, dict):
+        raise HTTPException(400, "plan 不能为空")
+    try:
+        result = await skill_architect.generate_and_validate(body.plan)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"生成失败: {exc}")
+    return ArchitectGeneratedResponse(**result)
+
+
+@router.post("/architect/oneshot", response_model=ArchitectGeneratedResponse)
+async def architect_oneshot(body: ArchitectOneshotBody) -> ArchitectGeneratedResponse:
+    """Fast mode: run the whole pipeline end-to-end in one request."""
+    from app.services import skill_architect
+    try:
+        result = await skill_architect.run_oneshot(
+            body.idea.strip(), body.category or None, body.ref_skill or None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"生成失败: {exc}")
+    return ArchitectGeneratedResponse(**result)
+
+
+@router.get("/architect/prompts", response_model=dict)
+def architect_prompts() -> dict:
+    """Return the editable stage prompts (seeding defaults on first access)."""
+    from app.services import skill_architect
+    return skill_architect.list_prompts()

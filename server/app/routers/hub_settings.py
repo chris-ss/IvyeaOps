@@ -139,6 +139,7 @@ async def settings_health(_u: str = Depends(require_user)):
             "hermes": _check_runner("hermes"),
             "codex":  _check_runner("codex"),
             "claude": _check_runner("claude"),
+            "kiro":   _check_runner("kiro-cli"),
         },
         "integrations": _integ.all_status(),
     }

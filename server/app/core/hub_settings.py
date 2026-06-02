@@ -22,6 +22,10 @@ _DEFAULTS: Dict[str, Any] = {
     # here only if your key has access to Claude text models.
     # Valid values: hermes, codex, claude, apimart
     "text_ai_providers": "hermes,codex,claude",
+    # Comma-separated vision-AI fallback chain (for skills that accept file/image inputs).
+    # Tried in order; first provider with a configured key wins.
+    # Valid values: apimart (Claude Vision), openai (GPT-4o), assistant (custom provider)
+    "vision_ai_providers": "apimart,openai,assistant",
     # Hermes LLM — primary model (written to ~/.hermes/.env + config.yaml)
     # provider: deepseek | anthropic | openai | openrouter | google | groq | together | custom
     # Saving any of these auto-syncs into Hermes config; no gateway restart needed.

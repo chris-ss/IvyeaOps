@@ -121,6 +121,8 @@ export default function Brain() {
   const [messages, setMessages] = useState<BrainChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 760);
+  const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
 
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadCategory, setUploadCategory] = useState("inbox");
@@ -212,6 +214,12 @@ export default function Brain() {
     loadUploads();
     loadChat();
   }, [loadOverview, loadFiles, loadUploads, loadChat]);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= 760);
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   const selectedFile = useMemo(() => files.find((f) => f.path === selectedPath), [files, selectedPath]);
   const stats = overview?.stats;
@@ -431,7 +439,7 @@ export default function Brain() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <span className="tag tg">LOCAL BRAIN</span>
-        <span style={{ color: "var(--t2)", fontSize: 11 }}>上传 / 对话 / 编辑本地知识库：先检索 GBrain，再调用本机 Hermes 对话；不新增公网端口</span>
+        {!isMobile && <span style={{ color: "var(--t2)", fontSize: 11 }}>上传 / 对话 / 编辑本地知识库：先检索 GBrain，再调用本机 Hermes 对话；不新增公网端口</span>}
         <button className="tbtn" onClick={() => { loadOverview(); loadFiles(); loadUploads(); loadChat(); }} style={{ marginLeft: "auto" }}>刷新</button>
       </div>
 
@@ -445,47 +453,98 @@ export default function Brain() {
       </div>
 
       {tab === "chat" && (
-        <div style={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr)", gap: 10, minHeight: 320, flex: 1 }} className="brain-chat-grid">
-          <div className="card" style={{ overflow: "auto" }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
-              <div className="ct" style={{ margin: 0, flex: 1 }}>SESSIONS</div>
-              <button className="tbtn" onClick={newChat} disabled={sending}>新建</button>
+        <>
+          {/* Mobile: sessions bottom sheet */}
+          {isMobile && sessionSheetOpen && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 897, background: "rgba(0,0,0,.5)" }} onClick={() => setSessionSheetOpen(false)} />
+          )}
+          {isMobile && (
+            <div style={{
+              position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 898,
+              maxHeight: "60vh", background: "var(--bg1)",
+              borderRadius: "16px 16px 0 0",
+              display: "flex", flexDirection: "column",
+              boxShadow: "0 -4px 32px rgba(0,0,0,.4)",
+              transform: sessionSheetOpen ? "translateY(0)" : "translateY(110%)",
+              transition: "transform .25s cubic-bezier(.4,0,.2,1)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 4px", flexShrink: 0 }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: "var(--b2)" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", padding: "2px 16px 10px", flexShrink: 0, borderBottom: "1px solid var(--b)" }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--t)", flex: 1 }}>会话列表</span>
+                <button className="tbtn" onClick={newChat} disabled={sending} style={{ marginRight: 8 }}>＋ 新建</button>
+                <button onClick={() => setSessionSheetOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--t3)", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>✕</button>
+              </div>
+              <div style={{ overflowY: "auto", flex: 1 }}>
+                {sessions.map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => { loadSession(s.id); setSessionSheetOpen(false); }}
+                    style={{
+                      padding: "12px 16px", cursor: "pointer", borderBottom: "1px solid var(--b)",
+                      background: s.id === activeSession?.id ? "color-mix(in srgb, var(--acc) 10%, transparent)" : undefined,
+                      display: "flex", alignItems: "center", gap: 10, transition: "background .12s",
+                    }}
+                  >
+                    <span style={{ flex: 1, fontSize: 13, color: s.id === activeSession?.id ? "var(--acc)" : "var(--t)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: s.id === activeSession?.id ? 600 : 400 }}>{s.title || "新对话"}</span>
+                    <button onClick={(e) => { e.stopPropagation(); archiveChat(s.id); setSessionSheetOpen(false); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--t3)", fontSize: 11, padding: "2px 6px", flexShrink: 0 }}>归档</button>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div style={{ display: "grid", gap: 4 }}>
-              {sessions.map((s) => (
-                <button key={s.id} className="tbtn" onClick={() => loadSession(s.id)} style={{ textAlign: "left", borderColor: s.id === activeSession?.id ? "var(--acc)" : "var(--b)", color: s.id === activeSession?.id ? "var(--acc)" : "var(--t2)", padding: "5px 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10 }}>
-                  {s.title || "新对话"}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--b)", flexWrap: "wrap", flexShrink: 0 }}>
-              <span style={{ color: "var(--t)", fontSize: 12, flex: 1 }}>{activeSession?.title || "知识库对话"}</span>
-              {activeSession && <button className="tbtn" onClick={() => archiveChat(activeSession.id)}>归档</button>}
-            </div>
-            <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, display: "grid", gap: 10, alignContent: "start" }}>
-              {!messages.length && <div style={{ color: "var(--t3)", fontSize: 12 }}>直接提问，例如：「这个产品广告应该怎么打？」系统会先检索知识库，再调用本机 Hermes 生成回答，并在消息下方显示引用来源。</div>}
-              {messages.map((m) => (
-                <div key={m.id} style={{ justifySelf: m.role === "user" ? "end" : "start", maxWidth: "88%" }}>
-                  <div style={{ border: "1px solid var(--b)", background: m.role === "user" ? "rgba(47,129,247,.13)" : "rgba(255,255,255,.03)", color: "var(--t)", padding: "9px 11px", borderRadius: 8, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.65 }}>{m.content}</div>
-                  {m.role === "assistant" && m.citations?.length > 0 && (
-                    <details style={{ marginTop: 6, color: "var(--t3)", fontSize: 10 }}>
-                      <summary>引用来源 {m.citations.length}</summary>
-                      <div style={{ display: "grid", gap: 5, marginTop: 6 }}>
-                        {m.citations.map((c, i) => <button key={`${c.slug}-${i}`} className="tbtn" onClick={() => openSlug(c.slug)} style={{ textAlign: "left" }}>{c.slug}<br /><span style={{ color: "var(--t3)" }}>{c.snippet?.slice(0, 160)}</span></button>)}
-                      </div>
-                    </details>
-                  )}
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "160px minmax(0, 1fr)", gap: 10, minHeight: 320, flex: 1 }} className="brain-chat-grid">
+            {/* Sessions panel — desktop only */}
+            {!isMobile && (
+              <div className="card" style={{ overflow: "auto" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                  <div className="ct" style={{ margin: 0, flex: 1 }}>SESSIONS</div>
+                  <button className="tbtn" onClick={newChat} disabled={sending}>新建</button>
                 </div>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid var(--b)", flexShrink: 0 }}>
-              <textarea className="inp" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendChat(); }} placeholder="输入问题，Ctrl/⌘ + Enter 发送" style={{ minHeight: 54, maxHeight: 140, flex: 1, resize: "vertical" }} />
-              <button className="tbtn" onClick={sendChat} disabled={sending || !chatInput.trim()}>{sending ? "发送中..." : "发送"}</button>
+                <div style={{ display: "grid", gap: 4 }}>
+                  {sessions.map((s) => (
+                    <button key={s.id} className="tbtn" onClick={() => loadSession(s.id)} style={{ textAlign: "left", borderColor: s.id === activeSession?.id ? "var(--acc)" : "var(--b)", color: s.id === activeSession?.id ? "var(--acc)" : "var(--t2)", padding: "5px 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10 }}>
+                      {s.title || "新对话"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Chat panel */}
+            <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--b)", flexWrap: "wrap", flexShrink: 0 }}>
+                <span style={{ color: "var(--t)", fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeSession?.title || "知识库对话"}</span>
+                {isMobile && (
+                  <button className="tbtn" onClick={() => setSessionSheetOpen(true)}>≡ 会话</button>
+                )}
+                {activeSession && <button className="tbtn" onClick={() => archiveChat(activeSession.id)}>归档</button>}
+              </div>
+              <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, display: "grid", gap: 10, alignContent: "start" }}>
+                {!messages.length && <div style={{ color: "var(--t3)", fontSize: 12 }}>直接提问，例如：「这个产品广告应该怎么打？」系统会先检索知识库，再调用本机 Hermes 生成回答，并在消息下方显示引用来源。</div>}
+                {messages.map((m) => (
+                  <div key={m.id} style={{ justifySelf: m.role === "user" ? "end" : "start", maxWidth: "88%" }}>
+                    <div style={{ border: "1px solid var(--b)", background: m.role === "user" ? "rgba(47,129,247,.13)" : "rgba(255,255,255,.03)", color: "var(--t)", padding: "9px 11px", borderRadius: 8, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.65 }}>{m.content}</div>
+                    {m.role === "assistant" && m.citations?.length > 0 && (
+                      <details style={{ marginTop: 6, color: "var(--t3)", fontSize: 10 }}>
+                        <summary>引用来源 {m.citations.length}</summary>
+                        <div style={{ display: "grid", gap: 5, marginTop: 6 }}>
+                          {m.citations.map((c, i) => <button key={`${c.slug}-${i}`} className="tbtn" onClick={() => openSlug(c.slug)} style={{ textAlign: "left" }}>{c.slug}<br /><span style={{ color: "var(--t3)" }}>{c.snippet?.slice(0, 160)}</span></button>)}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid var(--b)", flexShrink: 0 }}>
+                <textarea className="inp" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendChat(); }} placeholder="输入问题，Ctrl/⌘ + Enter 发送" style={{ minHeight: 54, maxHeight: 140, flex: 1, resize: "vertical" }} />
+                <button className="tbtn" onClick={sendChat} disabled={sending || !chatInput.trim()}>{sending ? "发送中..." : "发送"}</button>
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {tab === "upload" && (

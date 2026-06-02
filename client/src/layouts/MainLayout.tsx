@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { logout } from "../api/client";
 import { useAuth } from "../App";
 import Terminal from "../pages/workbench/Terminal";
+import CloudCLINative from "../pages/workbench/CloudCLINative";
 
 type NavItem = {
   to: string;
@@ -75,7 +76,7 @@ const PATH_LABEL: Record<string, string> = {
   "/agents": "~/智能体会话",
   "/agents-legacy": "~/智能体会话（旧版）",
   "/agent": "~/AgentOS",
-  "/cloudcli": "~/CloudCLI",
+  "/cloudcli": "~/智能体会话",
   "/terminal": "~/服务器终端",
   "/servmon": "~/服务器监控",
   "/news": "~/资讯",
@@ -117,6 +118,7 @@ export default function MainLayout() {
   }, []);
 
   const [termMounted, setTermMounted] = useState(false);
+  const [ccuiMounted, setCcuiMounted] = useState(false);
   const THEMES = [
     "dark", "deep-space", "smoke-gold", "catppuccin", "hermes", "light",
     "klein", "mars", "hermes-orange", "burgundy", "mummy",
@@ -209,6 +211,11 @@ export default function MainLayout() {
   useEffect(() => {
     if (location.pathname === "/terminal") setTermMounted(true);
   }, [location.pathname]);
+
+  // 智能体会话(/agents):首次访问后常驻挂载,切板块秒回、WS/会话状态不丢。
+  useEffect(() => {
+    if (location.pathname === "/agents") setCcuiMounted(true);
+  }, [location.pathname]);
   const [clock, setClock] = useState("");
 
   // Clock
@@ -231,6 +238,7 @@ export default function MainLayout() {
     document.documentElement.setAttribute("data-theme", t);
     localStorage.setItem("opshub.theme", t);
     setThemePicker(false);
+    window.dispatchEvent(new CustomEvent("opshub:theme-changed", { detail: t }));
   };
 
   const toggleSidebar = () => {
@@ -374,7 +382,8 @@ export default function MainLayout() {
         </div>
         <div className={"content" + (
           location.pathname === "/agents" ||
-          location.pathname === "/agents-legacy"
+          location.pathname === "/agents-legacy" ||
+          location.pathname === "/cloudcli"
             ? " content-fullpage" : ""
         )}>
           {/* Terminal is always mounted (after first visit) but hidden when
@@ -384,7 +393,13 @@ export default function MainLayout() {
               <Terminal />
             </div>
           )}
-          {location.pathname !== "/terminal" && <Outlet />}
+          {/* CloudCLI 原生版常驻挂载(独立 React root),切板块时不卸载,保持 WS/会话状态、秒切。 */}
+          {ccuiMounted && (
+            <div style={location.pathname === "/agents" ? { display: "contents" } : { position: "absolute", width: 0, height: 0, overflow: "hidden", opacity: 0, pointerEvents: "none" }}>
+              <CloudCLINative />
+            </div>
+          )}
+          {location.pathname !== "/terminal" && location.pathname !== "/agents" && <Outlet />}
         </div>
       </div>
     </div>

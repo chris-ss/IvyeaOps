@@ -296,6 +296,103 @@ export async function updateSettings(
 }
 
 // ---------------------------------------------------------------------------
+// Skill Architect (rigorous multi-stage generation)
+// ---------------------------------------------------------------------------
+
+export type ArchitectInput = {
+  name: string;
+  label?: string;
+  type?: string;
+  required?: boolean;
+  placeholder?: string;
+  default?: string;
+  options?: string[];
+};
+
+export type ArchitectPlan = {
+  name?: string;
+  category?: string;
+  icon?: string;
+  description?: string;
+  description_zh?: string;
+  tool_kind?: string;
+  runtime?: string;
+  inputs?: ArchitectInput[];
+  steps?: string[];
+  output_schema?: string;
+  mcp_tools_used?: string[];
+  pitfalls?: string[];
+  [k: string]: unknown;
+};
+
+export type ArchitectClarification = {
+  question: string;
+  options?: string[];
+  why?: string;
+};
+
+export type ArchitectPlanResponse = {
+  stage: "clarify" | "plan";
+  clarifications?: ArchitectClarification[];
+  understanding?: Record<string, unknown>;
+  plan?: ArchitectPlan;
+  review?: Record<string, unknown>;
+};
+
+export type ArchitectValidation = {
+  ok: boolean;
+  attempts: number;
+  errors: string[];
+  warnings: string[];
+};
+
+export type ArchitectGenerated = {
+  name: string;
+  category: string | null;
+  frontmatter: Record<string, unknown>;
+  body: string;
+  preview: string;
+  validation: ArchitectValidation;
+  plan?: ArchitectPlan;
+};
+
+export async function architectPlan(input: {
+  idea: string;
+  category?: string;
+  ref_skill?: string;
+  clarifications?: Record<string, string>;
+}): Promise<ArchitectPlanResponse> {
+  const { data } = await api.post<ArchitectPlanResponse>(
+    "/skill/architect/plan",
+    input,
+    { timeout: 300000 },
+  );
+  return data;
+}
+
+export async function architectGenerate(plan: ArchitectPlan): Promise<ArchitectGenerated> {
+  const { data } = await api.post<ArchitectGenerated>(
+    "/skill/architect/generate",
+    { plan },
+    { timeout: 300000 },
+  );
+  return data;
+}
+
+export async function architectOneshot(input: {
+  idea: string;
+  category?: string;
+  ref_skill?: string;
+}): Promise<ArchitectGenerated> {
+  const { data } = await api.post<ArchitectGenerated>(
+    "/skill/architect/oneshot",
+    input,
+    { timeout: 300000 },
+  );
+  return data;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

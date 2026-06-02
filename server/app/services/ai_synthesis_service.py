@@ -817,6 +817,229 @@ async def generate_text(prompt: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Vision provider helpers
+# ---------------------------------------------------------------------------
+
+def _openai_key() -> str:
+    from app.core import hub_settings
+    val = hub_settings.get("openai_api_key")
+    return str(val) if val else ""
+
+
+def _assistant_vision_cfg() -> tuple[str, str, str] | None:
+    """Return (provider, key, base_url) for the custom assistant if configured,
+    or None. Only providers known to support vision are returned."""
+    from app.core import hub_settings
+    provider = str(hub_settings.get("assistant_provider") or "").lower()
+    key = str(hub_settings.get("assistant_api_key") or "")
+    base = str(hub_settings.get("assistant_base_url") or "")
+    VISION_CAPABLE = ("openai", "anthropic", "openrouter", "google", "together",
+                      "custom", "apimart", "deepseek")
+    if not key or provider not in VISION_CAPABLE:
+        return None
+    return provider, key, base
+
+
+def _vision_provider_chain() -> list[str]:
+    """Parse vision_ai_providers setting; filter to providers that actually
+    have a key configured in the current environment."""
+    from app.core import hub_settings
+    raw = str(hub_settings.get("vision_ai_providers") or "").strip()
+    valid = ("apimart", "openai", "assistant")
+    order = [p.strip().lower() for p in (raw or "apimart,openai,assistant").split(",")
+             if p.strip().lower() in valid]
+    order = list(dict.fromkeys(order)) or ["apimart", "openai", "assistant"]
+
+    # Only keep providers that have credentials configured right now.
+    available = []
+    for p in order:
+        if p == "apimart" and _apimart_key():
+            available.append(p)
+        elif p == "openai" and _openai_key():
+            available.append(p)
+        elif p == "assistant" and _assistant_vision_cfg():
+            available.append(p)
+    return available
+
+
+def has_vision_capability() -> bool:
+    """True if at least one vision provider is currently configured."""
+    return bool(_vision_provider_chain())
+
+
+async def _stream_apimart_vision(prompt: str, images_b64: list[str]) -> AsyncGenerator[str, None]:
+    """Claude Vision via Apimart (Anthropic messages format)."""
+    content: list[dict] = []
+    for uri in images_b64[:4]:
+        try:
+            header, data = uri.split(",", 1)
+            media_type = header.split(":")[1].split(";")[0]
+        except (ValueError, IndexError):
+            continue
+        content.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}})
+    content.append({"type": "text", "text": prompt})
+
+    payload = {"model": "claude-sonnet-4-6", "max_tokens": 8192,
+               "messages": [{"role": "user", "content": content}], "stream": True}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as client:
+        async with client.stream(
+            "POST", f"{_apimart_base()}/messages", json=payload,
+            headers={"Authorization": f"Bearer {_apimart_key()}",
+                     "Content-Type": "application/json",
+                     "anthropic-version": "2023-06-01"},
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                raw = line[5:].strip()
+                if raw == "[DONE]":
+                    break
+                try:
+                    ev = json.loads(raw)
+                except Exception:
+                    continue
+                if ev.get("type") == "content_block_delta":
+                    text = ev.get("delta", {}).get("text", "")
+                    if text:
+                        yield text
+                elif ev.get("type") == "error":
+                    raise RuntimeError(f"Apimart Vision 错误: {ev.get('error', ev)}")
+
+
+async def _stream_openai_vision(
+    prompt: str, images_b64: list[str],
+    api_key: str, base_url: str = "https://api.openai.com",
+    model: str = "gpt-4o",
+) -> AsyncGenerator[str, None]:
+    """GPT-4o / OpenAI-compatible vision (image_url content blocks)."""
+    content: list[dict] = []
+    for uri in images_b64[:4]:
+        content.append({"type": "image_url", "image_url": {"url": uri, "detail": "high"}})
+    content.append({"type": "text", "text": prompt})
+
+    payload = {"model": model, "max_tokens": 8192,
+               "messages": [{"role": "user", "content": content}], "stream": True}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as client:
+        async with client.stream(
+            "POST", f"{base_url.rstrip('/')}/v1/chat/completions", json=payload,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                raw = line[5:].strip()
+                if raw == "[DONE]":
+                    break
+                try:
+                    ev = json.loads(raw)
+                except Exception:
+                    continue
+                text = (ev.get("choices") or [{}])[0].get("delta", {}).get("content", "")
+                if text:
+                    yield text
+
+
+async def stream_vision(prompt: str, images_b64: list[str]) -> AsyncGenerator[tuple[str, str], None]:
+    """Vision fallback chain: tries each configured vision provider in order.
+
+    Each element of images_b64 should be a data-URI string like
+    'data:image/jpeg;base64,...' as produced by FileReader.readAsDataURL().
+    Yields (provider_name, text_chunk) tuples; on total failure yields ('error', detail).
+    """
+    chain = _vision_provider_chain()
+    if not chain:
+        yield "error", (
+            "当前没有配置支持视觉分析的模型。"
+            "请在「系统配置 → AI 服务」配置以下任意一项：\n"
+            "  · Apimart key（Claude Vision）\n"
+            "  · OpenAI API key（GPT-4o）\n"
+            "  · 自定义 assistant provider（支持视觉的模型）"
+        )
+        return
+
+    failures: list[str] = []
+    for provider in chain:
+        try:
+            got = False
+            if provider == "apimart":
+                label = "claude"
+                gen = _stream_apimart_vision(prompt, images_b64)
+            elif provider == "openai":
+                label = "gpt-4o"
+                gen = _stream_openai_vision(prompt, images_b64, _openai_key())
+            else:  # assistant
+                cfg = _assistant_vision_cfg()
+                if not cfg:
+                    continue
+                _, key, base = cfg
+                label = "assistant"
+                # Anthropic-format providers go through Apimart-style; others use OpenAI compat.
+                if "anthropic" in cfg[0] or "apimart" in cfg[0]:
+                    gen = _stream_apimart_vision(prompt, images_b64)
+                else:
+                    gen = _stream_openai_vision(prompt, images_b64, key, base or "https://api.openai.com")
+
+            async for chunk in gen:
+                got = True
+                yield label, chunk
+            if got:
+                return
+            failures.append(f"{provider}: 返回空")
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{provider}: {exc}")
+            _log.warning("vision provider %s failed: %s", provider, exc)
+
+    yield "error", (
+        "所有视觉 AI 提供商均不可用：\n"
+        + "\n".join(f"  · {f}" for f in failures)
+        + "\n\n已尝试的提供商顺序：" + " → ".join(chain)
+    )
+
+
+async def stream_text(prompt: str) -> AsyncGenerator[tuple[str, str], None]:
+    """Streaming counterpart of ``generate_text``: yields (provider, chunk).
+
+    For llm-only skill execution where we want token-by-token UX but NO tools /
+    MCP. Tries DeepSeek then Apimart. On total failure yields ('error', detail).
+    """
+    failures: list[str] = []
+
+    dkey = _deepseek_key()
+    if dkey:
+        try:
+            got = False
+            async for chunk in _stream_openai_compat(
+                dkey, "https://api.deepseek.com", "deepseek-chat", prompt
+            ):
+                got = True
+                yield "deepseek", chunk
+            if got:
+                return
+            failures.append("DeepSeek 返回空")
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"DeepSeek: {exc}")
+
+    if _apimart_key():
+        try:
+            got = False
+            async for chunk in _stream_apimart(prompt):
+                got = True
+                yield "claude", chunk
+            if got:
+                return
+            failures.append("Apimart 返回空")
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"Apimart: {exc}")
+
+    yield "error", (
+        "无可用文本模型。"
+        + (" / ".join(failures) if failures else "请在「系统配置」配置 DeepSeek 或 Apimart key。")
+    )
+
+
 async def _stream_openai_compat(
     api_key: str, base_url: str, model: str, prompt: str
 ) -> AsyncGenerator[str, None]:

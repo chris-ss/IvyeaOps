@@ -7,6 +7,94 @@ type Props = {
   onConfirm: (params: { agent_id: string; model: string; title: string; workdir?: string }) => void;
 };
 
+// A nicer model selector than a native <select>: tap to open a bottom sheet
+// with a scrollable, highlight-on-select list. Looks consistent on phones.
+function ModelPicker({ models, value, onChange }: {
+  models: string[];
+  value: string;
+  onChange: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  // Keep a "custom" entry visible if the current value isn't in the list.
+  const list = value && !models.includes(value) ? [value, ...models] : models;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inp"
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", textAlign: "left", width: "100%" }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font)" }}>
+          {value || "选择模型"}
+        </span>
+        <span style={{ color: "var(--t3)", fontSize: 9, marginLeft: 8, flexShrink: 0 }}>▼</span>
+      </button>
+
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 520, maxHeight: "70vh", display: "flex", flexDirection: "column",
+              background: "var(--bg1, var(--bg2))", border: "1px solid var(--b)",
+              borderRadius: "16px 16px 0 0", boxShadow: "0 -8px 40px rgba(0,0,0,.5)", overflow: "hidden",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 4px", flexShrink: 0 }}>
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: "var(--b2)" }} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 16px 10px", borderBottom: "1px solid var(--b)", flexShrink: 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t)" }}>选择模型</span>
+              <span onClick={() => setOpen(false)} style={{ cursor: "pointer", color: "var(--t3)", fontSize: 16, lineHeight: 1 }}>✕</span>
+            </div>
+            <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 6 }}>
+              {list.map((m) => {
+                const sel = m === value;
+                return (
+                  <div
+                    key={m}
+                    role="button"
+                    onClick={() => { onChange(m); setOpen(false); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, padding: "12px", borderRadius: 8, marginBottom: 2,
+                      cursor: "pointer", userSelect: "none",
+                      background: sel ? "color-mix(in srgb, var(--acc) 16%, transparent)" : "transparent",
+                      color: sel ? "var(--acc)" : "var(--t)", fontSize: 13,
+                    }}
+                  >
+                    <span style={{ flex: 1, fontFamily: "var(--font)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {m}{value && !models.includes(m) ? "（自定义）" : ""}
+                    </span>
+                    <span style={{ width: 12, textAlign: "center", color: "var(--acc)", flexShrink: 0 }}>{sel ? "✓" : ""}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Modal that lets the user pick which agent to spawn for a new session.
 //
 // Step 1: pick an agent (cards show binary status & default model).
@@ -143,23 +231,18 @@ export default function AgentPicker({ open, onClose, onConfirm }: Props) {
           {/* Step 2: model + title + workdir */}
           {selectedAgent && (
             <>
+              {selectedAgent.id === "claude" && selectedAgent.caps?.authenticated === false && (
+                <div style={{ background: "color-mix(in srgb, var(--amber) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--amber) 40%, transparent)", borderRadius: 6, padding: "7px 10px", fontSize: 11, color: "var(--amber)", lineHeight: 1.6 }}>
+                  ⚠ 未检测到 Claude Code 登录。请在服务器终端运行 <code style={{ fontFamily: "var(--font)", background: "rgba(0,0,0,.2)", padding: "1px 4px", borderRadius: 3 }}>claude auth login</code> 完成授权。
+                </div>
+              )}
               <div className="fg">
                 <label>模型</label>
-                <select
-                  className="inp"
+                <ModelPicker
+                  models={selectedAgent.models}
                   value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  style={{ paddingRight: 24 }}
-                >
-                  {selectedAgent.models.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                  {!selectedAgent.models.includes(model) && model && (
-                    <option value={model}>{model}（自定义）</option>
-                  )}
-                </select>
+                  onChange={setModel}
+                />
               </div>
 
               <div className="fg">

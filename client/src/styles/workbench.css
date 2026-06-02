@@ -392,8 +392,8 @@ body::after{
 .proc-action:disabled{opacity:.5;cursor:not-allowed}
 .proc-locked{font-size:9px;color:var(--t3);white-space:nowrap}
 @media (max-width: 680px){
-  .service-row{grid-template-columns:minmax(260px,1fr) 82px 62px;gap:8px}
-  .service-list{overflow-x:auto}
+  .service-row{grid-template-columns:minmax(0,1fr) 82px 62px;gap:6px}
+  .service-list{overflow-x:hidden}
   .proc-card{padding:6px}
   .proc-table-wrap{max-height:520px}
 }
@@ -874,6 +874,64 @@ body::after{
 .agent-msg .msg-tag{font-size:9px;color:var(--t3);margin-bottom:3px;letter-spacing:.06em;text-transform:uppercase}
 .agent-msg.summary .msg-tag{color:var(--blue)}
 
+/* Structured agentic events (claude stream-json): tool calls + results */
+.agent-tool-call{align-self:flex-start;max-width:84%;margin-bottom:7px;border:1px solid color-mix(in srgb,var(--acc) 28%,var(--b));border-radius:var(--r);background:color-mix(in srgb,var(--acc) 5%,transparent);overflow:hidden}
+.agent-tool-head{display:flex;align-items:center;gap:7px;width:100%;padding:6px 10px;background:transparent;border:none;cursor:pointer;font-family:var(--font);font-size:10.5px;color:var(--t2);text-align:left}
+.agent-tool-head:disabled{cursor:default}
+.agent-tool-icon{flex-shrink:0}
+.agent-tool-name{flex-shrink:0;color:var(--acc);font-weight:600}
+.agent-tool-summary{flex:1;min-width:0;color:var(--t3);font-size:10px;font-family:var(--font);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-tool-toggle{flex-shrink:0;color:var(--t3);font-size:9px}
+/* Edit/Write diff */
+.agent-diff{border-top:1px solid var(--b);background:var(--bg);font-family:var(--font);font-size:10px;line-height:1.5;max-height:300px;overflow:auto}
+.agent-diff .diff-line{padding:0 10px;white-space:pre-wrap;word-break:break-word}
+.agent-diff .diff-del{background:rgba(248,113,113,.10);color:#f87171}
+.agent-diff .diff-add{background:rgba(74,222,128,.10);color:var(--acc)}
+/* TodoWrite checklist */
+.agent-todo{border-top:1px solid var(--b);background:var(--bg);padding:6px 10px;display:flex;flex-direction:column;gap:3px}
+.agent-todo .todo-item{display:flex;gap:7px;align-items:flex-start;font-size:10.5px;line-height:1.5;color:var(--t2)}
+.agent-todo .todo-mark{flex-shrink:0;color:var(--t3)}
+.agent-todo .todo-in_progress{color:var(--acc)}
+.agent-todo .todo-in_progress .todo-mark{color:var(--acc)}
+.agent-todo .todo-completed{color:var(--t3)}
+.agent-todo .todo-completed .todo-text{text-decoration:line-through;opacity:.7}
+/* Extended-thinking block */
+.agent-thinking{align-self:flex-start;max-width:84%;margin-bottom:7px;border:1px dashed var(--b2);border-radius:var(--r);background:transparent}
+.agent-thinking-head{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:5px 10px;background:transparent;border:none;cursor:pointer;font-family:var(--font);font-size:10px;color:var(--t3)}
+.agent-thinking-body{padding:6px 10px;border-top:1px dashed var(--b);color:var(--t3);font-size:10px;line-height:1.6;white-space:pre-wrap;word-break:break-word;font-style:italic;max-height:280px;overflow:auto}
+/* User message attachment chips */
+.agent-msg-attachments{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.agent-att-chip{font-size:9px;color:var(--t3);background:var(--bg3);border:1px solid var(--b);border-radius:3px;padding:1px 6px}
+
+/* MCP manager modal */
+.mcp-backdrop{position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px}
+.mcp-modal{width:min(560px,100%);max-height:80vh;display:flex;flex-direction:column;background:var(--bg1);border:1px solid var(--b);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.5);overflow:hidden}
+.mcp-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--b);flex-shrink:0}
+.mcp-title{flex:1;font-size:13px;font-weight:600;color:var(--t)}
+.mcp-err{padding:7px 14px;font-size:11px;color:var(--red);background:rgba(248,113,113,.08);border-bottom:1px solid rgba(248,113,113,.25);flex-shrink:0}
+.mcp-body{flex:1;min-height:0;overflow:auto;padding:6px 0}
+.mcp-empty{padding:28px 14px;text-align:center;color:var(--t3);font-size:11px}
+.mcp-row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--b)}
+.mcp-type{flex-shrink:0;font-size:9px;padding:2px 7px;border-radius:3px;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--b);color:var(--t3)}
+.mcp-type-stdio{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 35%,transparent)}
+.mcp-type-http,.mcp-type-sse{color:var(--blue);border-color:rgba(96,165,250,.35)}
+.mcp-row-main{flex:1;min-width:0}
+.mcp-row-name{font-size:12px;color:var(--t)}
+.mcp-row-detail{font-size:10px;color:var(--t3);font-family:var(--font);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.mcp-env{color:var(--t3)}
+.mcp-foot{padding:12px 14px;border-top:1px solid var(--b);flex-shrink:0}
+.mcp-form{padding:12px 14px;border-top:1px solid var(--b);display:flex;flex-direction:column;gap:8px;flex-shrink:0;background:var(--bg2)}
+.mcp-form-row{display:flex;gap:8px}
+.mcp-form-row .inp{flex:1}
+.mcp-form-actions{display:flex;justify-content:flex-end;gap:8px}
+.agent-tool-input{margin:0;padding:8px 10px;border-top:1px solid var(--b);background:var(--bg);color:var(--t2);font-family:var(--font);font-size:10px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:280px;overflow:auto}
+.agent-tool-result{align-self:flex-start;max-width:84%;margin-bottom:7px;border:1px solid var(--b);border-radius:var(--r);background:var(--bg3);overflow:hidden}
+.agent-tool-result.err{border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.06)}
+.agent-tool-result-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 10px;font-size:9px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase}
+.agent-tool-result.err .agent-tool-result-head{color:var(--red)}
+.agent-tool-result-head button{background:transparent;border:1px solid var(--b);border-radius:3px;color:var(--t3);cursor:pointer;font-size:9px;font-family:var(--font);padding:1px 7px;text-transform:none;letter-spacing:0}
+.agent-tool-result pre{margin:0;padding:0 10px 8px;color:var(--t2);font-family:var(--font);font-size:10px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto}
+
 /* Agent CLI pane */
 .cli-pane{position:relative;flex:1;min-height:0;background:var(--bg2);display:flex;flex-direction:column}
 .cli-live-shell{flex:1;min-height:0;background:#000;display:flex;flex-direction:column}
@@ -993,11 +1051,14 @@ body::after{
   .terminal-unified-chip{padding:6px 8px;font-size:10px;min-height:30px;min-width:30px}
   .terminal-workbench{grid-template-columns:1fr;gap:10px}
   .terminal-session-list{max-height:180px}
-  .terminal-main{min-height:72dvh;padding:8px}
+  /* Mobile: drop the outer card chrome (border/padding/background) so the
+     inner black terminal pane fills the whole area — the user only wants
+     the single framed pane, not a frame-inside-a-frame. */
+  .terminal-main{min-height:72dvh;padding:0;border:none;background:transparent;border-radius:0}
   .terminal-main-toolbar{flex-direction:column;align-items:flex-start;gap:8px;margin-bottom:8px}
   .terminal-main-toolbar-mobile-hidden{display:none}
   .terminal-inline-actions{gap:6px}
-  .terminal-pane-wrap{min-height:66dvh}
+  .terminal-pane-wrap{min-height:72dvh}
   .terminal-pane-wrap:fullscreen{border-radius:0;border:none}
   .terminal-pane-wrap:fullscreen iframe,
   .terminal-pane-wrap:fullscreen .terminal-live-pane{height:100%}
@@ -1108,7 +1169,20 @@ body::after{
 .git-panel{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg1)}
 .git-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--t3);font-size:11.5px;gap:6px;padding:20px;text-align:center}
 .git-empty code{font-family:var(--font);background:var(--bg2);padding:2px 6px;border-radius:3px;font-size:10.5px;color:var(--t2)}
-.git-branch-bar{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--b);background:var(--bg2);flex-shrink:0;font-size:11px}
+.git-branch-bar{position:relative;display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--b);background:var(--bg2);flex-shrink:0;font-size:11px}
+.git-branch-btn{background:transparent;border:1px solid transparent;border-radius:4px;cursor:pointer;font-family:var(--font);color:var(--t);font-weight:500;font-size:11px;padding:1px 6px}
+.git-branch-btn:hover:not(:disabled){border-color:var(--b2)}
+.git-branch-btn:disabled{cursor:default;opacity:.7}
+.git-branch-backdrop{position:fixed;inset:0;z-index:30}
+.git-branch-dropdown{position:absolute;top:100%;left:10px;z-index:31;margin-top:4px;min-width:210px;max-height:320px;overflow:auto;background:var(--bg1);border:1px solid var(--b);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.4);display:flex;flex-direction:column}
+.git-branch-dropdown-head{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--b);font-size:10px;color:var(--t3);position:sticky;top:0;background:var(--bg1)}
+.git-branch-dropdown-err{padding:6px 10px;font-size:10px;color:var(--red);background:rgba(248,113,113,.08)}
+.git-branch-dropdown-empty{padding:14px;text-align:center;font-size:11px;color:var(--t3)}
+.git-branch-item{display:flex;align-items:center;gap:7px;width:100%;text-align:left;padding:8px 10px;background:transparent;border:none;border-bottom:1px solid var(--b);cursor:pointer;font-family:var(--font);font-size:11px;color:var(--t2)}
+.git-branch-item:hover:not(:disabled){background:var(--bg3)}
+.git-branch-item.active{color:var(--acc)}
+.git-branch-item-mark{flex-shrink:0;font-size:9px}
+.git-branch-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .git-branch-icon{color:var(--acc)}
 .git-branch-name{color:var(--t);font-weight:500}
 .git-ahead{color:var(--acc);font-size:10px;padding:1px 5px;border:1px solid color-mix(in srgb, var(--acc) 30%, transparent);border-radius:2px;background:color-mix(in srgb, var(--acc) 8%, transparent)}
@@ -1218,6 +1292,9 @@ body::after{
 .qs-input{flex:1;background:var(--bg2);border:1px solid var(--b);color:var(--t);font-family:var(--font);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;min-width:0}
 .qs-input:focus{border-color:var(--acc)}
 .qs-faint{font-size:10px;color:var(--t3);line-height:1.6}
+.qs-tools{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin-top:8px}
+.qs-tool{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2);cursor:pointer}
+.qs-tool input{accent-color:var(--acc);width:13px;height:13px;flex-shrink:0}
 .qs-faint code{font-family:var(--font);background:var(--bg2);padding:0 4px;border-radius:2px;font-size:9.5px;color:var(--t2)}
 .qs-loading{font-size:10px;color:var(--t3);padding:4px 0}
 .qs-err{margin-top:6px;padding:4px 8px;font-size:10px;color:var(--red);background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);border-radius:3px}
@@ -1322,6 +1399,16 @@ body::after{
 .ws-tabs-pending{padding:0 10px;font-size:11px;color:var(--amber);animation:ws-pulse 1s ease-in-out infinite}
 @keyframes ws-pulse{0%,100%{opacity:.4}50%{opacity:1}}
 
+/* Hide the top tab bar and show the bottom nav on phone/narrow viewports.
+   This rule MUST live after the `.ws-tabs-bar{display:flex}` base rule
+   above — same specificity means later wins, so an earlier media query
+   would be overridden by the base display:flex. 900px matches MainLayout's
+   mobile threshold so the two navs never appear at once. */
+@media (max-width:900px){
+  .ws-tabs-bar{display:none}
+  .ws-bottom-nav{display:flex}
+}
+
 /* ─── Transcript viewer ─── */
 .ws-transcript{display:flex;flex-direction:column;flex:1;min-height:0;background:var(--bg1)}
 .ws-transcript-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--b);background:var(--bg2);flex-shrink:0;flex-wrap:wrap}
@@ -1424,6 +1511,11 @@ body::after{
 .agent-files-btn.danger:hover{border-color:var(--red);color:var(--red)}
 .agent-files-edit-input{flex:1;min-width:0;background:var(--bg3);border:1px solid var(--acc);color:var(--t);font-family:var(--font);font-size:11px;padding:3px 6px;border-radius:3px;outline:none}
 .agent-files-empty{padding:32px 20px;text-align:center;color:var(--t3);font-size:11px}
+/* Inline file editor overlay */
+.agent-files-editor{position:absolute;inset:0;z-index:6;background:var(--bg1);display:flex;flex-direction:column}
+.agent-files-editor-head{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--b);flex-shrink:0}
+.agent-files-editor-name{flex:1;min-width:0;font-size:12px;color:var(--t);font-family:var(--font);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-files-editor-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
 .agent-files-drop-overlay{position:absolute;inset:0;background:color-mix(in srgb, var(--acc) 12%, transparent);border:2px dashed color-mix(in srgb, var(--acc) 60%, transparent);display:flex;align-items:center;justify-content:center;z-index:10;pointer-events:none}
 .agent-files-drop-card{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--bg1);border:1px solid var(--acc);border-radius:8px;padding:16px 24px;font-size:12px;color:var(--t)}
 
@@ -1882,6 +1974,11 @@ body::after{
 /* ── GBrain chat: fill content height so input pins to bottom ── */
 .content:has(.brain-page-chat){overflow:hidden;display:flex;flex-direction:column}
 .brain-page-chat{flex:1;min-height:0;display:flex;flex-direction:column}
+.content:has(.asst-page){overflow:hidden;display:flex;flex-direction:column}
+.asst-page{flex:1;min-height:0}
+.content:has(.imggen-page){overflow:hidden;display:flex;flex-direction:column}
+.imggen-page{flex:1;min-height:0}
+.imggen-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:20px;padding:4px 2px}
 
 /* ── Freight quote tool ── */
 .fq-input{width:100%;background:var(--bg2);border:1px solid var(--b);color:var(--t);font-family:var(--font);font-size:12px;padding:7px 10px;border-radius:6px;outline:none;transition:border .12s;box-sizing:border-box}
@@ -1900,7 +1997,7 @@ body::after{
 .hs-refresh-btn:hover:not(:disabled){color:var(--t);border-color:var(--acc)}
 .hs-refresh-btn:disabled{opacity:.5;cursor:not-allowed}
 .hs-health-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;padding:6px 0}
-.hs-health-row{display:flex;align-items:center;gap:8px;padding:7px 16px;font-size:11px;border-bottom:1px solid var(--b)}
+.hs-health-row{display:flex;align-items:center;gap:8px;padding:7px 16px;font-size:11px;border-bottom:1px solid var(--b);min-width:0;overflow:hidden}
 .hs-health-row:last-child,.hs-health-row:nth-last-child(2),.hs-health-row:nth-last-child(3){border-bottom:none}
 .hs-dot{font-size:11px;font-weight:700;flex-shrink:0;width:14px;text-align:center}
 .hs-dot-ok{color:var(--acc)}

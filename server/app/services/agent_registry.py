@@ -84,6 +84,10 @@ class AgentDef:
     # agents (hermes) silently fail when given a model via the -z flag and
     # we must rely on their persisted default instead.
     chat_skip_model: bool = False
+    # When True, chat mode emits newline-delimited stream-json events (claude
+    # `--output-format stream-json`) rather than plain text. The router uses a
+    # structured handler (_chat_stream_json) that surfaces tool calls/results.
+    chat_stream_json: bool = False
     # Regex patterns (re.MULTILINE | re.DOTALL) to strip from the final
     # accumulated chat-mode output.  Used to drop banners / footers / shell
     # prompt artifacts that the agent prints alongside its actual reply.
@@ -179,18 +183,28 @@ AGENT_DEFS: dict[str, AgentDef] = {
         # the postinstall didn't run, so users typically have to point at the
         # platform-specific binary directly. Configure via hub_settings.claude_bin.
         bin_candidates=["claude"],
-        default_model="claude-sonnet-4.5",
-        static_models=[
-            "claude-sonnet-4.5",
-            "claude-sonnet-4.6",
-            "claude-haiku-4.5",
-            "claude-opus-4.5",
-            "claude-opus-4.6",
-            "claude-opus-4.7",
-        ],
+        # Claude Code CLI accepts tier aliases (it resolves to the latest of
+        # each tier) or a full id like `claude-opus-4-8`. Aliases never go
+        # stale and always match the user's subscription, so we use them as
+        # the safe default list. The actual configured model (from
+        # ~/.claude/settings.json) is injected at the top by _live_models_for.
+        default_model="default",
+        static_models=["default", "opus", "sonnet", "haiku"],
         cli_args=[],
-        # `claude -p <prompt>` prints the answer and exits.
-        chat_args=["-p", "{prompt}"],
+        # Structured chat: stream-json emits init/assistant/tool_use/tool_result/
+        # result events line by line, so the UI can render the full agentic flow.
+        # Input is ALSO stream-json (sent via stdin by _chat_stream_json), which
+        # lets us pass real multimodal image blocks — hence no "{prompt}" arg
+        # here. --resume (build_argv resume_id) keeps claude's own history.
+        # --permission-mode is appended per-session by _chat_stream_json
+        # (defaults to acceptEdits) so the user can switch策略 per session.
+        chat_args=[
+            "-p",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--verbose",
+        ],
+        chat_stream_json=True,
         resume_strategy="flag",
         resume_flag="--resume",
         prompt_regex=r"\n[>❯]\s*$",
@@ -202,9 +216,11 @@ AGENT_DEFS: dict[str, AgentDef] = {
         id="kiro",
         display_name="Kiro CLI",
         bin_candidates=["kiro-cli"],
-        default_model="claude-sonnet-4.5",
-        static_models=[],
-        use_kiro_models=True,  # exact same gateway as the agent itself uses
+        # Live list comes from `kiro-cli chat --list-models`. These are only
+        # an offline fallback, in kiro's real dotted format (not dashes).
+        default_model="auto",
+        static_models=["auto", "claude-sonnet-4.6", "claude-opus-4.6", "claude-haiku-4.5"],
+        use_kiro_models=True,  # merge in gateway catalog when available
         # `kiro-cli chat` is the chat subcommand.
         cli_args=["chat"],
         # `kiro-cli chat --no-interactive "<prompt>"` prints the answer.
@@ -219,6 +235,21 @@ AGENT_DEFS: dict[str, AgentDef] = {
             r"\n+\s*▸ Credits:[^\n]*",
             r"^>\s+",
         ],
+        caps_extra={"supports_oneshot": True, "supports_resume": True},
+    ),
+    # ---- Antigravity (agy) ----------------------------------------------
+    "agy": AgentDef(
+        id="agy",
+        display_name="Antigravity",
+        bin_candidates=["agy", "antigravity"],
+        default_model="default",
+        static_models=["default"],
+        cli_args=[],
+        chat_args=["-p", "{prompt}"],
+        chat_skip_model=True,  # Agy does not have --model flag yet
+        resume_strategy="flag",
+        resume_flag="--conversation",
+        prompt_regex=r"\n(?:agy|Antigravity) ?[>›❯]\s*$",
         caps_extra={"supports_oneshot": True, "supports_resume": True},
     ),
 }
@@ -245,6 +276,7 @@ _INTEGRATION_KEYS = {
     "codex":  "codex_bin",
     "claude": "claude_bin",
     "kiro":   "kiro_cli_bin",
+    "agy":    "agy_bin",
 }
 
 
@@ -267,15 +299,30 @@ def discover_agents() -> list[dict[str, Any]]:
     user installs a new binary at runtime.
     """
     svc.init_db()
+    # "重新探测" is an explicit user request for fresh data, so bust the kiro
+    # model cache and force a live `--list-models` call (the passive picker
+    # read keeps the 5-min cache for speed).
+    global _kiro_models_cache
+    _kiro_models_cache = (0.0, [])
     kiro_models = _list_kiro_models()
+
     discovered: list[dict[str, Any]] = []
     for adef in AGENT_DEFS.values():
         bin_path = _resolve_bin(_candidates_for(adef))
         models = list(adef.static_models)
         if adef.use_kiro_models:
-            # Use kiro-gateway models when defined; fall back to static list
-            # if the gateway is unreachable so the picker stays usable.
-            models = kiro_models or list(_KIRO_MODELS_FALLBACK)
+            # Merge gateway catalog (when reachable) on top of the static
+            # list, so kiro always has usable models even with no gateway.
+            for m in (kiro_models or _KIRO_MODELS_FALLBACK):
+                if m not in models:
+                    models.append(m)
+
+        # Prepend the agent's actual configured models (read live from its
+        # own config), so they appear first and drive the default.
+        configured = _live_models_for(adef.id)
+        merged = _merge_models(adef.id, configured, models)
+        default_model = configured[0] if configured else adef.default_model
+
         caps = {
             "cli": True,
             "chat": adef.chat_args is not None,
@@ -283,12 +330,14 @@ def discover_agents() -> list[dict[str, Any]]:
             "binary_found": bin_path is not None,
             **adef.caps_extra,
         }
+        if adef.id == "claude":
+            caps["authenticated"] = _claude_authenticated()
         svc.upsert_agent(
             agent_id=adef.id,
             display_name=adef.display_name,
             binary_path=bin_path or "",
-            default_model=adef.default_model,
-            models=models,
+            default_model=default_model,
+            models=merged,
             caps=caps,
             enabled=bin_path is not None,
         )
@@ -297,8 +346,8 @@ def discover_agents() -> list[dict[str, Any]]:
                 "id": adef.id,
                 "display_name": adef.display_name,
                 "binary_path": bin_path or "",
-                "default_model": adef.default_model,
-                "models": models,
+                "default_model": default_model,
+                "models": merged,
                 "caps": caps,
                 "enabled": bin_path is not None,
             }
@@ -312,13 +361,198 @@ def get_agent_def(agent_id: str) -> AgentDef:
     return AGENT_DEFS[agent_id]
 
 
+def _read_hermes_models() -> list[str]:
+    """Read the actual model(s) hermes is configured to use from its own
+    config.yaml. Returns [primary, fallback, ...] with no duplicates."""
+    import yaml
+    config_path = os.path.join(os.path.expanduser("~"), ".hermes", "config.yaml")
+    try:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception:
+        return []
+    models: list[str] = []
+    # Primary model
+    model_block = cfg.get("model") or {}
+    if isinstance(model_block, dict):
+        m = (model_block.get("default") or "").strip()
+        if m and m not in models:
+            models.append(m)
+    # Fallback providers
+    for fb in cfg.get("fallback_providers") or []:
+        if isinstance(fb, dict):
+            m = (fb.get("model") or "").strip()
+            if m and m not in models:
+                models.append(m)
+    return models
+
+
+def _read_claude_models() -> list[str]:
+    """Return claude's configured default model + the tier aliases the
+    Claude Code CLI actually accepts. The configured model goes first so it
+    becomes the picker default."""
+    import json
+    settings_path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
+    configured = ""
+    try:
+        with open(settings_path) as f:
+            configured = (json.load(f).get("model") or "").strip()
+    except Exception:
+        configured = ""
+    models: list[str] = []
+    if configured:
+        models.append(configured)
+    for alias in ("default", "opus", "sonnet", "haiku"):
+        if alias not in models:
+            models.append(alias)
+    return models
+
+
+def _claude_authenticated() -> bool:
+    """True when Claude Code has a stored login (OAuth credentials or an
+    oauthAccount in ~/.claude.json). Used to avoid showing a misleading
+    'please log in' hint to users who are already authenticated."""
+    import json
+    home = os.path.expanduser("~")
+    if os.path.isfile(os.path.join(home, ".claude", ".credentials.json")):
+        return True
+    try:
+        with open(os.path.join(home, ".claude.json")) as f:
+            if json.load(f).get("oauthAccount"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _read_codex_models() -> list[str]:
+    """Return codex's configured default + the models codex actually offers
+    (visibility=='list' in its models cache). Configured model goes first."""
+    import json
+    home = os.path.expanduser("~")
+    default = ""
+    try:
+        with open(os.path.join(home, ".codex", "config.toml")) as f:
+            for line in f:
+                s = line.strip()
+                if "=" in s and s.split("=", 1)[0].strip() == "model":
+                    default = s.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    except Exception:
+        default = ""
+    models: list[str] = []
+    if default:
+        models.append(default)
+    try:
+        with open(os.path.join(home, ".codex", "models_cache.json")) as f:
+            for m in json.load(f).get("models", []):
+                if m.get("visibility") == "list":
+                    slug = (m.get("slug") or "").strip()
+                    if slug and slug not in models:
+                        models.append(slug)
+    except Exception:
+        pass
+    return models
+
+
+# kiro --list-models hits the network, so cache the result for a few minutes
+# to keep the picker snappy. (timestamp, models)
+_kiro_models_cache: tuple[float, list[str]] = (0.0, [])
+
+
+def _read_kiro_models() -> list[str]:
+    """Return kiro's actual available models via `kiro-cli chat --list-models`
+    (default first). Cached 5 min; empty on failure so static fallback wins."""
+    import json
+    import time
+    global _kiro_models_cache
+    ts, cached = _kiro_models_cache
+    if cached and (time.time() - ts) < 300:
+        return cached
+    bin_path = _resolve_bin(_candidates_for(AGENT_DEFS["kiro"]))
+    if not bin_path:
+        return []
+    try:
+        out = subprocess.run(
+            [bin_path, "chat", "--list-models", "--format", "json"],
+            capture_output=True, text=True, timeout=12,
+        )
+        data = json.loads(out.stdout)
+        models: list[str] = []
+        default = (data.get("default_model") or "").strip()
+        if default:
+            models.append(default)
+        for m in data.get("models", []):
+            name = (m.get("model_id") or m.get("model_name") or "").strip()
+            if name and name not in models:
+                models.append(name)
+        if models:
+            _kiro_models_cache = (time.time(), models)
+        return models
+    except Exception:
+        return []
+
+
+def _live_models_for(agent_id: str) -> list[str]:
+    """Return the agent's actually-configured/available models (live, from
+    its own config or CLI). Empty when no live source or the read fails —
+    callers fall back to the static list."""
+    if agent_id == "hermes":
+        return _read_hermes_models()
+    if agent_id == "claude":
+        return _read_claude_models()
+    if agent_id == "codex":
+        return _read_codex_models()
+    if agent_id == "kiro":
+        return _read_kiro_models()
+    return []
+
+
+# Agents whose live source is the COMPLETE, authoritative model list
+# (codex models cache, kiro --list-models, claude tier aliases). For these
+# we use the live list as-is. Hermes only reports its configured primary +
+# fallback, so we append its static "other selectable" models after them.
+_LIVE_IS_COMPLETE = {"codex", "kiro", "claude"}
+
+
+def _merge_models(agent_id: str, live: list[str], static: list[str]) -> list[str]:
+    """Combine live + static models per agent semantics."""
+    if not live:
+        return list(static)
+    if agent_id in _LIVE_IS_COMPLETE:
+        return list(live)
+    merged = list(live)
+    for m in static:
+        if m not in merged:
+            merged.append(m)
+    return merged
+
+
 def list_agents() -> list[dict[str, Any]]:
-    """Cheap read for the picker — returns the persisted projection."""
+    """Cheap read for the picker.
+
+    Returns the persisted projection with the agent's actual configured
+    models injected at the top — reads each agent's own config so the
+    picker shows what it is really using, not a stale static list.
+    """
     rows = svc.list_agents_db()
     if not rows:
-        # First boot before discovery — fall back to live probe.
         return discover_agents()
-    return rows
+
+    result = []
+    for row in rows:
+        agent_id = row.get("id", "")
+        configured = _live_models_for(agent_id)
+        if not configured:
+            result.append(row)
+            continue
+
+        adef = AGENT_DEFS.get(agent_id)
+        static = list(adef.static_models) if adef else []
+        merged = _merge_models(agent_id, configured, static)
+        result.append({**row, "models": merged, "default_model": configured[0]})
+
+    return result
 
 
 def build_argv(

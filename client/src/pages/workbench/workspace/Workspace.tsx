@@ -8,6 +8,7 @@ import TopBar from "./TopBar";
 import MobileBottomNav from "./MobileBottomNav";
 import CommandPalette from "./CommandPalette";
 import QuickSettings from "./QuickSettings";
+import MCPManager from "./MCPManager";
 import Onboarding from "./Onboarding";
 import AgentPicker from "../../../components/AgentPicker";
 import { availableTabsFor, type TabKey } from "./tabs";
@@ -59,6 +60,7 @@ export default function Workspace() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [qsAnchor, setQsAnchor] = useState<DOMRect | null>(null);   // null = closed
+  const [mcpOpen, setMcpOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try { return localStorage.getItem("opshub-workspace-onboarded") !== "1"; }
     catch { return false; }
@@ -362,7 +364,9 @@ export default function Workspace() {
         project={selectedProject}
         session={selectedSession}
         onAfterRefresh={() => { void refresh(); }}
+        onOpenMCP={() => { setQsAnchor(null); setMcpOpen(true); }}
       />
+      <MCPManager open={mcpOpen} onClose={() => setMcpOpen(false)} />
       {showOnboarding && (
         <Onboarding
           onDone={() => {

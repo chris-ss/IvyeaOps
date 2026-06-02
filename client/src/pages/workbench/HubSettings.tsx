@@ -426,6 +426,7 @@ function HealthPanel() {
     { label: "Agent · hermes",            key: "runners", nested: "hermes" },
     { label: "Agent · codex",             key: "runners", nested: "codex" },
     { label: "Agent · claude",            key: "runners", nested: "claude" },
+    { label: "Agent · kiro",              key: "runners", nested: "kiro" },
   ];
 
   const get = (row: typeof rows[0]) => {
@@ -433,6 +434,16 @@ function HealthPanel() {
     const top = health[row.key as keyof HealthResp] as any;
     if (row.nested) return top?.[row.nested];
     return top;
+  };
+
+  const shortDetail = (detail: string): string => {
+    if (!detail) return "";
+    // Abbreviate long absolute paths: show only the last segment
+    if (detail.startsWith("/") && detail.length > 32) {
+      const last = detail.split("/").filter(Boolean).pop() ?? detail;
+      return "…/" + last;
+    }
+    return detail;
   };
 
   return (
@@ -453,11 +464,12 @@ function HealthPanel() {
       <div className="hs-health-grid">
         {rows.map(row => {
           const item = get(row);
+          const full = item?.detail || "";
           return (
             <div key={row.label} className="hs-health-row">
               <Dot ok={item?.ok} loading={loading || (!health && !err)} />
               <span className="hs-health-label">{row.label}</span>
-              <span className="hs-health-detail">{item?.detail || ""}</span>
+              <span className="hs-health-detail" title={full}>{shortDetail(full)}</span>
             </div>
           );
         })}
@@ -739,6 +751,7 @@ export default function HubSettings() {
                 label={`${name === "hermes" ? "Hermes" : name === "codex" ? "Codex" : "Claude"} 检测`} />
             );
           })}
+          <TestButton settingKey="kiro_cli_bin" value={(vals.kiro_cli_bin as string) || ""} label="Kiro 检测" />
         </div>
 
         <button

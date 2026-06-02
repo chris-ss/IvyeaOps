@@ -13,6 +13,12 @@ export interface SkillToolMeta {
   inputs: SkillInput[];
   has_execution: boolean;
   pinned?: boolean;
+  // Tool Spec (from the frontmatter `tool:` block; absent on legacy skills)
+  kind?: string | null;          // report | transform | lookup | workflow
+  runtime?: string | null;       // llm-only | mcp
+  output_format?: string;        // markdown | text | table
+  exportable?: boolean;
+  sample_params?: Record<string, unknown>;
 }
 
 export interface SkillInput {
@@ -45,6 +51,57 @@ export async function listPinnedTools(): Promise<SkillToolMeta[]> {
 
 export async function pinTool(skillName: string, pinned: boolean): Promise<SkillToolMeta> {
   const { data } = await api.post("/skill-tools/pin", { skill_name: skillName, pinned });
+  return data;
+}
+
+// ── Execution history ───────────────────────────────────────────────────
+
+export interface SkillRunSummary {
+  id: string;
+  skill_name: string;
+  status: string;          // done | error | empty
+  provider: string;
+  runtime: string;
+  started_at: string;
+  elapsed_s: number;
+  error: string | null;
+  params: Record<string, string>;
+  preview: string;
+}
+
+export interface SkillRunDetail extends SkillRunSummary {
+  output: string;
+  user: string;
+}
+
+export interface RepairResult {
+  name: string;
+  frontmatter: Record<string, unknown>;
+  body: string;
+  preview: string;
+  validation: { ok: boolean; errors: string[]; warnings: string[] };
+}
+
+export async function listRuns(skillName: string, limit = 50): Promise<SkillRunSummary[]> {
+  const { data } = await api.get("/skill-tools/runs", { params: { skill_name: skillName, limit } });
+  return data;
+}
+
+export async function getRun(skillName: string, runId: string): Promise<SkillRunDetail> {
+  const { data } = await api.get(`/skill-tools/runs/${runId}`, { params: { skill_name: skillName } });
+  return data;
+}
+
+export async function deleteRun(skillName: string, runId: string): Promise<void> {
+  await api.delete(`/skill-tools/runs/${runId}`, { params: { skill_name: skillName } });
+}
+
+export async function repairTool(skillName: string, error: string): Promise<RepairResult> {
+  const { data } = await api.post(
+    "/skill-tools/repair",
+    { skill_name: skillName, error },
+    { timeout: 300000 },
+  );
   return data;
 }
 

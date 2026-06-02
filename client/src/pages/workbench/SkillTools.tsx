@@ -1,19 +1,72 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { listTools, runTool, pinTool, type SkillToolMeta, type SkillInput, type SseEvent } from "../../api/skillTools";
-import { deleteSkill } from "../../api/skill";
+import {
+  listTools, runTool, pinTool, listRuns, getRun, deleteRun, repairTool,
+  type SkillToolMeta, type SkillInput, type SseEvent, type SkillRunSummary, type RepairResult,
+} from "../../api/skillTools";
+import { deleteSkill, updateSkill } from "../../api/skill";
 import { useConfirm } from "../../components/ConfirmDialog";
 
+// ── Design tokens re-used below ──────────────────────────────────────────────
+const S = {
+  // accent border on left edge of headings
+  accentBar: { borderLeft: "2px solid var(--acc)", paddingLeft: 8 } as React.CSSProperties,
+  // thin section divider
+  divider: { height: 1, background: "var(--b)", margin: "12px 0" } as React.CSSProperties,
+  // section label (like .sl in CSS but without extra top margin here)
+  sectionLabel: { fontSize: 9, color: "var(--t3)", letterSpacing: ".10em", textTransform: "uppercase" as const, marginBottom: 6 },
+};
+
+// ── Kind badge (uses the existing .tag colour variants) ──────────────────────
+const KIND_META: Record<string, { label: string; cls: string }> = {
+  report:    { label: "报告",  cls: "tg"    },   // green
+  transform: { label: "转换",  cls: "tb-tag" },   // blue
+  lookup:    { label: "查询",  cls: "tc"    },   // cyan
+  workflow:  { label: "流程",  cls: "ta"    },   // amber
+};
+const RUNTIME_META: Record<string, { label: string; cls: string }> = {
+  mcp:       { label: "需数据", cls: "tr"    },   // red/warn
+  "llm-only":{ label: "纯AI",  cls: "tp"    },   // purple
+};
+
+function KindBadge({ kind, runtime }: { kind?: string | null; runtime?: string | null }) {
+  const km = kind ? KIND_META[kind] : null;
+  const rm = runtime ? RUNTIME_META[runtime] : null;
+  if (!km && !rm) return null;
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+      {km && <span className={`tag ${km.cls}`} style={{ fontSize: 8 }}>{km.label}</span>}
+      {rm && <span className={`tag ${rm.cls}`} style={{ fontSize: 8 }}>{rm.label}</span>}
+    </span>
+  );
+}
+
+// ── Small icon box (like .agent-ico) ─────────────────────────────────────────
+function IconBox({ children, size = 28 }: { children: React.ReactNode; size?: number }) {
+  return (
+    <span style={{
+      width: size, height: size, borderRadius: 4, flexShrink: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: size * 0.55,
+      background: "color-mix(in srgb, var(--acc) 10%, transparent)",
+      border: "1px solid color-mix(in srgb, var(--acc) 22%, transparent)",
+    }}>
+      {children}
+    </span>
+  );
+}
+
+// ── List page ─────────────────────────────────────────────────────────────────
 export default function SkillTools() {
-  const [tools, setTools] = useState<SkillToolMeta[]>([]);
+  const [tools, setTools]       = useState<SkillToolMeta[]>([]);
   const [categories, setCategories] = useState<Record<string, number>>({});
-  const [filterCat, setFilterCat] = useState<string>("");
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [filterCat, setFilterCat]   = useState<string>("");
+  const [search, setSearch]         = useState("");
+  const [loading, setLoading]       = useState(true);
   const [activeTool, setActiveTool] = useState<SkillToolMeta | null>(null);
   const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
   const routerLoc = useLocation();
-  const confirm = useConfirm();
+  const confirm   = useConfirm();
 
   const handleDelete = useCallback(async (tool: SkillToolMeta, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -25,15 +78,12 @@ export default function SkillTools() {
     });
     if (!ok) return;
     try {
-      // Unpin first so it leaves the sidebar, then trash the skill.
-      if (tool.pinned) {
-        try { await pinTool(tool.name, false); } catch { /* ignore */ }
-      }
+      if (tool.pinned) { try { await pinTool(tool.name, false); } catch { /**/ } }
       await deleteSkill(tool.name);
       window.dispatchEvent(new CustomEvent("opshub:pinned-changed"));
       if (activeTool?.name === tool.name) setActiveTool(null);
       await loadTools();
-    } catch { /* surfaced by reload */ }
+    } catch { /**/ }
   }, [confirm, activeTool]);
 
   const loadTools = useCallback(async () => {
@@ -42,20 +92,17 @@ export default function SkillTools() {
       const res = await listTools(filterCat || undefined, search || undefined);
       setTools(res.tools);
       setCategories(res.categories);
-      // Deep-link: ?tool=<name> opens that tool directly (sidebar pinned entry).
       const want = new URLSearchParams(window.location.search).get("tool");
       if (want && !activeTool) {
         const hit = res.tools.find((t) => t.name === want);
         if (hit) setActiveTool(hit);
       }
-    } catch { /* ignore */ }
+    } catch { /**/ }
     setLoading(false);
   }, [filterCat, search]);
 
   useEffect(() => { loadTools(); }, [loadTools]);
 
-  // React to sidebar deep-links: when ?tool= changes (or is cleared), open or
-  // close the matching tool even if the page is already mounted.
   useEffect(() => {
     const want = new URLSearchParams(routerLoc.search).get("tool");
     if (!want) { setActiveTool(null); return; }
@@ -66,16 +113,22 @@ export default function SkillTools() {
     });
   }, [routerLoc.search]);
 
+  // ── Active tool: panel view ──
   if (activeTool) {
     return (
       <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <button className="tbtn" onClick={() => setActiveTool(null)} style={{ fontSize: 11 }}>
-            ← 返回运营商店
-          </button>
-          <button className="tbtn" onClick={() => handleDelete(activeTool)}
-            style={{ fontSize: 11, marginLeft: "auto", color: "var(--red)", borderColor: "rgba(248,113,113,.35)" }}>
-            🗑 删除工具
+        {/* Topbar row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <button className="tbtn" onClick={() => setActiveTool(null)}>← 返回</button>
+          <span style={{ fontSize: 10, color: "var(--t3)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            运营商店 / <span style={{ color: "var(--t2)" }}>{activeTool.name.split("/").pop()}</span>
+          </span>
+          <button
+            className="tbtn"
+            style={{ color: "var(--red)", borderColor: "rgba(248,113,113,.35)" }}
+            onClick={() => handleDelete(activeTool)}
+          >
+            删除工具
           </button>
         </div>
         <ToolPanel tool={activeTool} />
@@ -83,288 +136,573 @@ export default function SkillTools() {
     );
   }
 
-  const catList = Object.entries(categories);
+  // ── List view ──
+  const grouped: Record<string, SkillToolMeta[]> = {};
+  for (const t of tools) {
+    const cat = t.category || "(未分类)";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(t);
+  }
 
   return (
     <div>
       <div className="ptitle">/ 运营商店</div>
-      <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 12 }}>
-        从 Skill 自动生成的可视化操作工具，团队成员填参数即可执行
-      </div>
 
-      {/* Search + category filter */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <input
-          className="market-query-input"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索工具…"
-          style={{ flex: "1 1 200px" }}
-        />
+      {/* Search + filter bar */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 180px", position: "relative" }}>
+          <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--t3)", fontSize: 10, pointerEvents: "none" }}>◎</span>
+          <input
+            className="inp"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索工具名称或描述…"
+            style={{ paddingLeft: 26 }}
+          />
+        </div>
         <select
-          className="market-query-input"
-          style={{ flex: "0 0 140px" }}
+          className="inp"
+          style={{ flex: "0 0 150px", cursor: "pointer" }}
           value={filterCat}
           onChange={(e) => setFilterCat(e.target.value)}
         >
           <option value="">全部分类 ({tools.length})</option>
-          {catList.map(([cat, count]) => (
+          {Object.entries(categories).map(([cat, count]) => (
             <option key={cat} value={cat}>{cat} ({count})</option>
           ))}
         </select>
       </div>
 
-      {loading && <div className="pulse-loading"><span className="pulse-spin">◌</span> 加载中…</div>}
+      {loading && (
+        <div style={{ color: "var(--t3)", fontSize: 11, display: "flex", alignItems: "center", gap: 8, padding: "20px 0" }}>
+          <span className="spin" /> 加载中…
+        </div>
+      )}
 
       {!loading && tools.length === 0 && (
-        <div className="market-empty">
-          <div className="market-empty-icon">⊞</div>
-          <div className="market-empty-title">暂无可执行工具</div>
-          <div className="market-empty-hint">在「想法工坊」中创建 Skill 后，会自动出现在这里</div>
+        <div style={{ textAlign: "center", padding: "40px 0", color: "var(--t3)" }}>
+          <div style={{ fontSize: 28, marginBottom: 10 }}>⊞</div>
+          <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 6 }}>暂无可执行工具</div>
+          <div style={{ fontSize: 10 }}>在「想法工坊」中创建 Skill 后，会自动出现在这里</div>
         </div>
       )}
 
       {/* Tool grid grouped by category */}
-      {!loading && tools.length > 0 && (() => {
-        const grouped: Record<string, SkillToolMeta[]> = {};
-        for (const t of tools) {
-          const cat = t.category || "(未分类)";
-          if (!grouped[cat]) grouped[cat] = [];
-          grouped[cat].push(t);
-        }
-        return Object.entries(grouped).map(([cat, items]) => {
-          const collapsed = !!collapsedCats[cat];
-          return (
-          <div key={cat} style={{ marginBottom: 18 }}>
+      {!loading && Object.entries(grouped).map(([cat, items]) => {
+        const collapsed = !!collapsedCats[cat];
+        return (
+          <div key={cat} style={{ marginBottom: 20 }}>
+            {/* Category header */}
             <div
               onClick={() => setCollapsedCats((m) => ({ ...m, [cat]: !m[cat] }))}
-              style={{ fontSize: 10, fontWeight: 600, color: "var(--t2)", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".06em", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, userSelect: "none" }}>
-              <span style={{ display: "inline-block", transition: "transform .12s", transform: collapsed ? "rotate(-90deg)" : "none", fontSize: 8 }}>▼</span>
-              <span>{cat}</span>
-              <span style={{ color: "var(--t3)", fontWeight: 400 }}>({items.length})</span>
+              style={{
+                display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
+                cursor: "pointer", userSelect: "none",
+                ...S.accentBar,
+              }}
+            >
+              <span style={{ fontSize: 9, color: "var(--t3)", letterSpacing: ".10em", textTransform: "uppercase", flex: 1 }}>{cat}</span>
+              <span style={{ fontSize: 9, color: "var(--t3)" }}>{items.length}</span>
+              <span style={{
+                fontSize: 8, color: "var(--t3)",
+                transform: collapsed ? "rotate(-90deg)" : "none",
+                transition: "transform .14s",
+                display: "inline-block",
+              }}>▼</span>
             </div>
+
             {!collapsed && (
-            <div className="g3">
-              {items.map((t) => (
-                <div
-                  key={t.name}
-                  className="card"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => setActiveTool(t)}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 18 }}>{t.icon}</span>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--t)" }}>
-                      {t.name.split("/").pop()}
-                    </span>
-                    {t.inputs.length > 0 && (
-                      <span className="tag" style={{ marginLeft: "auto", fontSize: 8 }}>
-                        {t.inputs.length} 参数
-                      </span>
-                    )}
-                    <button
-                      onClick={(e) => handleDelete(t, e)}
-                      title="删除工具（移入回收站）"
-                      style={{ marginLeft: t.inputs.length > 0 ? 4 : "auto", background: "transparent", border: "none", color: "var(--t3)", cursor: "pointer", fontSize: 12, padding: "0 2px", lineHeight: 1 }}
-                    >✕</button>
-                  </div>
-                  <div style={{ fontSize: 10, color: "var(--t3)", lineHeight: 1.5 }}>
-                    {t.description_zh || t.description || "无描述"}
-                  </div>
-                  {!t.has_execution && (
-                    <div style={{ fontSize: 9, color: "var(--amber)", marginTop: 6 }}>
-                      ⚠ 仅文档说明，无可执行步骤
+              <div className="g3">
+                {items.map((t) => (
+                  <div
+                    key={t.name}
+                    className="skill-card"
+                    onClick={() => setActiveTool(t)}
+                  >
+                    {/* Card header */}
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+                      <IconBox>{t.icon}</IconBox>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t)", lineHeight: 1.3, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {t.name.split("/").pop()}
+                        </div>
+                        <KindBadge kind={t.kind} runtime={t.runtime} />
+                      </div>
+                      <button
+                        title="删除工具"
+                        onClick={(e) => handleDelete(t, e)}
+                        style={{ background: "transparent", border: "none", color: "var(--t3)", cursor: "pointer", fontSize: 11, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}
+                      >✕</button>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
+
+                    {/* Description */}
+                    <div style={{ fontSize: 10, color: "var(--t3)", lineHeight: 1.55, marginBottom: t.inputs.length ? 8 : 0, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                      {t.description_zh || t.description || "—"}
+                    </div>
+
+                    {/* Footer row */}
+                    {(t.inputs.length > 0 || !t.has_execution) && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, borderTop: "1px solid var(--b)", paddingTop: 6 }}>
+                        {t.inputs.length > 0 && (
+                          <span style={{ fontSize: 9, color: "var(--t3)" }}>
+                            {t.inputs.length} 个参数
+                          </span>
+                        )}
+                        {!t.has_execution && (
+                          <span style={{ fontSize: 9, color: "var(--amber)" }}>⚠ 仅文档</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-          );
-        });
-      })()}
+        );
+      })}
     </div>
   );
 }
 
-/* ── Tool execution panel ── */
-
+// ── Tool execution panel ──────────────────────────────────────────────────────
 function ToolPanel({ tool }: { tool: SkillToolMeta }) {
   const [params, setParams] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
-    for (const inp of tool.inputs) {
-      init[inp.name] = inp.default || "";
-    }
+    for (const inp of tool.inputs) init[inp.name] = inp.default || "";
     return init;
   });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [output, setOutput] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
+  const [output, setOutput]     = useState("");
   const [provider, setProvider] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
-  const setParam = (name: string, value: string) => {
-    setParams((prev) => ({ ...prev, [name]: value }));
+  const [runs, setRuns]               = useState<SkillRunSummary[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [repair, setRepair]           = useState<RepairResult | null>(null);
+  const [repairing, setRepairing]     = useState(false);
+  const [applying, setApplying]       = useState(false);
+  const [pinned, setPinned]           = useState(!!tool.pinned);
+  const [pinning, setPinning]         = useState(false);
+
+  const loadHistory = useCallback(async () => {
+    try { setRuns(await listRuns(tool.name)); } catch { /**/ }
+  }, [tool.name]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const setParam = (name: string, v: string) =>
+    setParams((prev) => ({ ...prev, [name]: v }));
+
+  const sample    = tool.sample_params || {};
+  const hasSample = Object.keys(sample).length > 0;
+  const fillSample = () =>
+    setParams((prev) => {
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(sample)) next[k] = String(v ?? "");
+      return next;
+    });
+
+  const toBase64 = (file: File): Promise<string> =>
+    new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result as string);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+
+  const renderControl = (inp: SkillInput) => {
+    const val = params[inp.name] || "";
+    const set = (v: string) => setParam(inp.name, v);
+
+    if (inp.type === "file") return (
+      <div>
+        <label style={{
+          display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+          padding: "7px 10px", background: "var(--bg2)", border: "1px solid var(--b)",
+          borderRadius: "var(--r)", fontSize: 11, color: "var(--t2)", transition: "border-color .1s",
+        }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--b2)")}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--b)")}
+        >
+          <span style={{ fontSize: 14 }}>📎</span>
+          <span>{val ? "已选择图片 ✓" : (inp.placeholder || "点击选择图片…")}</span>
+          <input type="file" accept="image/*,application/pdf" style={{ display: "none" }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try { set(await toBase64(file)); } catch { /**/ }
+            }} />
+        </label>
+        {val && (
+          <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
+            {val.startsWith("data:image/") && (
+              <img src={val} alt="" style={{ height: 48, borderRadius: 3, border: "1px solid var(--b)", objectFit: "cover" }} />
+            )}
+            <button className="tbtn" style={{ fontSize: 9 }} onClick={() => set("")}>移除</button>
+          </div>
+        )}
+      </div>
+    );
+
+    if (inp.type === "select" && inp.options?.length) return (
+      <select className="inp" style={{ cursor: "pointer" }} value={val} onChange={(e) => set(e.target.value)}>
+        <option value="">{inp.placeholder || "请选择…"}</option>
+        {inp.options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+    if (inp.type === "textarea") return (
+      <textarea className="inp" rows={3} value={val} onChange={(e) => set(e.target.value)}
+        placeholder={inp.placeholder} style={{ resize: "vertical", fontFamily: "inherit" }} />
+    );
+    if (inp.type === "boolean") return (
+      <label style={{ fontSize: 11, color: "var(--t2)", display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+        <input type="checkbox" checked={val === "true"} onChange={(e) => set(e.target.checked ? "true" : "false")} /> 是
+      </label>
+    );
+    if (inp.type === "number") return (
+      <input type="number" className="inp" value={val} onChange={(e) => set(e.target.value)} placeholder={inp.placeholder} />
+    );
+    if (inp.type === "date") return (
+      <input type="date" className="inp" value={val} onChange={(e) => set(e.target.value)} />
+    );
+    return <input className="inp" value={val} onChange={(e) => set(e.target.value)} placeholder={inp.placeholder || inp.label} />;
   };
 
-  const run = useCallback(async () => {
-    // Validate required
+  const run = useCallback(async (override?: Record<string, string>) => {
+    const effective = override || params;
+    if (override) setParams(override);
     for (const inp of tool.inputs) {
-      if (inp.required && !params[inp.name]?.trim()) {
-        setError(`请填写必填参数: ${inp.label}`);
+      if (inp.required && !effective[inp.name]?.trim()) {
+        setError(`请填写必填参数：${inp.label}`);
         return;
       }
     }
-    setLoading(true);
-    setError("");
-    setOutput("");
-    setProvider("");
+    setLoading(true); setError(""); setOutput(""); setProvider(""); setRepair(null);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
-      await runTool(
-        tool.name,
-        params,
-        (evt: SseEvent) => {
-          if (evt.type === "token") {
-            setOutput((prev) => prev + evt.text);
-            setProvider(evt.provider);
-          } else if (evt.type === "error") {
-            setError(evt.detail);
-          }
-        },
-        ctrl.signal,
-      );
+      await runTool(tool.name, effective, (evt: SseEvent) => {
+        if (evt.type === "token") { setOutput((p) => p + evt.text); setProvider(evt.provider); }
+        else if (evt.type === "error") setError(evt.detail);
+      }, ctrl.signal);
     } catch (e: any) {
       if (e.name !== "AbortError") setError(e?.message || "执行失败");
     } finally {
-      setLoading(false);
-      abortRef.current = null;
+      setLoading(false); abortRef.current = null; loadHistory();
     }
-  }, [tool, params, loading]);
+  }, [tool, params, loadHistory]);
 
-  const [pinned, setPinned] = useState(!!tool.pinned);
-  const [pinning, setPinning] = useState(false);
+  const doRepair = useCallback(async () => {
+    setRepairing(true);
+    try { setRepair(await repairTool(tool.name, error)); }
+    catch (e: any) { setError(e?.response?.data?.detail || e?.message || "AI 修复失败"); }
+    finally { setRepairing(false); }
+  }, [tool.name, error]);
+
+  const applyRepair = useCallback(async () => {
+    if (!repair) return;
+    setApplying(true);
+    try { await updateSkill(tool.name, repair.frontmatter, repair.body); setRepair(null); await run(); }
+    catch (e: any) { setError(e?.response?.data?.detail || e?.message || "应用修复失败"); }
+    finally { setApplying(false); }
+  }, [repair, tool.name, run]);
+
+  const viewRun = useCallback(async (id: string) => {
+    try { const f = await getRun(tool.name, id); setOutput(f.output); setProvider(f.provider); setError(f.error || ""); }
+    catch { /**/ }
+  }, [tool.name]);
+
+  const removeRun = useCallback(async (id: string) => {
+    try { await deleteRun(tool.name, id); await loadHistory(); } catch { /**/ }
+  }, [tool.name, loadHistory]);
+
   const togglePin = useCallback(async () => {
     setPinning(true);
     try {
       const next = !pinned;
       await pinTool(tool.name, next);
       setPinned(next);
-      // Notify the sidebar to refresh its pinned entries immediately.
       window.dispatchEvent(new CustomEvent("opshub:pinned-changed"));
-    } catch { /* ignore */ } finally { setPinning(false); }
+    } catch { /**/ } finally { setPinning(false); }
   }, [pinned, tool.name]);
+
+  const copyOut = () => { void navigator.clipboard?.writeText(output); };
+  const exportOut = () => {
+    const blob = new Blob([output], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `${tool.name.split("/").pop()}.md`; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, flex: 1 }}>
-          {tool.icon} {tool.name.split("/").pop()}
-        </div>
-        <button className="tbtn" onClick={togglePin} disabled={pinning}
-          style={{ fontSize: 10, color: pinned ? "var(--acc)" : "var(--t3)", borderColor: pinned ? "var(--acc)" : "var(--b)" }}
-          title={pinned ? "从侧边栏移除" : "固定到侧边栏作为独立工具"}>
-          {pinned ? "★ 已固定侧边栏" : "☆ 固定到侧边栏"}
-        </button>
-      </div>
-      <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 14 }}>
-        {tool.description_zh || tool.description}
-      </div>
-
-      {/* Dynamic form */}
-      {tool.inputs.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
-          {tool.inputs.map((inp: SkillInput) => (
-            <div key={inp.name}>
-              <label style={{ fontSize: 10, color: "var(--t2)", display: "block", marginBottom: 3 }}>
-                {inp.label}
-                {inp.required && <span style={{ color: "#ef4444" }}>*</span>}
-              </label>
-              {inp.type === "select" && inp.options?.length > 0 ? (
-                <select
-                  className="market-query-input"
-                  value={params[inp.name] || ""}
-                  onChange={(e) => setParam(inp.name, e.target.value)}
-                >
-                  <option value="">{inp.placeholder || "请选择"}</option>
-                  {inp.options.map((opt: string) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-              ) : inp.type === "textarea" ? (
-                <textarea
-                  className="market-query-input"
-                  value={params[inp.name] || ""}
-                  onChange={(e) => setParam(inp.name, e.target.value)}
-                  placeholder={inp.placeholder}
-                  rows={3}
-                  style={{ resize: "vertical", fontFamily: "inherit" }}
-                />
-              ) : (
-                <input
-                  className="market-query-input"
-                  value={params[inp.name] || ""}
-                  onChange={(e) => setParam(inp.name, e.target.value)}
-                  placeholder={inp.placeholder}
-                />
+      {/* ── Panel header ── */}
+      <div className="card" style={{ marginBottom: 14, background: "var(--bg2)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <IconBox size={34}>{tool.icon}</IconBox>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t)", marginBottom: 3 }}>
+              {tool.name.split("/").pop()}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <KindBadge kind={tool.kind} runtime={tool.runtime} />
+              {tool.category && (
+                <span style={{ fontSize: 9, color: "var(--t3)" }}>{tool.category}</span>
               )}
             </div>
-          ))}
-        </div>
-      ) : tool.has_execution ? (
-        <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 14 }}>
-          此工具无可配置参数，点击直接执行。
-        </div>
-      ) : null}
-
-      {!tool.has_execution && (
-        <div style={{ fontSize: 11, color: "var(--amber)", background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.25)", borderRadius: 6, padding: "10px 12px", marginBottom: 12, lineHeight: 1.6 }}>
-          ⚠ 这个 Skill 没有定义可执行的步骤/参数，目前只是一份说明文档，无法在此直接运行。<br />
-          如需让它可执行，请在「Skill 管理」中编辑，补充 inputs 参数和带 {"{{参数}}"} 的执行步骤。
-        </div>
-      )}
-
-      {tool.has_execution && (
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button className="market-btn market-btn-submit" onClick={run} disabled={loading}>
-          {loading ? "执行中…" : "执行"}
-        </button>
-        {loading && (
-          <button className="tbtn" onClick={() => abortRef.current?.abort()} style={{ fontSize: 10 }}>
-            停止
+          </div>
+          <button
+            className="tbtn"
+            onClick={togglePin}
+            disabled={pinning}
+            style={{ fontSize: 10, color: pinned ? "var(--acc)" : "var(--t3)", borderColor: pinned ? "color-mix(in srgb, var(--acc) 40%, transparent)" : "var(--b)", background: pinned ? "color-mix(in srgb, var(--acc) 6%, transparent)" : "transparent" }}
+            title={pinned ? "从侧边栏移除" : "固定到侧边栏"}
+          >
+            {pinned ? "★ 已固定" : "☆ 固定"}
           </button>
+        </div>
+
+        {(tool.description_zh || tool.description) && (
+          <>
+            <div style={S.divider} />
+            <div style={{ fontSize: 10, color: "var(--t2)", lineHeight: 1.65 }}>
+              {tool.description_zh || tool.description}
+            </div>
+          </>
         )}
       </div>
+
+      {/* ── Not executable notice ── */}
+      {!tool.has_execution && (
+        <div style={{ fontSize: 10, color: "var(--amber)", background: "rgba(251,191,36,.07)", border: "1px solid rgba(251,191,36,.22)", borderLeft: "3px solid var(--amber)", borderRadius: "var(--r)", padding: "10px 12px", marginBottom: 14, lineHeight: 1.7 }}>
+          ⚠ 这个 Skill 没有定义可执行的步骤/参数，目前只是一份说明文档，无法在此直接运行。
+          请在「Skill 管理」中编辑，补充 <code style={{ background: "rgba(251,191,36,.12)", padding: "0 4px", borderRadius: 2, fontFamily: "inherit" }}>inputs</code> 参数和带 {"{{"} 参数 {"}}"}  的执行步骤。
+        </div>
       )}
 
-      {error && <div className="market-error" style={{ marginTop: 10 }}>{error}</div>}
+      {/* ── Form ── */}
+      {tool.inputs.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ ...S.sectionLabel, ...S.accentBar, marginBottom: 10 }}>参数</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {tool.inputs.map((inp: SkillInput) => (
+              <div key={inp.name}>
+                <label style={{ fontSize: 10, color: "var(--t2)", display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
+                  {inp.label}
+                  {inp.required && <span style={{ color: "var(--red)", fontSize: 10 }}>*</span>}
+                  {inp.placeholder && inp.type !== "select" && (
+                    <span style={{ color: "var(--t3)", fontSize: 9, fontWeight: 400, marginLeft: 2 }}>— {inp.placeholder}</span>
+                  )}
+                </label>
+                {renderControl(inp)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-      {output && (
+      {tool.inputs.length === 0 && tool.has_execution && (
+        <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 14 }}>此工具无可配置参数，点击直接执行。</div>
+      )}
+
+      {/* ── Execute row ── */}
+      {tool.has_execution && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+          <button
+            className="btn-acc"
+            onClick={() => run()}
+            disabled={loading}
+            style={{ fontSize: 11, padding: "6px 16px", display: "flex", alignItems: "center", gap: 6 }}
+          >
+            {loading ? <><span className="spin" />执行中…</> : "▷ 执行"}
+          </button>
+          {hasSample && !loading && (
+            <button className="tbtn" onClick={fillSample} style={{ fontSize: 10 }}>填充示例</button>
+          )}
+          {loading && (
+            <button className="tbtn" onClick={() => abortRef.current?.abort()} style={{ fontSize: 10, color: "var(--red)", borderColor: "rgba(248,113,113,.35)" }}>
+              停止
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Error + repair ── */}
+      {error && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 10, color: "var(--red)", background: "rgba(248,113,113,.07)", border: "1px solid rgba(248,113,113,.25)", borderLeft: "3px solid var(--red)", borderRadius: "var(--r)", padding: "8px 12px", lineHeight: 1.65 }}>
+            {error}
+          </div>
+          {tool.has_execution && !repair && (
+            <button className="tbtn" onClick={doRepair} disabled={repairing}
+              style={{ fontSize: 10, marginTop: 6, color: "var(--amber)", borderColor: "rgba(251,191,36,.35)" }}>
+              {repairing ? <><span className="spin" style={{ marginRight: 5 }} />AI 分析中…</> : "🛠 让 AI 修复此工具"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Repair proposal ── */}
+      {repair && (
+        <div style={{ marginTop: 12, background: "var(--bg2)", border: "1px solid rgba(251,191,36,.30)", borderLeft: "3px solid var(--amber)", borderRadius: "var(--r)", padding: "10px 12px" }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--amber)", marginBottom: 8 }}>AI 提议的修复（审核后应用）</div>
+          {!repair.validation.ok && (
+            <div style={{ fontSize: 9, color: "var(--red)", marginBottom: 8 }}>
+              仍有问题：{repair.validation.errors.join("；")}
+            </div>
+          )}
+          <pre style={{ fontSize: 10, lineHeight: 1.6, maxHeight: 260, overflow: "auto", padding: 10, background: "var(--bg1)", borderRadius: "var(--r)", whiteSpace: "pre-wrap", wordBreak: "break-word", border: "1px solid var(--b)" }}>
+            {repair.preview}
+          </pre>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button className="btn-acc" onClick={applyRepair} disabled={applying}
+              style={{ fontSize: 10, padding: "5px 12px" }}>
+              {applying ? "应用中…" : "✓ 应用并重试"}
+            </button>
+            <button className="tbtn" onClick={() => setRepair(null)} style={{ fontSize: 10 }}>取消</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Output ── */}
+      {(output || loading) && (
         <div style={{ marginTop: 14 }}>
-          {provider && <div style={{ fontSize: 9, color: "var(--t3)", marginBottom: 4 }}>via {provider}</div>}
+          {/* Output header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, ...S.accentBar }}>
+            <span style={{ fontSize: 9, color: "var(--t3)", letterSpacing: ".10em", textTransform: "uppercase", flex: 1 }}>
+              {loading ? <><span className="spin" style={{ marginRight: 4 }} />生成中…</> : "输出结果"}
+            </span>
+            {provider && <span style={{ fontSize: 9, color: "var(--t3)" }}>via {provider}</span>}
+            {!loading && output && (
+              <span style={{ display: "flex", gap: 6 }}>
+                <button className="tbtn" onClick={copyOut} style={{ fontSize: 9 }}>复制</button>
+                {tool.exportable && (
+                  <button className="tbtn" onClick={exportOut} style={{ fontSize: 9 }}>导出 .md</button>
+                )}
+              </span>
+            )}
+          </div>
+          {/* Output body */}
           <div
-            className="card"
-            style={{ background: "var(--bg2)", fontSize: 11, lineHeight: 1.7, whiteSpace: "pre-wrap" }}
-            dangerouslySetInnerHTML={{ __html: simpleMarkdown(output) }}
+            style={{ background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: "var(--r)", padding: "12px 14px", fontSize: 11, lineHeight: 1.8, color: "var(--t2)", overflowX: "auto" }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(output) }}
           />
+        </div>
+      )}
+
+      {/* ── Execution history ── */}
+      {runs.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={S.divider} />
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            style={{ background: "transparent", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <span style={{ fontSize: 9, color: "var(--t3)", letterSpacing: ".10em", textTransform: "uppercase" }}>
+              历史记录
+            </span>
+            <span style={{ fontSize: 9, color: "var(--t3)" }}>({runs.length})</span>
+            <span style={{ fontSize: 8, color: "var(--t3)", transform: showHistory ? "none" : "rotate(-90deg)", transition: "transform .14s", display: "inline-block" }}>▼</span>
+          </button>
+
+          {showHistory && (
+            <div style={{ marginTop: 8 }}>
+              <table className="tbl" style={{ width: "100%" }}>
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>状态</th>
+                    <th>provider</th>
+                    <th style={{ textAlign: "right" }}>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.map((r) => (
+                    <tr key={r.id}>
+                      <td style={{ color: "var(--t3)", fontSize: 10 }}>{r.started_at}</td>
+                      <td>
+                        <span style={{ fontSize: 10, color: r.status === "error" ? "var(--red)" : "var(--acc)" }}>
+                          {r.status === "error" ? "✕ 失败" : "✓ 完成"}
+                        </span>
+                        {r.elapsed_s > 0 && <span style={{ fontSize: 9, color: "var(--t3)", marginLeft: 4 }}>{r.elapsed_s}s</span>}
+                      </td>
+                      <td style={{ fontSize: 10, color: "var(--t3)" }}>{r.provider}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <span style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                          <button className="tbtn" style={{ fontSize: 9 }} onClick={() => viewRun(r.id)}>查看</button>
+                          <button className="tbtn" style={{ fontSize: 9 }} onClick={() => run(Object.fromEntries(Object.entries(r.params).map(([k, v]) => [k, String(v)])))}>重跑</button>
+                          <button className="tbtn" style={{ fontSize: 9 }} onClick={() => removeRun(r.id)}>删</button>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function simpleMarkdown(md: string): string {
-  return md
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/^### (.+)$/gm, '<div style="font-size:13px;font-weight:700;margin:10px 0 4px">$1</div>')
-    .replace(/^## (.+)$/gm, '<div style="font-size:14px;font-weight:700;margin:12px 0 6px">$1</div>')
-    .replace(/^# (.+)$/gm, '<div style="font-size:15px;font-weight:700;margin:14px 0 8px">$1</div>')
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/`([^`]+)`/g, '<code style="background:var(--bg3);padding:1px 4px;border-radius:2px;font-size:10px">$1</code>')
-    .replace(/\n/g, "<br>");
+// ── Markdown renderer (table-aware) ──────────────────────────────────────────
+function renderMarkdown(md: string): string {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const inlineFormat = (s: string) =>
+    esc(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, '<code style="background:var(--bg3);padding:1px 5px;border-radius:2px;font-size:10px">$1</code>');
+
+  const lines = md.split("\n");
+  const out: string[] = [];
+  let inTable = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // heading
+    if (/^### /.test(line)) { if (inTable) { out.push("</table>"); inTable = false; } out.push(`<div style="font-size:12px;font-weight:700;color:var(--t);margin:12px 0 5px">${inlineFormat(line.slice(4))}</div>`); continue; }
+    if (/^## /.test(line))  { if (inTable) { out.push("</table>"); inTable = false; } out.push(`<div style="font-size:13px;font-weight:700;color:var(--t);margin:14px 0 6px">${inlineFormat(line.slice(3))}</div>`); continue; }
+    if (/^# /.test(line))   { if (inTable) { out.push("</table>"); inTable = false; } out.push(`<div style="font-size:14px;font-weight:700;color:var(--t);margin:16px 0 7px">${inlineFormat(line.slice(2))}</div>`); continue; }
+
+    // hr
+    if (/^---+$/.test(line.trim())) { if (inTable) { out.push("</table>"); inTable = false; } out.push('<hr style="border:none;border-top:1px solid var(--b);margin:10px 0">'); continue; }
+
+    // table
+    if (line.startsWith("|")) {
+      const cells = line.split("|").filter((_, i2, a) => i2 > 0 && i2 < a.length - 1);
+      const isSep = cells.every((c) => /^[-: ]+$/.test(c));
+      if (isSep) { /* skip separator row */ continue; }
+      if (!inTable) {
+        out.push(`<table style="width:100%;border-collapse:collapse;font-size:10px;margin:8px 0">`);
+        inTable = true;
+      }
+      const tag = (!inTable || out[out.length - 1]?.includes("<table")) ? "th" : "td";
+      const tdStyle = tag === "th"
+        ? `style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--b);color:var(--t3);letter-spacing:.05em;font-weight:400"`
+        : `style="padding:6px 8px;border-bottom:1px solid var(--b);color:var(--t2)"`;
+      out.push(`<tr>${cells.map((c) => `<${tag} ${tdStyle}>${inlineFormat(c.trim())}</${tag}>`).join("")}</tr>`);
+      continue;
+    }
+
+    // end table
+    if (inTable) { out.push("</table>"); inTable = false; }
+
+    // list item
+    if (/^[*-] /.test(line)) { out.push(`<div style="padding:1px 0 1px 14px;color:var(--t2);font-size:11px">· ${inlineFormat(line.slice(2))}</div>`); continue; }
+    if (/^\d+\. /.test(line)) { out.push(`<div style="padding:1px 0 1px 14px;color:var(--t2);font-size:11px">${inlineFormat(line)}</div>`); continue; }
+
+    // blank line
+    if (!line.trim()) { out.push('<div style="height:6px"></div>'); continue; }
+
+    // paragraph
+    out.push(`<div style="color:var(--t2);margin-bottom:2px">${inlineFormat(line)}</div>`);
+  }
+  if (inTable) out.push("</table>");
+  return out.join("");
 }

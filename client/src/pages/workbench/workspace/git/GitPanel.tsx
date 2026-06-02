@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Project } from "../../../../api/projects";
 import { useGitController } from "./useGitController";
-import type { GitFile } from "../../../../api/git";
+import { getGitBranches, checkoutBranch, createBranch, type GitFile } from "../../../../api/git";
 
 type Props = {
   project: Project;
@@ -79,7 +79,7 @@ export default function GitPanel({ project }: Props) {
 
   return (
     <div className="git-panel">
-      <BranchBar status={ctrl.status} onRefresh={ctrl.refresh} busy={ctrl.busyOp || ctrl.loadingStatus} />
+      <BranchBar status={ctrl.status} projectId={project.id} onRefresh={ctrl.refresh} onSwitched={ctrl.refresh} busy={ctrl.busyOp || ctrl.loadingStatus} />
       {ctrl.err && (
         <div className="git-err">
           ⚠ {ctrl.err}
@@ -123,16 +123,101 @@ export default function GitPanel({ project }: Props) {
 
 // ─── Branch / refresh bar ───────────────────────────────────────────────────
 
-function BranchBar({ status, onRefresh, busy }: { status: import("../../../../api/git").GitStatus; onRefresh: () => void; busy: boolean }) {
+function BranchBar({ status, projectId, onRefresh, onSwitched, busy }: {
+  status: import("../../../../api/git").GitStatus;
+  projectId: string;
+  onRefresh: () => void;
+  onSwitched: () => void;
+  busy: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [loadingBranches, setLoadingBranches] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const toggle = async () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true); setErr(null); setLoadingBranches(true);
+    try {
+      const r = await getGitBranches(projectId);
+      setBranches(r.branches);
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || "加载分支失败");
+    } finally {
+      setLoadingBranches(false);
+    }
+  };
+
+  const doCheckout = async (name: string) => {
+    if (name === status.branch) { setOpen(false); return; }
+    setSwitching(true); setErr(null);
+    try {
+      await checkoutBranch(projectId, name);
+      setOpen(false);
+      onSwitched();
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || "切换失败（可能有未提交改动）");
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const doCreate = async () => {
+    const name = window.prompt("新分支名（基于当前分支创建并切换）");
+    if (!name?.trim()) return;
+    setSwitching(true); setErr(null);
+    try {
+      await createBranch(projectId, name.trim());
+      setOpen(false);
+      onSwitched();
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || "创建失败");
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   return (
     <div className="git-branch-bar">
       <span className="git-branch-icon">⎇</span>
-      <span className="git-branch-name">{status.branch || "(detached HEAD)"}</span>
+      <button className="git-branch-name git-branch-btn" onClick={toggle} disabled={busy || switching} title="切换分支">
+        {status.branch || "(detached HEAD)"} <span style={{ fontSize: 8, opacity: 0.6 }}>▾</span>
+      </button>
       {status.ahead > 0 && <span className="git-ahead" title="本地领先远端">↑{status.ahead}</span>}
       {status.behind > 0 && <span className="git-behind" title="本地落后远端">↓{status.behind}</span>}
       <span className="git-branch-spacer" />
       <span className="git-branch-path" title={status.path}>{status.path}</span>
       <button className="tbtn" onClick={onRefresh} disabled={busy}>{busy ? "…" : "↻"}</button>
+      {open && (
+        <>
+          <div className="git-branch-backdrop" onClick={() => setOpen(false)} />
+          <div className="git-branch-dropdown">
+            <div className="git-branch-dropdown-head">
+              <span>切换分支</span>
+              <button className="tbtn" onClick={doCreate} disabled={switching}>+ 新建</button>
+            </div>
+            {err && <div className="git-branch-dropdown-err">{err}</div>}
+            {loadingBranches ? (
+              <div className="git-branch-dropdown-empty">加载中…</div>
+            ) : branches.length === 0 ? (
+              <div className="git-branch-dropdown-empty">无本地分支</div>
+            ) : (
+              branches.map((b) => (
+                <button
+                  key={b}
+                  className={"git-branch-item" + (b === status.branch ? " active" : "")}
+                  onClick={() => doCheckout(b)}
+                  disabled={switching}
+                >
+                  <span className="git-branch-item-mark">{b === status.branch ? "●" : "○"}</span>
+                  <span className="git-branch-item-name">{b}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -29,6 +29,11 @@ class CommitBody(BaseModel):
     allow_empty: bool = False
 
 
+class BranchBody(BaseModel):
+    project_id: str
+    name: str
+
+
 def _exec_git(call):
     """Wrap a call into the typical GitError → HTTPException mapping."""
     try:
@@ -79,3 +84,18 @@ def log(
     _u: str = Depends(require_user),
 ):
     return _exec_git(lambda: git_ops.get_log(project_id, limit))
+
+
+@router.get("/git/branches")
+def branches(project_id: str = Query(...), _u: str = Depends(require_user)):
+    return _exec_git(lambda: git_ops.list_branches(project_id))
+
+
+@router.post("/git/checkout")
+def checkout(body: BranchBody, _u: str = Depends(require_user)):
+    return _exec_git(lambda: git_ops.checkout_branch(body.project_id, body.name))
+
+
+@router.post("/git/create-branch")
+def create_branch(body: BranchBody, _u: str = Depends(require_user)):
+    return _exec_git(lambda: git_ops.create_branch(body.project_id, body.name))
