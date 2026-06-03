@@ -32,7 +32,7 @@ from app.routers import deep_analysis as deep_analysis_router
 from app.routers import skill_tools as skill_tools_router
 from app.routers import autofix as autofix_router
 from app.routers import mcp as mcp_router
-from app.ccui.router import api_router as ccui_api_router, ws_router as ccui_ws_router
+from app.agents.router import api_router as agents_api_router, ws_router as agents_ws_router
 
 
 # Methods that can mutate state; anything not in this set is exempt from the
@@ -108,14 +108,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[IvyeaOps] market history DB init skipped: {e}")
 
-    # CloudCLI native backend: ensure its metadata tables exist (no-op against
-    # the live ~/.cloudcli/auth.db the old Node service shared).
+    # Agents native backend: ensure its metadata tables exist (no-op against
+    # the live ~/.agents/auth.db the old Node service shared).
     try:
-        from app.ccui.db import init_db as _init_ccui_db
-        _init_ccui_db()
-        print("[IvyeaOps] ccui DB ready")
+        from app.agents.db import init_db as _init_agents_db
+        _init_agents_db()
+        print("[IvyeaOps] agents DB ready")
     except Exception as e:
-        print(f"[IvyeaOps] ccui DB init skipped: {e}")
+        print(f"[IvyeaOps] agents DB init skipped: {e}")
 
     # Launch-playbook history DB.
     try:
@@ -353,14 +353,14 @@ app.include_router(brain.router, prefix="/api/brain", tags=["brain"], dependenci
 app.include_router(listing_router.router, prefix="/api/listing", tags=["listing"], dependencies=[Depends(require_module("listing"))])
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"], dependencies=[Depends(require_module("terminal"))])
 # /agents (old native Workspace agent hub) retired — superseded by the native
-# CloudCLI backend below. agent_hub/mcp routers are no longer mounted; the
-# /agents route now serves the cloudcli UI. (Service files kept for now.)
+# Agents backend below. agent_hub/mcp routers are no longer mounted; the
+# /agents route now serves the agents UI. (Service files kept for now.)
 # app.include_router(agent_hub.router, prefix="/api", tags=["agent-hub"], dependencies=[Depends(require_module("agents"))])
 # app.include_router(mcp_router.router, prefix="/api", tags=["mcp"], dependencies=[Depends(require_module("agents"))])
-# CloudCLI native backend (replaces the external Node :3002 service). REST is
+# Agents native backend (replaces the external Node :3002 service). REST is
 # gated by the same "agents" board permission; WS does its own cookie auth.
-app.include_router(ccui_api_router, prefix="/api/ccui", tags=["ccui"], dependencies=[Depends(require_module("agents"))])
-app.include_router(ccui_ws_router, prefix="/api/ccui", tags=["ccui-ws"])
+app.include_router(agents_api_router, prefix="/api/agents", tags=["agents"], dependencies=[Depends(require_module("agents"))])
+app.include_router(agents_ws_router, prefix="/api/agents", tags=["agents-ws"])
 app.include_router(deep_analysis_router.router, prefix="/api/deep-analysis", tags=["deep-analysis"], dependencies=[Depends(require_module("tools"))])
 app.include_router(skill_tools_router.router, prefix="/api/skill-tools", tags=["skill-tools"], dependencies=[Depends(require_module("tools"))])
 # --- Admin-only: config / other users / infra (never grantable) ---

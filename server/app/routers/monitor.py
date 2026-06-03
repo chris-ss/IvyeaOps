@@ -192,7 +192,7 @@ _WATCHED_SERVICES = [
     "warp-svc",
     "pm2-root",
     "hermes-dashboard",
-    "cloudcli-ui",
+    "agents-ui",
     "ttyd",
 ]
 
@@ -205,7 +205,7 @@ _SERVICE_CATALOG: dict[str, tuple[str, str, str]] = {
     "warp-svc": ("Cloudflare WARP 客户端，用于出站网络代理/绕路", "optional", "WARP 出站链路不可用，通常不影响核心服务"),
     "pm2-root": ("PM2 托管的 Node 应用进程管理器", "on-demand", "PM2 托管应用可能停止或无法自恢复"),
     "hermes-dashboard": ("Hermes 监控/仪表盘 Web 服务", "on-demand", "Hermes 仪表盘不可访问"),
-    "cloudcli-ui": ("Claude Code UI / CloudCLI Web 界面", "on-demand", "Web AI 编码界面不可用"),
+    "agents-ui": ("Claude Code UI / Agents Web 界面", "on-demand", "Web AI 编码界面不可用"),
     "ttyd": ("Web 服务器终端服务，嵌入 /terminal 页面", "on-demand", "网页终端不可用，SSH 不受影响"),
     "agy": ("Antigravity AI 终端", "on-demand", "Antigravity CLI 功能停止"),
 }
@@ -288,7 +288,7 @@ _PROC_CATALOG: dict[str, tuple[str, str, str]] = {
     "ttyd": ("Web终端服务", "on-demand", "网页终端不可用，SSH不受影响"),
     "kiro-gateway": ("Kiro Gateway API代理", "on-demand", "本地AI API代理不可用"),
     "feishu-codex-relay": ("飞书Codex中继", "on-demand", "飞书AI对话停止"),
-    "cloudcli-ui": ("Claude Code UI", "on-demand", "Web版Claude Code不可用"),
+    "agents-ui": ("Claude Code UI", "on-demand", "Web版Claude Code不可用"),
     "postgresql": ("PostgreSQL数据库", "on-demand", "gbrain知识库不可用"),
     "imgflow": ("图片工作流(PM2)", "on-demand", "Amazon图片处理不可用"),
     "next-server": ("imgflow前端(Next.js)", "on-demand", "图片工作流前端不可用"),
@@ -391,7 +391,7 @@ _PROC_TO_SERVICE: dict[str, str] = {
     "tat_agent": "tat_agent",
     "postmaster": "postgresql",
     "hermes dashboard": "hermes-dashboard",
-    "cloudcli-ui": "cloudcli-ui",
+    "agents-ui": "agents-ui",
     "feishu-codex-relay": "feishu-codex-relay",
     "kiro-gateway": "kiro-gateway",
 }

@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { logout } from "../api/client";
 import { useAuth } from "../App";
 import Terminal from "../pages/workbench/Terminal";
-import CloudCLINative from "../pages/workbench/CloudCLINative";
+import Agents from "../pages/workbench/Agents";
 
 type NavItem = {
   to: string;
@@ -74,9 +74,7 @@ const PATH_LABEL: Record<string, string> = {
   "/skill": "~/SkillStudio",
   "/brain": "~/GBrain知识库",
   "/agents": "~/智能体会话",
-  "/agents-legacy": "~/智能体会话（旧版）",
   "/agent": "~/AgentOS",
-  "/cloudcli": "~/智能体会话",
   "/terminal": "~/服务器终端",
   "/servmon": "~/服务器监控",
   "/news": "~/资讯",
@@ -118,7 +116,7 @@ export default function MainLayout() {
   }, []);
 
   const [termMounted, setTermMounted] = useState(false);
-  const [ccuiMounted, setCcuiMounted] = useState(false);
+  const [agentsMounted, setCcuiMounted] = useState(false);
   const THEMES = [
     "dark", "deep-space", "smoke-gold", "catppuccin", "hermes", "light",
     "klein", "mars", "hermes-orange", "burgundy", "mummy",
@@ -381,9 +379,7 @@ export default function MainLayout() {
           </div>
         </div>
         <div className={"content" + (
-          location.pathname === "/agents" ||
-          location.pathname === "/agents-legacy" ||
-          location.pathname === "/cloudcli"
+          location.pathname === "/agents"
             ? " content-fullpage" : ""
         )}>
           {/* Terminal is always mounted (after first visit) but hidden when
@@ -393,10 +389,10 @@ export default function MainLayout() {
               <Terminal />
             </div>
           )}
-          {/* CloudCLI 原生版常驻挂载(独立 React root),切板块时不卸载,保持 WS/会话状态、秒切。 */}
-          {ccuiMounted && (
+          {/* Agents 原生版常驻挂载(独立 React root),切板块时不卸载,保持 WS/会话状态、秒切。 */}
+          {agentsMounted && (
             <div style={location.pathname === "/agents" ? { display: "contents" } : { position: "absolute", width: 0, height: 0, overflow: "hidden", opacity: 0, pointerEvents: "none" }}>
-              <CloudCLINative />
+              <Agents />
             </div>
           )}
           {location.pathname !== "/terminal" && location.pathname !== "/agents" && <Outlet />}

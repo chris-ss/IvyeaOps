@@ -1,17 +1,17 @@
 /** @type {import('tailwindcss').Config} */
-// 仅作用于 claudecodeui 原生移植子树(src/cloudcli)。
+// 仅作用于 claudecodeui 原生移植子树(src/agents)。
 // 关键隔离手段:
-//   1. content 只扫 src/cloudcli/** —— 不为 ops 现有页面生成任何 utility
+//   1. content 只扫 src/agents/** —— 不为 ops 现有页面生成任何 utility
 //   2. corePlugins.preflight = false —— 不注入全局 reset(避免污染 ops 16 套主题)
-//      cloudcli 自身的 reset 由 index.css 作用域化到 #ccui-root 容器内承担
+//      agents 自身的 reset 由 index.css 作用域化到 #agents-root 容器内承担
 import typography from '@tailwindcss/typography';
 
 export default {
   darkMode: ['class'],
-  content: ['./src/cloudcli/**/*.{js,jsx,ts,tsx}'],
-  // 所有 utility 类生成为 `#ccui-root .xxx` —— 自动限定在 cloudcli 容器内,
+  content: ['./src/agents/**/*.{js,jsx,ts,tsx}'],
+  // 所有 utility 类生成为 `#agents-root .xxx` —— 自动限定在 agents 容器内,
   // 既不污染 ops,又提权压过 ops 自己的样式。
-  important: '#ccui-root',
+  important: '#agents-root',
   corePlugins: {
     preflight: false,
   },

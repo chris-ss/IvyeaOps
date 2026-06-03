@@ -1,0 +1,885 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global spinner animation - defined early to ensure it loads */
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@-webkit-keyframes spin {
+  0% {
+    -webkit-transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+  }
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+
+    /* Nav design tokens */
+    --nav-glass-bg: 0 0% 100% / 0.7;
+    --nav-glass-blur: 20px;
+    --nav-glass-saturate: 1.8;
+    --nav-tab-glow: 221.2 83.2% 53.3% / 0.18;
+    --nav-tab-ring: 221.2 83.2% 53.3% / 0.10;
+    --nav-float-shadow: 0 0% 0% / 0.06;
+    --nav-float-ring: 214.3 31.8% 91.4% / 0.5;
+    --nav-divider-color: 214.3 31.8% 91.4% / 0.5;
+    --nav-input-bg: 210 40% 96.1% / 0.5;
+    --nav-input-focus-ring: 221.2 83.2% 53.3% / 0.22;
+
+    /* Safe area CSS variables */
+    --safe-area-inset-top: env(safe-area-inset-top);
+    --safe-area-inset-right: env(safe-area-inset-right);
+    --safe-area-inset-bottom: env(safe-area-inset-bottom);
+    --safe-area-inset-left: env(safe-area-inset-left);
+
+    /* Mobile navigation dimensions - Single source of truth */
+    /* Floating nav: ~52px bar + 8px bottom margin + 12px px-3 top spacing */
+    --mobile-nav-height: 52px;
+    --mobile-nav-padding: 20px;
+    --mobile-nav-total: calc(var(--mobile-nav-height) + var(--mobile-nav-padding) + env(safe-area-inset-bottom, 0px));
+
+    /* Header safe area dimensions */
+    --header-safe-area-top: env(safe-area-inset-top, 0px);
+    --header-base-padding: 8px;
+    --header-total-padding: calc(var(--header-safe-area-top) + var(--header-base-padding));
+  }
+  
+  /* Fallback for older iOS versions */
+  @supports (padding-top: constant(safe-area-inset-top)) {
+    :root {
+      --safe-area-inset-top: constant(safe-area-inset-top);
+      --safe-area-inset-right: constant(safe-area-inset-right);
+      --safe-area-inset-bottom: constant(safe-area-inset-bottom);
+      --safe-area-inset-left: constant(safe-area-inset-left);
+    }
+  }
+
+  .dark {
+    /* IvyeaOps 暗夜主题色系 */
+    --background: 0 0% 5%;           /* #0c0c0c */
+    --foreground: 0 0% 91%;          /* #e8e8e8 */
+    --card: 0 0% 7%;                 /* #111111 */
+    --card-foreground: 0 0% 91%;
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 91%;
+    --primary: 142 69% 58%;          /* #4ade80 绿色强调 */
+    --primary-foreground: 0 0% 5%;
+    --secondary: 0 0% 9%;            /* #161616 */
+    --secondary-foreground: 0 0% 91%;
+    --muted: 0 0% 9%;
+    --muted-foreground: 0 0% 66%;    /* #a8a8a8 */
+    --accent: 142 69% 58%;
+    --accent-foreground: 0 0% 5%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 91%;
+    --border: 0 0% 15%;              /* #262626 */
+    --input: 0 0% 15%;
+    --ring: 142 69% 58%;
+    --radius: 0.25rem;
+
+    /* Nav tokens */
+    --nav-glass-bg: 0 0% 7% / 0.75;
+    --nav-glass-blur: 20px;
+    --nav-glass-saturate: 1.4;
+    --nav-tab-glow: 142 69% 58% / 0.20;
+    --nav-tab-ring: 142 69% 58% / 0.12;
+    --nav-float-shadow: 0 0% 0% / 0.40;
+    --nav-float-ring: 0 0% 15% / 0.4;
+    --nav-divider-color: 0 0% 15% / 0.6;
+    --nav-input-bg: 0 0% 9% / 0.6;
+    --nav-input-focus-ring: 142 69% 58% / 0.22;
+  }
+}
+
+@layer base {
+  /* === 作用域化 reset:替代被关掉的全局 preflight,只作用于 #agents-root 容器内,
+         绝不触碰 ops 现有页面 === */
+  #agents-root *, #agents-root *::before, #agents-root *::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: hsl(var(--border));
+  }
+
+  /* 容器本身承担原 body 的角色 */
+  #agents-root {
+    height: 100%;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 标题/段落/列表 margin 归零(preflight 行为) */
+  #agents-root h1, #agents-root h2, #agents-root h3, #agents-root h4, #agents-root h5, #agents-root h6, #agents-root p, #agents-root figure, #agents-root blockquote, #agents-root dl, #agents-root dd {
+    margin: 0;
+  }
+  #agents-root h1, #agents-root h2, #agents-root h3, #agents-root h4, #agents-root h5, #agents-root h6 {
+    font-size: inherit;
+    font-weight: inherit;
+  }
+  #agents-root ol, #agents-root ul, #agents-root menu {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* 表单元素继承字体、重置外观(preflight 行为) */
+  #agents-root button, #agents-root input, #agents-root optgroup, #agents-root select, #agents-root textarea {
+    font-family: inherit;
+    font-size: 100%;
+    font-weight: inherit;
+    line-height: inherit;
+    color: inherit;
+    margin: 0;
+    padding: 0;
+  }
+  #agents-root button, #agents-root [type='button'], #agents-root [type='reset'], #agents-root [type='submit'] {
+    -webkit-appearance: button;
+    background-color: transparent;
+    background-image: none;
+    cursor: pointer;
+  }
+  #agents-root :disabled { cursor: default; }
+
+  /* 媒体元素 block(preflight 行为) */
+  #agents-root img, #agents-root svg, #agents-root video, #agents-root canvas, #agents-root audio, #agents-root iframe, #agents-root embed, #agents-root object {
+    display: block;
+    vertical-align: middle;
+  }
+  #agents-root img, #agents-root video { max-width: 100%; height: auto; }
+
+  /* 链接/粗体/等宽/表格 */
+  #agents-root a { color: inherit; text-decoration: inherit; }
+  #agents-root b, #agents-root strong { font-weight: bolder; }
+  #agents-root code, #agents-root kbd, #agents-root samp, #agents-root pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 1em;
+  }
+  #agents-root table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
+  #agents-root :where(input, textarea)::placeholder { opacity: 1; color: hsl(var(--muted-foreground)); }
+  #agents-root [hidden] { display: none; }
+
+  /* 过渡动画(类选择器,仅作用 agents 元素) */
+  #agents-root .transition-all { transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); }
+  #agents-root .transition-transform { transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1); }
+  #agents-root .transition-opacity { transition: opacity 200ms ease-in-out; }
+  #agents-root .transition-scale { transition: transform 100ms cubic-bezier(0.4, 0, 0.2, 1); }
+  #agents-root .transition-shadow { transition: box-shadow 200ms ease-in-out; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #agents-root *, #agents-root *::before, #agents-root *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Smooth hover transitions for interactive elements */
+  #agents-root button:hover, #agents-root a:hover, #agents-root [role="button"]:hover {
+    transition-duration: 100ms;
+  }
+  
+  /* Active state transitions */
+  #agents-root button:active, #agents-root a:active, #agents-root [role="button"]:active {
+    transition-duration: 50ms;
+  }
+  
+  /* Focus transitions */
+  #agents-root button:focus-visible, #agents-root a:focus-visible, #agents-root input:focus-visible, #agents-root textarea:focus-visible, #agents-root select:focus-visible {
+    transition: outline-offset 150ms ease-out, box-shadow 150ms ease-out;
+  }
+  
+  /* Sidebar transitions */
+  #agents-root .sidebar-transition {
+    transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 300ms ease-in-out;
+  }
+
+  /* Nav glass surface — uses theme tokens */
+  #agents-root .nav-glass {
+    background: hsl(var(--nav-glass-bg));
+    backdrop-filter: blur(var(--nav-glass-blur)) saturate(var(--nav-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--nav-glass-blur)) saturate(var(--nav-glass-saturate));
+  }
+
+  /* Nav tab active pill glow — uses theme tokens */
+  #agents-root .nav-tab-active {
+    box-shadow: 0 1px 8px hsl(var(--nav-tab-glow)),
+                0 0 0 1px hsl(var(--nav-tab-ring));
+  }
+
+  /* Floating mobile nav bar — uses theme tokens */
+  #agents-root .mobile-nav-float {
+    box-shadow: 0 -1px 20px hsl(var(--nav-float-shadow)),
+                0 0 0 1px hsl(var(--nav-float-ring));
+  }
+
+  /* Subtle sidebar divider — uses theme tokens */
+  #agents-root .nav-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, hsl(var(--nav-divider-color)) 20%, hsl(var(--nav-divider-color)) 80%, transparent);
+  }
+
+  /* Nav search input surface — uses theme tokens */
+  #agents-root .nav-search-input {
+    background: hsl(var(--nav-input-bg));
+    border: none;
+  }
+
+  #agents-root .nav-search-input:focus-within {
+    background: hsl(var(--background));
+    box-shadow: 0 0 0 2px hsl(var(--nav-input-focus-ring));
+  }
+  
+  /* Modal and dropdown transitions */
+  #agents-root .modal-transition {
+    transition: opacity 200ms ease-in-out,
+                transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  /* Chat message transitions */
+  #agents-root .message-transition {
+    transition: opacity 300ms ease-in-out,
+                transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  /* Height transitions for expanding elements */
+  #agents-root .height-transition {
+    transition: height 200ms ease-in-out,
+                max-height 200ms ease-in-out;
+  }
+  
+  #agents-root .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground)) transparent;
+  }
+  
+  #agents-root .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  #agents-root .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  #agents-root .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground));
+    border-radius: 3px;
+  }
+  
+  #agents-root .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.8);
+  }
+  
+  /* Dark mode scrollbar styles */
+  #agents-root .dark .scrollbar-thin {
+    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+  }
+  
+  #agents-root .dark .scrollbar-thin::-webkit-scrollbar-track {
+    background: rgba(31, 41, 55, 0.3);
+  }
+  
+  #agents-root .dark .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.5);
+    border-radius: 3px;
+  }
+  
+  #agents-root .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(156, 163, 175, 0.7);
+  }
+  
+  /* Global scrollbar styles for main content areas */
+  #agents-root .dark::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  #agents-root .dark::-webkit-scrollbar-track {
+    background: rgba(31, 41, 55, 0.5);
+  }
+  
+  #agents-root .dark::-webkit-scrollbar-thumb {
+    background-color: rgba(107, 114, 128, 0.5);
+    border-radius: 4px;
+  }
+  
+  #agents-root .dark::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(107, 114, 128, 0.7);
+  }
+  
+  /* Firefox scrollbar styles */
+  #agents-root {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(107, 114, 128, 0.5) rgba(31, 41, 55, 0.5);
+  }
+  
+  /* Ensure checkbox styling is preserved */
+  #agents-root input[type="checkbox"] {
+    @apply accent-blue-600;
+    opacity: 1;
+  }
+  
+  #agents-root input[type="checkbox"]:focus {
+    opacity: 1;
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  
+  /* Fix checkbox appearance in dark mode */
+  #agents-root .dark input[type="checkbox"] {
+    background-color: rgb(31 41 55); /* gray-800 */
+    border-color: rgb(75 85 99); /* gray-600 */
+    color: rgb(37 99 235); /* blue-600 */
+    color-scheme: dark;
+  }
+  
+  #agents-root .dark input[type="checkbox"]:checked {
+    background-color: rgb(37 99 235); /* blue-600 */
+    border-color: rgb(37 99 235); /* blue-600 */
+  }
+  
+  #agents-root .dark input[type="checkbox"]:focus {
+    --tw-ring-color: rgb(59 130 246); /* blue-500 */
+    --tw-ring-offset-color: rgb(31 41 55); /* gray-800 */
+  }
+  
+  /* Fix radio button appearance in dark mode */
+  #agents-root .dark input[type="radio"] {
+    background-color: rgb(31 41 55); /* gray-800 */
+    border-color: rgb(75 85 99); /* gray-600 */
+    color: rgb(37 99 235); /* blue-600 */
+    color-scheme: dark;
+  }
+  
+  #agents-root .dark input[type="radio"]:checked {
+    background-color: rgb(37 99 235); /* blue-600 */
+    border-color: rgb(37 99 235); /* blue-600 */
+  }
+  
+  #agents-root .dark input[type="radio"]:focus {
+    --tw-ring-color: rgb(59 130 246); /* blue-500 */
+    --tw-ring-offset-color: rgb(31 41 55); /* gray-800 */
+  }
+  
+  /* Ensure textarea text is always visible in dark mode */
+  #agents-root textarea {
+    color-scheme: light dark;
+  }
+  
+  #agents-root .dark textarea {
+    color: rgb(243 244 246) !important; /* gray-100 */
+    -webkit-text-fill-color: rgb(243 244 246) !important;
+    caret-color: rgb(243 244 246) !important;
+  }
+  
+  /* Fix for focus state in dark mode */
+  #agents-root .dark textarea:focus {
+    color: rgb(243 244 246) !important;
+    -webkit-text-fill-color: rgb(243 244 246) !important;
+  }
+  
+  /* Fix for iOS/Safari dark mode textarea issues */
+  @supports (-webkit-touch-callout: none) {
+    #agents-root .dark textarea {
+      background-color: transparent !important;
+      color: rgb(243 244 246) !important;
+      -webkit-text-fill-color: rgb(243 244 246) !important;
+    }
+    
+    #agents-root .dark textarea:focus {
+      background-color: transparent !important;
+      color: rgb(243 244 246) !important;
+      -webkit-text-fill-color: rgb(243 244 246) !important;
+    }
+  }
+  
+  /* Ensure parent container doesn't override textarea styles */
+  #agents-root .dark .bg-gray-800 textarea {
+    color: rgb(243 244 246) !important;
+    -webkit-text-fill-color: rgb(243 244 246) !important;
+  }
+  
+  /* Fix focus-within container issues in dark mode */
+  #agents-root .dark .focus-within\:ring-2:focus-within {
+    background-color: rgb(31 41 55) !important; /* gray-800 */
+  }
+  
+  /* Ensure textarea remains transparent with visible text */
+  #agents-root .dark textarea.bg-transparent {
+    background-color: transparent !important;
+    color: rgb(243 244 246) !important;
+    -webkit-text-fill-color: rgb(243 244 246) !important;
+  }
+  
+  /* Fix placeholder text color to be properly gray */
+  #agents-root textarea::placeholder {
+    color: rgb(156 163 175) !important; /* gray-400 */
+    opacity: 1 !important;
+  }
+  
+  #agents-root .dark textarea::placeholder {
+    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    opacity: 1 !important;
+  }
+  
+  /* More specific selector for chat input textarea */
+  #agents-root .dark .bg-gray-800 textarea::placeholder, #agents-root .dark textarea.bg-transparent::placeholder {
+    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    opacity: 1 !important;
+    -webkit-text-fill-color: rgb(75 85 99) !important;
+  }
+  
+  /* Custom class for chat input placeholder */
+  #agents-root .chat-input-placeholder::placeholder {
+    color: rgb(156 163 175) !important;
+    opacity: 1 !important;
+  }
+
+  #agents-root .dark .chat-input-placeholder::placeholder {
+    color: rgb(75 85 99) !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: rgb(75 85 99) !important;
+  }
+
+  #agents-root .chat-input-placeholder::-webkit-input-placeholder {
+    color: rgb(156 163 175) !important;
+    opacity: 1 !important;
+  }
+
+  #agents-root .dark .chat-input-placeholder::-webkit-input-placeholder {
+    color: rgb(75 85 99) !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: rgb(75 85 99) !important;
+  }
+  
+  /* WebKit specific placeholder styles */
+  #agents-root textarea::-webkit-input-placeholder {
+    color: rgb(156 163 175) !important;
+    opacity: 1 !important;
+  }
+  
+  #agents-root .dark textarea::-webkit-input-placeholder {
+    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    opacity: 1 !important;
+  }
+  
+  /* Mozilla specific placeholder styles */
+  #agents-root textarea::-moz-placeholder {
+    color: rgb(156 163 175) !important;
+    opacity: 1 !important;
+  }
+  
+  #agents-root .dark textarea::-moz-placeholder {
+    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    opacity: 1 !important;
+  }
+  
+  /* IE/Edge specific placeholder styles */
+  #agents-root textarea:-ms-input-placeholder {
+    color: rgb(156 163 175) !important;
+    opacity: 1 !important;
+  }
+  
+  #agents-root .dark textarea:-ms-input-placeholder {
+    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    opacity: 1 !important;
+  }
+}
+
+/* Mobile optimizations and components */
+@layer components {
+  /* Mobile touch optimization and safe areas */
+  @media (max-width: 768px) {
+    #agents-root * {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    /* Allow vertical scrolling in scroll containers */
+    #agents-root .overflow-y-auto, #agents-root [data-scroll-container] {
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Preserve checkbox visibility */
+    #agents-root input[type="checkbox"] {
+      -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+      opacity: 1 !important;
+    }
+    
+    #agents-root button, #agents-root [role="button"], #agents-root .clickable, #agents-root a, #agents-root .cursor-pointer {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    
+    /* Better mobile touch targets */
+    #agents-root .mobile-touch-target {
+      @apply min-h-[44px] min-w-[44px];
+    }
+    
+    /* Chat message improvements */
+    #agents-root .chat-message.user {
+      @apply justify-end;
+    }
+    
+    #agents-root .chat-message.user > div {
+      @apply max-w-[85%];
+    }
+    
+    #agents-root .chat-message.assistant > div, #agents-root .chat-message.error > div {
+      @apply w-full sm:max-w-[95%];
+    }
+    
+    /* Session name truncation on mobile */
+    #agents-root .session-name-mobile {
+      @apply truncate;
+      max-width: calc(100vw - 120px); /* Account for sidebar padding and buttons */
+    }
+    
+    /* Enable text selection on mobile for terminal */
+    #agents-root .xterm, #agents-root .xterm .xterm-viewport {
+      -webkit-user-select: text !important;
+      user-select: text !important;
+      -webkit-touch-callout: default !important;
+    }
+    
+    /* Fix mobile scrolling */
+    #agents-root .overflow-y-auto {
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    #agents-root .chat-message {
+      touch-action: pan-y;
+    }
+    
+    /* Fix hover states on mobile */
+    #agents-root .group:active .group-hover\:opacity-100, #agents-root .group .group-hover\:opacity-100 {
+      opacity: 1 !important;
+    }
+    
+    @media (hover: none) and (pointer: coarse) {
+      #agents-root .group-hover\:opacity-100 {
+        opacity: 1 !important;
+      }
+      
+      #agents-root .hover\:bg-gray-50:hover, #agents-root .hover\:bg-gray-100:hover, #agents-root .hover\:bg-red-200:hover, #agents-root .dark\:hover\:bg-gray-700:hover, #agents-root .dark\:hover\:bg-red-900\/50:hover {
+        background-color: inherit;
+      }
+    }
+  }
+  
+  /* Touch device optimizations for all screen sizes */
+  @media (hover: none) and (pointer: coarse) {
+    #agents-root .touch\:opacity-100 {
+      opacity: 1 !important;
+    }
+    
+    /* Completely disable hover states on touch devices */
+    #agents-root * {
+      -webkit-tap-highlight-color: transparent !important;
+    }
+    
+    /* Preserve checkbox visibility on touch devices */
+    #agents-root input[type="checkbox"] {
+      -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1) !important;
+      opacity: 1 !important;
+    }
+    
+    /* Only disable hover states for interactive elements, not containers */
+    #agents-root button:hover, #agents-root [role="button"]:hover, #agents-root .cursor-pointer:hover, #agents-root a:hover, #agents-root .hover\:bg-gray-50:hover, #agents-root .hover\:bg-gray-100:hover, #agents-root .hover\:text-gray-900:hover, #agents-root .hover\:opacity-100:hover {
+      background-color: inherit !important;
+      color: inherit !important;
+      opacity: inherit !important;
+      transform: inherit !important;
+    }
+    
+    /* Force buttons to be immediately clickable */
+    #agents-root button, #agents-root [role="button"], #agents-root .cursor-pointer {
+      cursor: pointer !important;
+      pointer-events: auto !important;
+    }
+    
+    /* Keep active states for immediate feedback */
+    #agents-root .active\:scale-\[0\.98\]:active, #agents-root .active\:scale-95:active {
+      transform: scale(0.98) !important;
+    }
+  }
+  
+  /* Safe area support for iOS devices */
+  #agents-root .ios-bottom-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  /* PWA specific header adjustments - uses CSS variables for consistency */
+  #agents-root .pwa-header-safe {
+    padding-top: var(--header-base-padding);
+  }
+
+  /* When PWA mode is detected by JavaScript */
+  #agents-root.pwa-mode .pwa-header-safe {
+    /* Reset padding since #root already handles safe area */
+    padding-top: 0px !important;
+  }
+
+  /* For mobile PWA, add bottom padding for better spacing */
+  @media screen and (max-width: 768px) {
+    #agents-root.pwa-mode .pwa-header-safe {
+      padding-bottom: 8px;
+    }
+  }
+  
+  @media screen and (max-width: 768px) {
+    #agents-root .chat-input-mobile {
+      padding-bottom: calc(60px + env(safe-area-inset-bottom));
+    }
+  }
+
+  /* Text wrapping improvements */
+  #agents-root .chat-message {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+  }
+
+  /* Force wrap long URLs and code */
+  #agents-root .chat-message pre, #agents-root .chat-message code {
+    white-space: pre-wrap !important;
+    word-break: break-all;
+    overflow-wrap: break-word;
+  }
+
+  /* Prevent horizontal scroll in chat area */
+  #agents-root .chat-message * {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Hide scrollbar utility for horizontal scroll */
+  #agents-root .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  #agents-root .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Hide markdown backticks in prose content */
+#agents-root .prose code::before, #agents-root .prose code::after {
+  content: "" !important;
+  display: none !important;
+}
+
+/* Custom spinner animation for mobile compatibility */
+@layer utilities {
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  
+  #agents-root .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+  
+  /* Force hardware acceleration for smoother animation on mobile */
+  #agents-root .loading-spinner {
+    animation: spin 1s linear infinite;
+    will-change: transform;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  
+  /* Improved textarea styling */
+  #agents-root .chat-input-placeholder {
+    display: block !important;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+  }
+
+  /* Ensure container fits textarea tightly */
+  #agents-root .chat-input-placeholder:not(:focus) {
+    height: auto;
+  }
+  
+  #agents-root .chat-input-placeholder::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  #agents-root .chat-input-placeholder::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 8px 0;
+  }
+  
+  #agents-root .chat-input-placeholder::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.3);
+    border-radius: 3px;
+    transition: background-color 0.2s;
+  }
+  
+  #agents-root .chat-input-placeholder::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(156, 163, 175, 0.5);
+  }
+  
+  #agents-root .dark .chat-input-placeholder {
+    scrollbar-color: rgba(107, 114, 128, 0.3) transparent;
+  }
+  
+  #agents-root .dark .chat-input-placeholder::-webkit-scrollbar-thumb {
+    background-color: rgba(107, 114, 128, 0.3);
+  }
+  
+  #agents-root .dark .chat-input-placeholder::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(107, 114, 128, 0.5);
+  }
+  
+  /* Enhanced box shadow when textarea expands */
+  #agents-root .chat-input-expanded {
+    box-shadow: 0 -5px 15px -3px rgba(0, 0, 0, 0.1), 0 -4px 6px -2px rgba(0, 0, 0, 0.05);
+  }
+  
+  #agents-root .dark .chat-input-expanded {
+    box-shadow: 0 -5px 15px -3px rgba(0, 0, 0, 0.3), 0 -4px 6px -2px rgba(0, 0, 0, 0.2);
+  }
+  
+  /* Fix focus ring offset color in dark mode */
+  #agents-root .dark [class*="ring-offset"] {
+    --tw-ring-offset-color: rgb(31 41 55); /* gray-800 */
+  }
+  
+  /* Ensure buttons don't show white backgrounds in dark mode */
+  #agents-root .dark button:focus {
+    --tw-ring-offset-color: rgb(31 41 55); /* gray-800 */
+  }
+  
+  /* Fix mobile select dropdown styling */
+  @supports (-webkit-touch-callout: none) {
+    #agents-root select {
+      font-size: 16px !important;
+      -webkit-appearance: none;
+    }
+  }
+  
+  /* Improve select appearance in dark mode */
+  #agents-root .dark select {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+  }
+  
+  #agents-root select {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+  }
+  
+  /* Fix select option text in mobile */
+  #agents-root select option {
+    font-size: 16px !important;
+    padding: 8px !important;
+    background-color: var(--background) !important;
+    color: var(--foreground) !important;
+  }
+  
+  #agents-root .dark select option {
+    background-color: rgb(31 41 55) !important;
+    color: rgb(243 244 246) !important;
+  }
+
+  /* Tool details chevron animation */
+  #agents-root details[open] .details-chevron, #agents-root details[open] summary svg[class*="group-open"] {
+    transform: rotate(180deg);
+  }
+
+  /* Smooth chevron transition */
+  #agents-root .details-chevron, #agents-root summary svg[class*="transition-transform"] {
+    transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Settings content fade-in transition */
+  @keyframes settings-fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  #agents-root .settings-content-enter {
+    animation: settings-fade-in 150ms ease-out;
+  }
+
+  /* Search result highlight flash */
+  #agents-root .search-highlight-flash {
+    animation: search-flash 4s ease-out;
+  }
+
+  @keyframes search-flash {
+    0%, 50% {
+      outline: 3px solid hsl(var(--primary));
+      outline-offset: 4px;
+      border-radius: 8px;
+      background-color: hsl(var(--primary) / 0.06);
+    }
+    100% {
+      outline: 3px solid transparent;
+      outline-offset: 4px;
+      background-color: transparent;
+    }
+  }
+}

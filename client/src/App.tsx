@@ -18,7 +18,7 @@ import ServerMonitor from "./pages/workbench/ServerMonitor";
 import News from "./pages/workbench/News";
 import Brain from "./pages/workbench/Brain";
 import ListingWorkbench from "./pages/workbench/ListingWorkbench";
-import CloudCLINative from "./pages/workbench/CloudCLINative";
+import Agents from "./pages/workbench/Agents";
 import Market from "./pages/workbench/Market";
 import Playbook from "./pages/workbench/Playbook";
 import HubSettings from "./pages/workbench/HubSettings";
@@ -133,11 +133,7 @@ export default function App() {
             <Route path="servmon" element={<ServerMonitor />} />
             <Route path="news" element={<News />} />
             <Route path="brain" element={<Brain />} />
-            {/* /agents 已退役为 cloudcli 原生后端:agents/cloudcli 全部渲染
-                CloudCLINative。旧 Workspace/AgentChat 不再挂载(文件保留待清理)。 */}
-            <Route path="agents" element={<CloudCLINative />} />
-            <Route path="cloudcli" element={<CloudCLINative />} />
-            <Route path="cloudcli-native" element={<CloudCLINative />} />
+            <Route path="agents" element={<Agents />} />
             <Route path="listing" element={<ListingWorkbench />} />
             <Route path="freight" element={<FreightQuote />} />
             <Route path="market" element={<Market />} />
