@@ -13,6 +13,10 @@ function Btn({ onClick, children, primary, disabled }: any) {
 const LEVER_COLOR: Record<string, string> = { "否词": "var(--red)", "降bid": "var(--amber)", "加bid": "var(--acc)", "加预算": "var(--blue)", "收割": "var(--purple)" };
 const pct = (v: any) => (v == null ? "—" : (v * 100).toFixed(0) + "%");
 
+// module-level cache so a run (and its in-flight request) survives tab switches
+type OptEntry = { data?: any; loading?: boolean; promise?: Promise<any>; done?: Record<number, string> };
+const optCache: Record<string, OptEntry> = {};
+
 export default function LingXingOptimizer({ storeSid }: { storeSid?: string }) {
   const [sellers, setSellers] = useState<any[]>([]);
   const sid = storeSid || "";   // store is driven by the page-level selector
@@ -25,6 +29,7 @@ export default function LingXingOptimizer({ storeSid }: { storeSid?: string }) {
   const [adgroups, setAdgroups] = useState<any[]>([]);
   const [hForm, setHForm] = useState<Record<number, any>>({});
   const setH = (i: number, k: string, v: any) => setHForm((f) => ({ ...f, [i]: { ...f[i], [k]: v } }));
+  const markDone = (i: number, id: string) => setDone((d) => { const n = { ...d, [i]: id }; if (optCache[sid]) optCache[sid].done = n; return n; });
   const cur: Cur | undefined = sidCurrencyMap(sellers)[sid];
 
   useEffect(() => { void load(); }, []);
@@ -34,16 +39,28 @@ export default function LingXingOptimizer({ storeSid }: { storeSid?: string }) {
       setSellers(r.data.rows || []);
     } catch (e: any) { setErr(humanErr(e)); }
   }
-  useEffect(() => { setData(null); setDone({}); }, [storeSid]);  // clear stale candidates on store change
+  // restore from cache on mount / store change (keeps the running indicator + result)
+  useEffect(() => {
+    const c = optCache[sid];
+    setData(c?.data ?? null); setDone(c?.done ?? {}); setErr("");
+    if (c?.loading && c.promise) {
+      setLoading(true);
+      c.promise.then((d) => setData(d)).catch(() => {}).finally(() => setLoading(false));
+    } else { setLoading(false); }
+    if (c?.data?.candidates?.some((x: any) => x.harvest)) void loadDest();
+  }, [storeSid]);
   async function run() {
     if (!sid) return;
     setLoading(true); setErr(""); setData(null); setDone({});
+    const p = api.get(`/lingxing/optimizer/run?sid=${sid}&days=${days}`).then((r) => r.data);
+    optCache[sid] = { loading: true, promise: p, done: {} };
     try {
-      const d = (await api.get(`/lingxing/optimizer/run?sid=${sid}&days=${days}`)).data;
+      const d = await p;
+      optCache[sid] = { data: d, loading: false, done: {} };
       setData(d);
       if ((d.candidates || []).some((c: any) => c.harvest)) void loadDest();
-    }
-    catch (e: any) { setErr(humanErr(e)); } finally { setLoading(false); }
+    } catch (e: any) { setErr(humanErr(e)); optCache[sid] = { loading: false }; }
+    finally { setLoading(false); }
   }
   async function loadDest() {
     try {
@@ -58,7 +75,7 @@ export default function LingXingOptimizer({ storeSid }: { storeSid?: string }) {
   async function makeTicket(c: any, i: number) {
     try {
       const r = await api.post("/lingxing/operate/manual", c.payload);
-      setDone((d) => ({ ...d, [i]: r.data.id }));
+      markDone(i, r.data.id);
     } catch (e: any) { setErr(humanErr(e)); }
   }
   async function makeHarvest(c: any, i: number) {
@@ -71,7 +88,7 @@ export default function LingXingOptimizer({ storeSid }: { storeSid?: string }) {
         rationale: `收割：搜索词「${c.harvest.query}」已 ${c.metrics?.orders} 单，加入精准活动，建议bid ${c.harvest.suggested_bid}`,
         opt: { lever: "收割", rule: c.rule, significance: c.significance, metrics: c.metrics, target_acos: c.opt_target, breakeven_acos: c.opt_breakeven },
       });
-      setDone((d) => ({ ...d, [i]: r.data.id }));
+      markDone(i, r.data.id);
     } catch (e: any) { setErr(humanErr(e)); }
   }
 
