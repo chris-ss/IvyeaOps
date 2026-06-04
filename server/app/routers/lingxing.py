@@ -177,6 +177,17 @@ class ManualTicket(BaseModel):
     opt: Dict[str, Any] | None = None  # optimizer rule trail (rule/metrics/significance)
 
 
+@router.get("/help")
+async def help_doc() -> Dict[str, Any]:
+    """The Chinese user guide (markdown) for in-app rendering."""
+    from pathlib import Path
+    p = Path(__file__).resolve().parents[3] / "docs" / "lingxing-erp-guide.md"
+    try:
+        return {"markdown": p.read_text("utf-8")}
+    except Exception:
+        return {"markdown": "# 文档未找到\n请见仓库 docs/lingxing-erp-guide.md"}
+
+
 @router.get("/review/providers")
 async def review_providers() -> Dict[str, Any]:
     cfg = _hs.load()

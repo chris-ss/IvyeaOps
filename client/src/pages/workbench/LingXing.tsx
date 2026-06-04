@@ -6,6 +6,7 @@ import LingXingAudit from "./LingXingAudit";
 import LingXingDashboard from "./LingXingDashboard";
 import LingXingOptimizer from "./LingXingOptimizer";
 import LingXingConfig from "./LingXingConfig";
+import LingXingHelp from "./LingXingHelp";
 
 /* ── shared mini-styles (match workbench look) ─────────────────────────── */
 const inputStyle: React.CSSProperties = {
@@ -34,7 +35,7 @@ function readLS(): any { try { return JSON.parse(localStorage.getItem(LS_KEY) ||
 export default function LingXing() {
   const [status, setStatus] = useState<Status | null>(null);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [view, setView] = useState<"dashboard" | "browse" | "optimizer" | "auto" | "operate" | "audit" | "config">(() => readLS().view || "dashboard");
+  const [view, setView] = useState<"dashboard" | "browse" | "optimizer" | "auto" | "operate" | "audit" | "config" | "help">(() => readLS().view || "dashboard");
   const [active, setActive] = useState<string>(() => readLS().active || "sellers");
   const [sellers, setSellers] = useState<any[]>([]);
   const [storeSid, setStoreSid] = useState<string>(() => readLS().storeSid || "");
@@ -155,7 +156,7 @@ export default function LingXing() {
 
       <>
         <div style={{ display: "flex", gap: 2, marginBottom: 10, flexWrap: "wrap" }}>
-          {([["dashboard", "大盘"], ["browse", "数据浏览"], ["optimizer", "优化引擎"], ["auto", "自动化建议"], ["operate", "操作执行"], ["audit", "审计"], ["config", "配置"]] as const).map(([v, l]) => (
+          {([["dashboard", "大盘"], ["browse", "数据浏览"], ["optimizer", "优化引擎"], ["auto", "自动化建议"], ["operate", "操作执行"], ["audit", "审计"], ["config", "配置"], ["help", "帮助"]] as const).map(([v, l]) => (
             <button key={v} onClick={() => setView(v)} style={{
               padding: "6px 14px", fontSize: 11, border: "none", borderRadius: 4, cursor: "pointer",
               background: view === v ? "var(--acc)" : "var(--bg2)", color: view === v ? "#000" : "var(--t2)",
@@ -163,7 +164,8 @@ export default function LingXing() {
             }}>{l}</button>
           ))}
         </div>
-        {view === "config" ? <LingXingConfig />
+        {view === "help" ? <LingXingHelp />
+          : view === "config" ? <LingXingConfig />
           : !status?.master_enabled ? (
             <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--t3)", fontSize: 12 }}>
               领星数据未启用。请到「配置」tab 填好 OpenAPI 凭证、测试连接后启用。<br />
