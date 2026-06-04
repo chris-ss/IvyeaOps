@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
 import { sidCurrencyMap, fmtBudget, type Cur } from "./lingxingCurrency";
+import { useConfirm } from "../../components/ConfirmDialog";
 
 const inputStyle: React.CSSProperties = {
   background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: 3,
@@ -30,6 +31,7 @@ export default function LingXingOperate() {
   const [busy, setBusy] = useState(false);
   const curMap = useMemo(() => sidCurrencyMap(sellers), [sellers]);
   const curOf = (sid: any): Cur | undefined => curMap[String(sid)];
+  const confirm = useConfirm();
 
   useEffect(() => { void load(); const t = setInterval(refreshStatus, 5000); return () => clearInterval(t); }, []);
   async function load() {
@@ -111,7 +113,7 @@ export default function LingXingOperate() {
           <span style={{ marginLeft: "auto" }}>
             {active
               ? <Btn onClick={() => toggleOperate(false)} disabled={busy}>关闭操作</Btn>
-              : <Btn danger onClick={() => toggleOperate(true)} disabled={busy}>开启操作领星</Btn>}
+              : <Btn danger onClick={async () => { if (await confirm({ title: "开启操作开关", message: "开启后进入可写态（写操作仍需三重复核 + 护栏 + 人工确认）。确定开启？", confirmText: "开启", danger: true })) toggleOperate(true); }} disabled={busy}>开启操作领星</Btn>}
           </span>
         </div>
         <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 8 }}>
@@ -237,11 +239,11 @@ export default function LingXingOperate() {
                 <Btn onClick={() => report(sel.id, true)}>下载报告</Btn>
                 {sel.status === "awaiting_human" && <>
                   <Btn onClick={() => act(sel.id, "confirm", { dry_run: true })} disabled={busy}>预览请求</Btn>
-                  <Btn danger onClick={() => { if (confirm("确认执行该写操作到领星？")) act(sel.id, "confirm", { dry_run: false }); }} disabled={busy || !active}>确认执行</Btn>
+                  <Btn danger onClick={async () => { if (await confirm({ title: "确认执行写操作", message: `将真实写入领星：${sel.intent?.target_name || sel.intent?.target_id}。已通过三重复核 + 护栏，确定执行？`, confirmText: "确认执行", danger: true })) act(sel.id, "confirm", { dry_run: false }); }} disabled={busy || !active}>确认执行</Btn>
                   <Btn onClick={() => act(sel.id, "reject")} disabled={busy}>驳回</Btn>
                   {!active && <span style={{ fontSize: 10, color: "var(--amber)", alignSelf: "center" }}>需先开启操作开关</span>}
                 </>}
-                {sel.status === "executed" && <Btn onClick={() => { if (confirm("回滚到执行前状态？")) act(sel.id, "rollback"); }} disabled={busy || !active}>回滚</Btn>}
+                {sel.status === "executed" && <Btn onClick={async () => { if (await confirm({ title: "回滚操作", message: "回滚到执行前的快照状态？", confirmText: "回滚", danger: true })) act(sel.id, "rollback"); }} disabled={busy || !active}>回滚</Btn>}
               </div>
             </div>
           )}
