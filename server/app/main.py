@@ -429,4 +429,11 @@ if _CLIENT_DIST.exists():
         index = _CLIENT_DIST / "index.html"
         if not index.is_file():
             raise HTTPException(status_code=404, detail="frontend not built")
-        return FileResponse(index, headers={"Cache-Control": "no-cache, must-revalidate"})
+        # index.html must always be fresh (it references hashed asset URLs).
+        # no-store is the strongest guarantee — stubborn mobile browsers / proxies
+        # honor it where they ignore no-cache, so updates appear without a manual
+        # cache clear. The hashed /assets/* can still be cached forever.
+        return FileResponse(index, headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache", "Expires": "0",
+        })
