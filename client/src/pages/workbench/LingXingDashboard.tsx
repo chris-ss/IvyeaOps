@@ -101,7 +101,7 @@ export default function LingXingDashboard({ storeSid }: { storeSid?: string }) {
         </div>
         {cmp && (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <table className="lx-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead><tr>{["店铺", "花费", "销售额", "ACOS", "ROAS", "订单"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>
                 {(cmp.by_store || []).map((s: any) => (
@@ -139,7 +139,7 @@ function CampTable({ rows, cur, loading }: { rows: any[]; cur?: Cur; loading: bo
   if (!rows.length) return <div style={{ padding: 20, textAlign: "center", color: "var(--t3)", fontSize: 11 }}>窗口内无广告数据</div>;
   return (
     <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+      <table className="lx-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
         <thead><tr>{["活动", "花费", "销售额", "ACOS", "ROAS", "订单", "CTR", "CVR"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => (

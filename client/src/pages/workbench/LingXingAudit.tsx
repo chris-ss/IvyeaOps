@@ -48,7 +48,7 @@ export default function LingXingAudit() {
         {shown.length === 0 ? (
           <div style={{ padding: 30, textAlign: "center", color: "var(--t3)", fontSize: 11 }}>{msg || "暂无审计记录"}</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+          <table className="lx-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
             <thead><tr>{["时间", "调用方", "工具/路由", "类型", "状态", "耗时", "详情"].map((h) => (
               <th key={h} style={{ textAlign: "left", padding: "7px 10px", color: "var(--t3)", borderBottom: "1px solid var(--b)", whiteSpace: "nowrap" }}>{h}</th>))}</tr></thead>
             <tbody>

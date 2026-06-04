@@ -144,7 +144,7 @@ export default function LingXing() {
       )}
 
       {/* status bar */}
-      <div className="card" style={{ padding: "8px 12px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <div className="card lx-statusbar" style={{ padding: "8px 12px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <Chip on={!!status?.openapi_configured} label={status?.openapi_configured ? "OpenAPI 已配置" : "未配置凭证"} />
         <Chip on={!!status?.master_enabled} label={status?.master_enabled ? "数据已启用" : "数据未启用"} />
         <Chip on={!!status?.operate_active} label={status?.operate_active ? "操作开关：开" : "操作开关：关(只读)"} warn={!!status?.operate_active} />
@@ -162,7 +162,7 @@ export default function LingXing() {
       </div>
 
       <>
-        <div style={{ display: "flex", gap: 2, marginBottom: 10, flexWrap: "wrap" }}>
+        <div className="lx-tabs">
           {([["dashboard", "大盘"], ["browse", "数据浏览"], ["optimizer", "优化引擎"], ["auto", "自动化建议"], ["operate", "操作执行"], ["audit", "审计"], ["config", "配置"], ["help", "帮助"]] as const).map(([v, l]) => (
             <button key={v} onClick={() => setView(v)} style={{
               padding: "6px 14px", fontSize: 11, border: "none", borderRadius: 4, cursor: "pointer",
@@ -229,7 +229,7 @@ export default function LingXing() {
                   {loading ? "加载中…" : "暂无数据，点「查询」"}
                 </div>
               ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <table className="lx-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                   <thead>
                     <tr>{cols.map((c) => (
                       <th key={c.key} style={{ textAlign: "left", padding: "7px 10px", color: "var(--t3)", borderBottom: "1px solid var(--b)", whiteSpace: "nowrap" }}>{c.label}</th>

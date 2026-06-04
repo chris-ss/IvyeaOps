@@ -123,7 +123,7 @@ export default function LingXingAutomation() {
                 <div style={{ color: "var(--t3)", fontSize: 11 }}>无建议（数据不足或无明显信号）。</div>
               ) : (
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <table className="lx-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                     <thead><tr>{["活动", "动作", "当前", "建议", "幅度", "依据", "预期", "置信", "风险"].map((h) => (
                       <th key={h} style={th}>{h}</th>))}</tr></thead>
                     <tbody>

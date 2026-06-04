@@ -2468,9 +2468,18 @@ body::after{
 .lx-split{display:flex;gap:12px}
 .lx-main{flex:1;min-width:0}
 .lx-side{flex-shrink:0}
+/* ① 标签栏：窄屏横向滑动一排（不换行） */
+.lx-tabs{display:flex;gap:2px;margin-bottom:10px;flex-wrap:wrap}
+/* ③ 表头粘性 */
+.lx-table thead th{position:sticky;top:0;background:var(--bg2);z-index:1}
 @media (max-width: 680px){
   .lx-split{flex-direction:column}
   .lx-side{width:100% !important;max-width:100% !important}
+  .lx-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .lx-tabs::-webkit-scrollbar{display:none}
+  .lx-tabs>button{flex:0 0 auto;white-space:nowrap}
+  /* ② 状态条更紧凑 */
+  .lx-statusbar{padding:6px 8px !important;gap:6px !important}
 }
 .xsel-wrap:focus-visible{outline:2px solid color-mix(in srgb, var(--acc) 50%, transparent);outline-offset:1px}
 
