@@ -26,6 +26,7 @@ export default function LingXingConfig() {
   const [avail, setAvail] = useState<any[]>([]); const [personas, setPersonas] = useState<string[]>([]);
   const [provs, setProvs] = useState<string[]>(["deepseek", "apimart", "deepseek"]);
   const [models, setModels] = useState<any[]>([]); const [cm, setCm] = useState<any>({});
+  const [rules, setRules] = useState(""); const [rulesDefault, setRulesDefault] = useState("");
 
   useEffect(() => { void load(); }, []);
   async function load() {
@@ -37,6 +38,7 @@ export default function LingXingConfig() {
       setAvail(rp.data.available || []); setPersonas(rp.data.personas || []);
       setProvs(String(rp.data.review_providers || "deepseek,apimart,deepseek").split(",").map((x: string) => x.trim()));
       try { setModels(JSON.parse(cfg.lingxing_custom_models || "[]")); } catch { setModels([]); }
+      setRules(rp.data.rules_doc || ""); setRulesDefault(rp.data.rules_doc_default || "");
     } catch (e: any) { setMsg(humanErr(e)); }
   }
   async function saveProvs(next: string[]) { setProvs(next); await patch({ lingxing_review_providers: next.join(",") }, "复核模型已保存"); }
@@ -155,6 +157,19 @@ export default function LingXingConfig() {
             <Field label="api_key"><input type="password" value={cm.api_key || ""} onChange={(e) => setCm({ ...cm, api_key: e.target.value })} style={{ ...inputStyle, width: 150 }} /></Field>
             <Btn primary disabled={!cm.id || !cm.base_url || !cm.model} onClick={() => { void saveModels([...models.filter((x) => x.id !== cm.id), cm]); setCm({}); }}>添加</Btn>
           </div>
+        </div>
+      </Card>
+
+      {/* ⑥ rules doc */}
+      <Card title="⑥ 优化规则文档（展示 + 可编辑；作为 LLM 复核/分析的方法论依据注入）">
+        <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={14}
+          style={{ ...inputStyle, width: "100%", resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }} />
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <Btn primary onClick={() => patch({ lingxing_rules_doc: rules }, "规则文档已保存")} disabled={busy}>保存规则文档</Btn>
+          <Btn onClick={() => setRules(rulesDefault)} disabled={busy}>恢复默认</Btn>
+        </div>
+        <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 6 }}>
+          确定性阈值（否词点击数/步长/冷却等）在「④ 优化参数」里调；这里改的是 LLM 复核与分析所遵循的方法论叙述。
         </div>
       </Card>
 

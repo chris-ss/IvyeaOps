@@ -182,7 +182,9 @@ async def review_providers() -> Dict[str, Any]:
     cfg = _hs.load()
     return {"available": lxo.available_providers(),
             "review_providers": cfg.get("lingxing_review_providers") or "deepseek,apimart,deepseek",
-            "personas": [p[0] for p in lxo._REVIEWERS]}
+            "personas": [p[0] for p in lxo._REVIEWERS],
+            "rules_doc": _hs.get("lingxing_rules_doc") or "",
+            "rules_doc_default": _hs._DEFAULTS.get("lingxing_rules_doc", "")}
 
 
 @router.get("/operate/op-types")

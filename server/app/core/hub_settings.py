@@ -124,6 +124,30 @@ _DEFAULTS: Dict[str, Any] = {
     # in lingxing_review_providers as "custom:<id>". CLI agents
     # (hermes/claude/codex) are also valid providers.
     "lingxing_custom_models": "[]",
+    # Editable optimization methodology. Shown in the UI and injected into the
+    # LLM review (and analysis) as the rubric the model must apply.
+    "lingxing_rules_doc": (
+        "# 亚马逊广告(SP)优化方法论\n"
+        "## 数据充分性（底线：数据不足一律不动手）\n"
+        "- 否词：搜索词 ≥15 点击且 0 单（或花费 ≥2×目标CPA 且 0 单）\n"
+        "- 改 bid：≥15 点击才足以相信 ACOS\n"
+        "- 放量(加bid)：≥3 单且 ACOS ≤ 0.8×目标\n"
+        "- 收割：搜索词 ≥3 单\n"
+        "- 窗口：bid/预算 14–30 天，否词/收割 30–90 天；剔除最近 1–2 天（归因延迟）\n"
+        "## 目标\n"
+        "- 盈亏平衡 ACOS = 毛利率；目标 ACOS = 系数×毛利率（默认 0.7）\n"
+        "- 不同活动目标可不同（打榜可高于平衡换排名；利润收割低于平衡）\n"
+        "## 各杠杆规则\n"
+        "- 降bid(高ACOS)：新bid = RPC×目标ACOS，单步 ≤15%，不破下限\n"
+        "- 加bid(放量)：ACOS≤0.8×目标且有单 → +≤15%，新bid ≤ RPC×目标\n"
+        "- 高花费0单词：花费≥目标CPA → 重降或暂停；若是搜索词则否定\n"
+        "- 预算：打满且ACOS≤目标 → +X%；超标且没打满 → 先修bid/否词，别加预算\n"
+        "- 否词：达阈值 → negative exact；多周期一致才升 phrase\n"
+        "- 收割：auto/broad ≥3单搜索词 → 加精准活动(bid≈RPC×目标) + 原活动否定它（毕业）\n"
+        "## 顺序与护栏\n"
+        "- 顺序：否词 → 收割 → 调bid → 预算；同一对象冷却 7 天内不重复动\n"
+        "- 护栏：保护赢家(达标不准降/停)、放量bid不破平衡点、bid上下限、写白名单、单步幅度封顶\n"
+    ),
     # Deterministic guardrails (hard caps, enforced in code regardless of AI
     # reviews). Empty scope lists = nothing is writable until you whitelist.
     "lingxing_scope_stores": "",          # comma-separated store ids/names allowed for writes
