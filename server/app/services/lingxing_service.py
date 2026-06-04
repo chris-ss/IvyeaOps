@@ -156,6 +156,25 @@ def init_db() -> None:
             )
             """
         )
+        # P3 operation tickets (write ops: review → guardrails → human → execute).
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lingxing_op_ticket (
+                id          TEXT PRIMARY KEY,
+                created_at  TEXT,
+                updated_at  TEXT,
+                source      TEXT,            -- run:<id> | manual
+                status      TEXT,
+                intent_json TEXT,
+                reviews_json TEXT,
+                guardrail_json TEXT,
+                snapshot_json TEXT,          -- pre-execution state for rollback
+                result_json TEXT,
+                decided_by  TEXT,
+                error       TEXT
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()

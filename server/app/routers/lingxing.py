@@ -20,6 +20,7 @@ from app.core import hub_settings as _hs
 from app.services import lingxing_service as lx
 from app.services import lingxing_data as lxd
 from app.services import lingxing_automation as lxa
+from app.services import lingxing_operate as lxo
 
 router = APIRouter()
 
@@ -122,3 +123,64 @@ async def auto_run_now() -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="领星集成未启用（总开关关闭）")
     run_id = lxa.start_background_run(trigger="manual")
     return {"ok": True, "run_id": run_id}
+
+
+# --- controlled write operations (P3) --------------------------------------
+class ConfirmRequest(BaseModel):
+    dry_run: bool = False
+
+
+@router.post("/operate/enable")
+async def operate_enable() -> Dict[str, Any]:
+    return {"status": lxo.enable_operate()}
+
+
+@router.post("/operate/disable")
+async def operate_disable() -> Dict[str, Any]:
+    return {"status": lxo.disable_operate()}
+
+
+@router.get("/operate/tickets")
+async def operate_tickets(limit: int = 50) -> Dict[str, Any]:
+    return {"tickets": lxo.list_tickets(limit=max(1, min(limit, 200)))}
+
+
+@router.get("/operate/tickets/{tid}")
+async def operate_ticket_detail(tid: str) -> Dict[str, Any]:
+    t = lxo.get_ticket(tid)
+    if not t:
+        raise HTTPException(status_code=404, detail="未找到工单")
+    return t
+
+
+@router.post("/operate/from-run/{run_id}")
+async def operate_from_run(run_id: str) -> Dict[str, Any]:
+    """Turn a run's advisory proposals into review-gated tickets."""
+    try:
+        return await lxo.create_tickets_from_run(run_id)
+    except lx.LingXingError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/operate/tickets/{tid}/confirm")
+async def operate_confirm(tid: str, body: ConfirmRequest) -> Dict[str, Any]:
+    try:
+        return await lxo.confirm_ticket(tid, decided_by="human", dry_run=body.dry_run)
+    except lx.LingXingError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/operate/tickets/{tid}/reject")
+async def operate_reject(tid: str) -> Dict[str, Any]:
+    try:
+        return await lxo.reject_ticket(tid, decided_by="human")
+    except lx.LingXingError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/operate/tickets/{tid}/rollback")
+async def operate_rollback(tid: str) -> Dict[str, Any]:
+    try:
+        return await lxo.rollback_ticket(tid, decided_by="human")
+    except lx.LingXingError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
