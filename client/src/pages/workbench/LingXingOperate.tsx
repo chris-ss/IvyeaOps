@@ -282,7 +282,7 @@ function fmtChange(c: any, cur?: Cur) {
 }
 function fmtState(o: any, cur?: Cur) { if (!o) return "—"; const a = []; if (o.state) a.push(o.state); const [, v] = numField(o); if (v != null) a.push(fmtBudget(v, cur)); return a.join(" / ") || "—"; }
 function L({ t, children }: { t: string; children: any }) {
-  return <label style={{ display: "grid", gap: 3, fontSize: 10, color: "var(--t3)" }}><span>{t}</span>{children}</label>;
+  return <div style={{ display: "grid", gap: 3, fontSize: 10, color: "var(--t3)" }}><span>{t}</span>{children}</div>;
 }
 function fmtDur(s: number) { const m = Math.floor(s / 60); return m >= 60 ? `${Math.floor(m / 60)}h${m % 60}m` : `${m}m`; }
 function fmtTs(ts?: string) { if (!ts) return "—"; try { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); } catch { return ts; } }

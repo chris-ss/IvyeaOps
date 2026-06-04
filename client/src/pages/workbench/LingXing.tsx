@@ -32,6 +32,14 @@ type Status = { master_enabled: boolean; operate_active: boolean; openapi_config
 
 const LS_KEY = "lingxing.ui.v1";
 function readLS(): any { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; } }
+// relative date token like "-7d" / "-1d" → real YYYY-MM-DD (for display + date inputs)
+function resolveDate(token: any): string {
+  if (typeof token !== "string") return token ?? "";
+  const m = token.trim().match(/^(-?\d+)d$/);
+  if (!m) return token;
+  const d = new Date(); d.setDate(d.getDate() + Number(m[1]));
+  return d.toISOString().slice(0, 10);
+}
 
 export default function LingXing() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -91,6 +99,7 @@ export default function LingXing() {
     for (const p of ds.params) {
       if (p.name === "sid") f[p.name] = storeSid;
       else if (p.name === "sids") f[p.name] = storeSid;
+      else if (p.type === "date") f[p.name] = resolveDate(p.default);
       else f[p.name] = p.default ?? "";
     }
     setForm(f); setRows([]); setMeta(null); setErr("");
@@ -196,9 +205,10 @@ export default function LingXing() {
                 {ds?.params.map((p) => (
                   <label key={p.name} style={{ display: "grid", gap: 3, fontSize: 10, color: "var(--t3)" }}>
                     <span>{p.label || p.name}{p.required ? " *" : ""}</span>
-                    <input value={form[p.name] ?? ""} placeholder={p.type}
+                    <input type={p.type === "date" ? "date" : "text"} value={form[p.name] ?? ""}
+                      placeholder={p.type === "date" ? "" : p.type}
                       onChange={(e) => setForm((f) => ({ ...f, [p.name]: e.target.value }))}
-                      style={{ ...inputStyle, width: p.type === "int" ? 90 : 150 }} />
+                      style={{ ...inputStyle, width: p.type === "int" ? 90 : p.type === "date" ? 140 : 150 }} />
                   </label>
                 ))}
                 <Btn primary onClick={() => run(false)} disabled={loading}>{loading ? "查询中…" : "查询"}</Btn>

@@ -13,7 +13,7 @@ function Card({ title, children }: any) {
   return <div className="card" style={{ padding: 12, marginBottom: 10 }}><div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{title}</div>{children}</div>;
 }
 function Field({ label, children }: any) {
-  return <label style={{ display: "grid", gap: 3, fontSize: 10, color: "var(--t3)" }}><span>{label}</span>{children}</label>;
+  return <div style={{ display: "grid", gap: 3, fontSize: 10, color: "var(--t3)" }}><span>{label}</span>{children}</div>;
 }
 
 export default function LingXingConfig() {
