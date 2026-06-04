@@ -119,6 +119,10 @@ _DEFAULTS: Dict[str, Any] = {
     # advocate / business-balance). 'apimart' = Claude. Missing provider falls
     # back to the default deepseek→apimart chain.
     "lingxing_review_providers": "deepseek,apimart,deepseek",
+    # Model for the weekly advisory analysis (自动化建议). Same provider space as
+    # review (deepseek/apimart/hermes/claude/codex/custom:<id>); empty/unavailable
+    # falls back to the default deepseek→apimart chain.
+    "lingxing_analysis_provider": "deepseek",
     # Custom review/analysis model slots: JSON list of
     # {"id","label","base_url","api_key","model"} (OpenAI-compatible). Reference
     # in lingxing_review_providers as "custom:<id>". CLI agents

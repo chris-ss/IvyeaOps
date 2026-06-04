@@ -243,7 +243,13 @@ async def run_once(trigger: str = "manual") -> Dict[str, Any]:
                 _save_run(run)
                 return run
 
-            raw = await _ai.generate_text(_build_prompt(metrics, days, max_pct))
+            from app.services import lingxing_operate as _op
+            prompt = _build_prompt(metrics, days, max_pct)
+            provider = _hs.get("lingxing_analysis_provider") or "deepseek"
+            try:
+                raw = await _op._review_generate(provider, prompt)
+            except Exception:  # noqa: BLE001 — configured provider unavailable → default chain
+                raw = await _ai.generate_text(prompt)
             parsed = _parse_json(raw)
             proposals = _enforce_guardrails(parsed.get("proposals") or [], max_pct)
             run.update(status="done", summary=parsed.get("summary", ""),
