@@ -174,6 +174,7 @@ class ManualTicket(BaseModel):
     match_type: str | None = None
     bid: float | None = None
     rationale: str | None = None
+    opt: Dict[str, Any] | None = None  # optimizer rule trail (rule/metrics/significance)
 
 
 @router.get("/operate/op-types")

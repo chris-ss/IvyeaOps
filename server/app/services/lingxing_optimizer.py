@@ -281,6 +281,13 @@ async def run_store(sid: int) -> Dict[str, Any]:
                             "rationale": f"预算打满且ACOS {m['acos']:.0%}达标，扩量+{int(step*100)}%"},
             })
 
+    # carry the rule trail into each ticket payload (for review rubric + report)
+    for cc in cands:
+        if cc.get("payload"):
+            cc["payload"]["opt"] = {"lever": cc["lever"], "rule": cc["rule"],
+                                    "significance": cc.get("significance"), "metrics": cc.get("metrics"),
+                                    "target_acos": round(target, 4), "breakeven_acos": breakeven}
+
     order = {"否词": 0, "收割": 1, "降bid": 2, "加bid": 3, "加预算": 4}
     cands.sort(key=lambda c: (order.get(c["lever"], 9), -(c["metrics"].get("spend") or 0)))
     return {

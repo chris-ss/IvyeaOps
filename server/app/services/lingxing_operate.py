@@ -210,6 +210,28 @@ def disable_operate() -> Dict[str, Any]:
     return _gw.status()
 
 
+def _recently_touched_sync(sid: Any, days: int) -> Dict[str, str]:
+    """target_id/keyword → last op time, for entities executed within ``days``."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
+    out: Dict[str, str] = {}
+    for t in list_tickets(200):
+        if t.get("status") not in ("executed", "rolled_back"):
+            continue
+        intent = t.get("intent") or {}
+        if str(intent.get("sid")) != str(sid):
+            continue
+        ts = t.get("created_at") or ""
+        try:
+            if datetime.fromisoformat(ts) < cutoff:
+                continue
+        except Exception:
+            pass
+        k = str(intent.get("target_id") or intent.get("keyword_text") or "")
+        if k:
+            out[k] = ts
+    return out
+
+
 # --- deterministic guardrails ----------------------------------------------
 def check_guardrails(intent: Dict[str, Any]) -> Dict[str, Any]:
     cfg = _hs.load()
@@ -256,6 +278,23 @@ def check_guardrails(intent: Dict[str, Any]) -> Dict[str, Any]:
         add("value_positive", nv is None or float(nv) > 0, "" if nv is None else f"新{nlabel} {nv}")
         ns = change.get("state")
         add("state_valid", ns is None or ns in ("enabled", "paused"), "" if ns is None else f"state={ns}")
+        # bid floor/ceiling (ad guardrail)
+        if op and nf in ("bid", "defaultBid") and nv is not None:
+            try:
+                floor = float(cfg.get("lingxing_bid_floor") or 0.02)
+                ceil = float(cfg.get("lingxing_bid_ceiling") or 0)
+                bok = (float(nv) >= floor) and (ceil <= 0 or float(nv) <= ceil)
+                add("bid_bounds", bok, f"bid {nv} ∈ [{floor}, {ceil or '∞'}]")
+            except (TypeError, ValueError):
+                add("bid_bounds", False, "bid 非法")
+
+    # cooldown — don't re-touch the same entity within N days (anti-thrash)
+    cool_days = int(cfg.get("lingxing_cooldown_days") or 7)
+    tkey = str(intent.get("target_id") or intent.get("keyword_text") or "")
+    if tkey and cool_days > 0:
+        hit = _recently_touched_sync(intent.get("sid"), cool_days).get(tkey)
+        add("cooldown", hit is None,
+            f"近{cool_days}天已操作过该对象（{hit[:10]}）" if hit else f"近{cool_days}天未重复操作")
 
     ok = all(c["ok"] for c in checks)
     return {"ok": ok, "checks": checks}
@@ -282,8 +321,18 @@ async def _one_review(persona: str, framing: str, intent: Dict[str, Any]) -> Dic
 待审操作（仅审核，不要执行）：
 {json.dumps(intent, ensure_ascii=False, indent=1)}
 
+请对照亚马逊广告优化准则逐条审视：
+1. 数据充分/显著性：点击、订单是否足够支撑该判断（否词≥15点击且0单；改bid≥15点击；放量≥3单）。数据不足 → 否决。
+2. 改动幅度：单步是否过大（bid/预算单步 ≤15% 为宜）。
+3. 方向是否合理：高ACOS→降bid、赢家(ACOS≤目标且有单)→放量、搜索词高点击0单→否定（先止血后放量）。
+4. 是否误伤赢家：会不会在降/停一个其实达标(ACOS≤目标且有单)的对象。
+5. 平衡点：放量后的 bid 是否会让 ACOS 超过盈亏平衡(=毛利率)。
+6. 冷却：同一对象近期是否已调过（避免抖动/过度修正）。
+7. 暂停态：给已暂停对象改预算/竞价是否无意义。
+若 intent 带 opt(规则依据/指标)，核对规则是否被正确应用、阈值是否真的达到。
+
 只输出 JSON：{{"approve": true/false, "risk_score": 0~1, "reasons": "中文理由"}}
-approve=是否批准；risk_score=重大风险概率(越高越危险)；理由要具体。"""
+approve=是否批准；risk_score=重大风险概率(越高越危险)；理由要具体、点名关键指标。"""
     try:
         raw = await _ai.generate_text(prompt)
         r = _parse_review(raw)
@@ -453,6 +502,8 @@ async def create_manual_ticket(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
         if op.get("has_bid") and payload.get("bid") not in (None, ""):
             intent["bid"] = float(payload["bid"])
+        if payload.get("opt"):
+            intent["opt"] = payload["opt"]
         return await create_ticket(intent, source="manual")
 
     nf = op["num_field"]
@@ -492,6 +543,8 @@ async def create_manual_ticket(payload: Dict[str, Any]) -> Dict[str, Any]:
         "change": change, "before": before, "change_pct": change_pct,
         "rationale": payload.get("rationale") or "(人工新建)",
     }
+    if payload.get("opt"):
+        intent["opt"] = payload["opt"]
     return await create_ticket(intent, source="manual")
 
 

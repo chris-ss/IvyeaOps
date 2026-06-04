@@ -198,6 +198,16 @@ async def build_report_html(tid: str) -> str:
         except Exception:
             trend, tot = [], {}
 
+    opt = intent.get("opt") or {}
+    opt_html = ""
+    if opt:
+        opt_html = (f'<div class="box" style="margin-top:8px">'
+                    f'<b>命中规则：</b>{_e(opt.get("rule"))}<br>'
+                    f'<b>显著性：</b>{_e(opt.get("significance"))}<br>'
+                    f'<b>目标 ACOS：</b>{_pct(opt.get("target_acos"))} · '
+                    f'<b>盈亏平衡 ACOS：</b>{_pct(opt.get("breakeven_acos"))} · '
+                    f'<b>杠杆：</b>{_e(opt.get("lever"))}</div>')
+
     sp = intent.get("source_proposal") or {}
     why_bits = []
     if intent.get("rationale"):
@@ -244,6 +254,7 @@ ul{{margin:6px 0;padding-left:20px}} li{{margin:3px 0}}
 <ul>{opt}</ul>
 
 <h2>③ 为什么这么操作</h2>
+{opt_html}
 {''.join(why_bits) or '<p class="muted">无额外说明。</p>'}
 
 <h2>④ 三重独立复核</h2>
