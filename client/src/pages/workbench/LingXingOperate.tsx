@@ -68,6 +68,16 @@ export default function LingXingOperate() {
     } catch (e: any) { setMsg(humanErr(e)); } finally { setBusy(false); }
   }
   const mSet = (k: string, v: any) => setMForm((f: any) => ({ ...f, [k]: v }));
+  async function report(tid: string, download: boolean) {
+    try {
+      const r = await api.get(`/lingxing/operate/tickets/${tid}/report?download=${download ? 1 : 0}`, { responseType: "blob" });
+      const url = URL.createObjectURL(r.data as Blob);
+      if (download) {
+        const a = document.createElement("a"); a.href = url; a.download = `lingxing-op-${tid}.html`; a.click();
+      } else { window.open(url, "_blank"); }
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch (e: any) { setMsg(humanErr(e)); }
+  }
   async function openTicket(id: string) { try { setSel((await api.get(`/lingxing/operate/tickets/${id}`)).data); } catch (e: any) { setMsg(humanErr(e)); } }
   async function act(id: string, action: string, body: any = {}) {
     setBusy(true); setMsg("");
@@ -223,6 +233,8 @@ export default function LingXingOperate() {
 
               {/* actions */}
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <Btn onClick={() => report(sel.id, false)}>预览报告</Btn>
+                <Btn onClick={() => report(sel.id, true)}>下载报告</Btn>
                 {sel.status === "awaiting_human" && <>
                   <Btn onClick={() => act(sel.id, "confirm", { dry_run: true })} disabled={busy}>预览请求</Btn>
                   <Btn danger onClick={() => { if (confirm("确认执行该写操作到领星？")) act(sel.id, "confirm", { dry_run: false }); }} disabled={busy || !active}>确认执行</Btn>

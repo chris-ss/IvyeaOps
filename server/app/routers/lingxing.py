@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app.core import hub_settings as _hs
@@ -207,6 +208,18 @@ async def operate_from_run(run_id: str) -> Dict[str, Any]:
         return await lxo.create_tickets_from_run(run_id)
     except lx.LingXingError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/operate/tickets/{tid}/report", response_class=HTMLResponse)
+async def operate_report(tid: str, download: int = 1) -> HTMLResponse:
+    """Self-contained HTML operation report (renders + prints to PDF anywhere)."""
+    from app.services import lingxing_report as lxr
+    try:
+        html = await lxr.build_report_html(tid)
+    except lx.LingXingError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    headers = {"Content-Disposition": f'attachment; filename="lingxing-op-{tid}.html"'} if download else {}
+    return HTMLResponse(content=html, headers=headers)
 
 
 @router.post("/operate/tickets/{tid}/confirm")
