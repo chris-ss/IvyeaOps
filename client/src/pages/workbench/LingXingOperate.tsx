@@ -121,35 +121,38 @@ export default function LingXingOperate() {
         {msg && <span style={{ fontSize: 11, color: "var(--t3)" }}>{msg}</span>}
       </div>
 
-      {/* manual ticket — any supported op (bid / budget / state) */}
+      {/* manual ticket — dynamic fields per op type */}
       {showManual && (() => {
         const op = opTypes.find((o) => o.key === mForm.op_type);
-        const nl = op?.num_label || "数值";
         return (
           <div className="card" style={{ padding: 12, marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 8 }}>新建写操作工单（将走 三复核 + 护栏 + 人工确认）</div>
+            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 8 }}>新建写操作工单（走 三复核 + 护栏 + 人工确认）</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <L t="操作类型"><select value={mForm.op_type} onChange={(e) => mSet("op_type", e.target.value)} style={{ ...inputStyle, minWidth: 150 }}>
+              <L t="操作类型"><select value={mForm.op_type} onChange={(e) => setMForm({ op_type: e.target.value, sid: mForm.sid })} style={{ ...inputStyle, minWidth: 170 }}>
                 {opTypes.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
               </select></L>
               <L t="店铺"><select value={mForm.sid ?? ""} onChange={(e) => mSet("sid", Number(e.target.value))} style={{ ...inputStyle, minWidth: 140 }}>
                 {sellers.map((s) => <option key={s.sid} value={s.sid}>{s.name || s.sid}</option>)}
               </select></L>
-              <L t={`目标ID（${op?.key === "campaign_budget" ? "活动" : op?.key === "keyword_bid" ? "关键词" : op?.key === "target_bid" ? "定向" : "广告组"}）`}>
-                <input value={mForm.target_id ?? ""} onChange={(e) => mSet("target_id", e.target.value)} style={{ ...inputStyle, width: 150 }} /></L>
-              <L t="目标名(可选)"><input value={mForm.target_name ?? ""} onChange={(e) => mSet("target_name", e.target.value)} style={{ ...inputStyle, width: 120 }} /></L>
-              <L t={`当前${nl}`}><input value={mForm.cur_value ?? ""} onChange={(e) => mSet("cur_value", e.target.value)} style={{ ...inputStyle, width: 90 }} /></L>
-              <L t={`目标${nl}`}><input value={mForm.new_value ?? ""} onChange={(e) => mSet("new_value", e.target.value)} style={{ ...inputStyle, width: 90 }} /></L>
-              <L t="状态"><select value={mForm.new_state ?? ""} onChange={(e) => mSet("new_state", e.target.value)} style={{ ...inputStyle, width: 100 }}>
-                <option value="">不改</option><option value="enabled">enabled</option><option value="paused">paused</option>
-              </select></L>
+              {(op?.fields || []).map((f: any) => (
+                <L key={f.name} t={f.label + (f.required ? " *" : "")}>
+                  {f.type === "select"
+                    ? <select value={mForm[f.name] ?? ""} onChange={(e) => mSet(f.name, e.target.value)} style={{ ...inputStyle, minWidth: 110 }}>
+                        {f.options.map((o: string) => <option key={o} value={o}>{o || "不改"}</option>)}
+                      </select>
+                    : <input value={mForm[f.name] ?? ""} onChange={(e) => mSet(f.name, e.target.value)}
+                        style={{ ...inputStyle, width: f.type === "number" ? 100 : 150 }} placeholder={f.type === "number" ? "数字" : ""} />}
+                </L>
+              ))}
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "flex-end" }}>
-              <L t="依据/理由"><input value={mForm.rationale ?? ""} onChange={(e) => mSet("rationale", e.target.value)} style={{ ...inputStyle, width: 420 }} placeholder="为什么这么改（复核会读）" /></L>
-              <Btn primary onClick={submitManual} disabled={busy || !mForm.target_id || !mForm.sid}>提交进复核</Btn>
+              <L t="依据/理由"><input value={mForm.rationale ?? ""} onChange={(e) => mSet("rationale", e.target.value)} style={{ ...inputStyle, width: 420 }} placeholder="为什么这么做（复核会读）" /></L>
+              <Btn primary onClick={submitManual} disabled={busy || !mForm.sid}>提交进复核</Btn>
             </div>
             <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 6 }}>
-              提示：改竞价/预算需填「当前值」才能算幅度护栏；竞价用关键词/定向ID，预算用活动ID。回滚以当前值为快照。
+              {op?.category === "add"
+                ? `加词/否词为新增操作${op?.reversible ? "（回滚=归档该否定词）" : "（不可一键回滚，撤销请到领星暂停/归档）"}；活动/广告组ID 可在「数据浏览」对应数据集查到。`
+                : "改竞价/预算：当前值自动读取真实值算幅度护栏；目标ID 在「数据浏览」SP关键词/定向/广告组里查；回滚以执行前真实值为快照。"}
             </div>
           </div>
         );
@@ -169,7 +172,7 @@ export default function LingXingOperate() {
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.intent?.target_name || t.intent?.campaign_name || t.intent?.target_id || t.intent?.campaign_id}</span>
                 <TicketStatus s={t.status} />
               </div>
-              <div style={{ fontSize: 10, color: "var(--t3)" }}>{fmtChange(t.intent?.change, curOf(t.intent?.sid))}</div>
+              <div style={{ fontSize: 10, color: "var(--t3)" }}>{t.intent?.keyword_text ? `「${t.intent.keyword_text}」${t.intent.match_type || ""}` : fmtChange(t.intent?.change, curOf(t.intent?.sid))}</div>
             </div>
           ))}
         </div>
@@ -185,7 +188,9 @@ export default function LingXingOperate() {
                 <span style={{ fontSize: 11, color: "var(--t3)" }}>店铺 {sel.intent?.sid}</span>
               </div>
               <div style={{ fontSize: 11, marginBottom: 8 }}>
-                改动：<b>{fmtChange(sel.intent?.change, curOf(sel.intent?.sid))}</b>（当前 {fmtState(sel.intent?.before, curOf(sel.intent?.sid))}）<br />
+                {sel.intent?.keyword_text
+                  ? <>新增：<b>「{sel.intent.keyword_text}」（{sel.intent.match_type}）</b> 活动 {sel.intent.campaign_id}{sel.intent.ad_group_id ? ` / 组 ${sel.intent.ad_group_id}` : ""}{sel.intent.bid != null ? ` / 竞价 ${fmtBudget(sel.intent.bid, curOf(sel.intent.sid))}` : ""}<br /></>
+                  : <>改动：<b>{fmtChange(sel.intent?.change, curOf(sel.intent?.sid))}</b>（当前 {fmtState(sel.intent?.before, curOf(sel.intent?.sid))}）<br /></>}
                 依据：<span style={{ color: "var(--t2)" }}>{sel.intent?.rationale || "—"}</span>
               </div>
 

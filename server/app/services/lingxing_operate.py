@@ -39,33 +39,75 @@ _RISK_THRESHOLD = 0.5
 # {sid, <array>:[{<id_field>, isBaseValue:0, state?, <num_field>/budget}]}. Each
 # op carries its numeric field (for magnitude guardrail + snapshot/rollback) and,
 # where a read exists, the dataset to snapshot the live value before executing.
+_F_STATE = {"name": "new_state", "label": "状态", "type": "select", "options": ["", "enabled", "paused"]}
+
+
+def _modify_fields(id_label: str, val_label: str) -> List[Dict[str, Any]]:
+    return [
+        {"name": "target_id", "label": id_label, "type": "text", "required": True},
+        {"name": "target_name", "label": "名称(可选)", "type": "text"},
+        {"name": "new_value", "label": f"目标{val_label}", "type": "number"},
+        _F_STATE,
+    ]
+
+
 OP_TYPES: Dict[str, Dict[str, Any]] = {
     "campaign_budget": {
-        "label": "广告活动·预算/启停", "route": PUT_SP_CAMPAIGN_ROUTE,
-        "array": "campaigns", "id_field": "campaignId", "num_field": "daily_budget",
-        "num_label": "日预算", "snapshot_dataset": "sp_campaigns", "snapshot_id": "campaign_id",
+        "category": "modify", "label": "广告活动·预算/启停", "route": PUT_SP_CAMPAIGN_ROUTE,
+        "array": "campaigns", "id_field": "campaignId", "num_field": "daily_budget", "num_label": "日预算",
+        "snapshot_dataset": "sp_campaigns", "snapshot_id": "campaign_id", "snapshot_value": "daily_budget",
+        "reversible": True, "fields": _modify_fields("活动ID", "日预算"),
     },
     "keyword_bid": {
-        "label": "关键词·竞价/启停", "route": "/basicOpen/adReport/manage/putSpKeyword",
-        "array": "keywords", "id_field": "keywordId", "num_field": "bid",
-        "num_label": "竞价bid", "snapshot_dataset": None, "snapshot_id": None,
+        "category": "modify", "label": "关键词·竞价/启停", "route": "/basicOpen/adReport/manage/putSpKeyword",
+        "array": "keywords", "id_field": "keywordId", "num_field": "bid", "num_label": "竞价bid",
+        "snapshot_dataset": "sp_keywords", "snapshot_id": "keyword_id", "snapshot_value": "bid",
+        "reversible": True, "fields": _modify_fields("关键词ID", "竞价"),
     },
     "target_bid": {
-        "label": "定向·竞价/启停", "route": "/basicOpen/adReport/manage/putSpTarget",
-        "array": "targetingClauses", "id_field": "targetId", "num_field": "bid",
-        "num_label": "竞价bid", "snapshot_dataset": None, "snapshot_id": None,
+        "category": "modify", "label": "定向·竞价/启停", "route": "/basicOpen/adReport/manage/putSpTarget",
+        "array": "targetingClauses", "id_field": "targetId", "num_field": "bid", "num_label": "竞价bid",
+        "snapshot_dataset": "sp_targets", "snapshot_id": "target_id", "snapshot_value": "bid",
+        "reversible": True, "fields": _modify_fields("定向ID", "竞价"),
     },
     "adgroup_bid": {
-        "label": "广告组·默认竞价/启停", "route": "/basicOpen/adReport/manage/putSpAdGroup",
-        "array": "adGroups", "id_field": "adGroupId", "num_field": "defaultBid",
-        "num_label": "默认竞价", "snapshot_dataset": None, "snapshot_id": None,
+        "category": "modify", "label": "广告组·默认竞价/启停", "route": "/basicOpen/adReport/manage/putSpAdGroup",
+        "array": "adGroups", "id_field": "adGroupId", "num_field": "defaultBid", "num_label": "默认竞价",
+        "snapshot_dataset": "sp_adgroups", "snapshot_id": "ad_group_id", "snapshot_value": "default_bid",
+        "reversible": True, "fields": _modify_fields("广告组ID", "默认竞价"),
+    },
+    # --- add-type ops (create entities; reversal differs) -------------------
+    "add_keyword": {
+        "category": "add", "label": "加词(投放关键词)", "route": "/basicOpen/adReport/spTarget/addKeywords",
+        "body_key": "keywords", "has_bid": True, "reversible": False,
+        "match_options": ["EXACT", "PHRASE", "BROAD"],
+        "fields": [
+            {"name": "campaign_id", "label": "活动ID", "type": "text", "required": True},
+            {"name": "ad_group_id", "label": "广告组ID", "type": "text", "required": True},
+            {"name": "keyword_text", "label": "关键词", "type": "text", "required": True},
+            {"name": "match_type", "label": "匹配", "type": "select", "options": ["EXACT", "PHRASE", "BROAD"]},
+            {"name": "bid", "label": "竞价", "type": "number"},
+        ],
+    },
+    "negate_keyword": {
+        "category": "add", "label": "否词(加否定关键词)", "route": "/basicOpen/adReport/spTarget/addNegativeKeywords",
+        "body_key": "negativeKeywords", "has_bid": False, "reversible": True,
+        "archive_route": "/basicOpen/adReport/spTarget/archiveNegatives",
+        "match_options": ["negativeExact", "negativePhrase"],
+        "fields": [
+            {"name": "campaign_id", "label": "活动ID", "type": "text", "required": True},
+            {"name": "ad_group_id", "label": "广告组ID(空=活动级)", "type": "text"},
+            {"name": "keyword_text", "label": "否定词", "type": "text", "required": True},
+            {"name": "match_type", "label": "匹配", "type": "select", "options": ["negativeExact", "negativePhrase"]},
+        ],
     },
 }
 
 
 def op_types_catalog() -> List[Dict[str, Any]]:
-    return [{"key": k, "label": v["label"], "num_field": v["num_field"],
-             "num_label": v["num_label"], "reversible": True} for k, v in OP_TYPES.items()]
+    return [{"key": k, "label": v["label"], "category": v["category"],
+             "num_label": v.get("num_label"), "reversible": v.get("reversible", False),
+             "fields": v["fields"]} for k, v in OP_TYPES.items()]
 
 _REVIEWERS = [
     ("数据严谨派", "你是只看数据、最严谨的审核员。只有当数据充分支撑该调整、且改动幅度与依据匹配时才批准。"),
@@ -185,30 +227,35 @@ def check_guardrails(intent: Dict[str, Any]) -> Dict[str, Any]:
         ("scope 为空，默认禁止所有写操作" if not allowed else f"店铺 {sid} 不在白名单"))
 
     op = OP_TYPES.get(intent.get("op_type") or "")
-    nf = op["num_field"] if op else "daily_budget"
-    nlabel = op["num_label"] if op else "数值"
     add("op_type_known", bool(op), op["label"] if op else f"未知操作类型 {intent.get('op_type')}")
 
-    # magnitude (on the op's numeric field: budget / bid / defaultBid)
-    max_pct = float(cfg.get("lingxing_max_change_pct") or 20)
-    change = intent.get("change") or {}
-    before = intent.get("before") or {}
-    pct_ok, pct_detail = True, f"无{nlabel}变更"
-    if change.get(nf) is not None and before.get(nf):
-        try:
-            old, new = float(before[nf]), float(change[nf])
-            pct = abs(new - old) / old * 100 if old else 999
-            pct_ok = pct <= max_pct
-            pct_detail = f"{nlabel}幅度 {pct:.1f}% ≤ {max_pct}%" if pct_ok else f"{nlabel}幅度 {pct:.1f}% 超过上限 {max_pct}%"
-        except (TypeError, ValueError, ZeroDivisionError):
-            pct_ok, pct_detail = False, "无法计算幅度"
-    add("change_magnitude", pct_ok, pct_detail)
-
-    # sane value / state
-    nv = change.get(nf)
-    add("value_positive", nv is None or float(nv) > 0, "" if nv is None else f"新{nlabel} {nv}")
-    ns = change.get("state")
-    add("state_valid", ns is None or ns in ("enabled", "paused"), "" if ns is None else f"state={ns}")
+    if op and op["category"] == "add":
+        kw = (intent.get("keyword_text") or "").strip()
+        add("keyword_present", bool(kw), f"词「{kw}」" if kw else "缺少词")
+        add("campaign_present", bool(intent.get("campaign_id")),
+            "有活动ID" if intent.get("campaign_id") else "缺少活动ID")
+        mt = intent.get("match_type")
+        add("match_type_valid", mt in op["match_options"], f"匹配 {mt}")
+    else:
+        nf = op["num_field"] if op else "daily_budget"
+        nlabel = op["num_label"] if op else "数值"
+        max_pct = float(cfg.get("lingxing_max_change_pct") or 20)
+        change = intent.get("change") or {}
+        before = intent.get("before") or {}
+        pct_ok, pct_detail = True, f"无{nlabel}变更"
+        if change.get(nf) is not None and before.get(nf):
+            try:
+                old, new = float(before[nf]), float(change[nf])
+                pct = abs(new - old) / old * 100 if old else 999
+                pct_ok = pct <= max_pct
+                pct_detail = f"{nlabel}幅度 {pct:.1f}% ≤ {max_pct}%" if pct_ok else f"{nlabel}幅度 {pct:.1f}% 超过上限 {max_pct}%"
+            except (TypeError, ValueError, ZeroDivisionError):
+                pct_ok, pct_detail = False, "无法计算幅度"
+        add("change_magnitude", pct_ok, pct_detail)
+        nv = change.get(nf)
+        add("value_positive", nv is None or float(nv) > 0, "" if nv is None else f"新{nlabel} {nv}")
+        ns = change.get("state")
+        add("state_valid", ns is None or ns in ("enabled", "paused"), "" if ns is None else f"state={ns}")
 
     ok = all(c["ok"] for c in checks)
     return {"ok": ok, "checks": checks}
@@ -319,19 +366,36 @@ async def _current_value(intent: Dict[str, Any]) -> Dict[str, Any]:
     op = OP_TYPES.get(intent.get("op_type") or "")
     if not op or not op.get("snapshot_dataset"):
         return dict(intent.get("before") or {})
-    nf = op["num_field"]
-    res = await _data.fetch_dataset(op["snapshot_dataset"], {"sid": int(intent["sid"]), "length": 300}, force=True)
-    for c in (res.get("rows") or []):
-        if str(c.get(op["snapshot_id"])) == str(intent["target_id"]):
-            return {nf: c.get(nf), "state": c.get("state")}
+    nf, vf = op["num_field"], op.get("snapshot_value", op["num_field"])
+    # page through the entity list to find the target (large accounts)
+    for offset in range(0, 2000, 300):
+        res = await _data.fetch_dataset(
+            op["snapshot_dataset"], {"sid": int(intent["sid"]), "length": 300, "offset": offset}, force=True)
+        rows = res.get("rows") or []
+        for c in rows:
+            if str(c.get(op["snapshot_id"])) == str(intent["target_id"]):
+                return {nf: c.get(vf), "state": c.get("state")}
+        if len(rows) < 300:
+            break
     return dict(intent.get("before") or {})
 
 
 def build_body(intent: Dict[str, Any]) -> Dict[str, Any]:
-    """Construct the put* request body for any supported op type."""
+    """Construct the request body for any supported op type."""
     op = OP_TYPES.get(intent.get("op_type") or "")
     if not op:
         raise _gw.LingXingError(f"未知操作类型: {intent.get('op_type')}")
+    if op["category"] == "add":
+        item: Dict[str, Any] = {
+            "campaignId": str(intent["campaign_id"]),
+            "keyword": intent["keyword_text"],
+            "matchType": intent["match_type"], "state": "ENABLED",
+        }
+        if intent.get("ad_group_id"):
+            item["adGroupId"] = str(intent["ad_group_id"])
+        if op.get("has_bid") and intent.get("bid") is not None:
+            item["bid"] = float(intent["bid"])
+        return {"sid": int(intent["sid"]), op["body_key"]: [item]}
     ch = intent.get("change") or {}
     nf = op["num_field"]
     item: Dict[str, Any] = {op["id_field"]: int(intent["target_id"]), "isBaseValue": 0}
@@ -345,15 +409,55 @@ def build_body(intent: Dict[str, Any]) -> Dict[str, Any]:
     return {"sid": int(intent["sid"]), op["array"]: [item]}
 
 
+def _extract_target_ids(res: Any) -> List[str]:
+    """Pull the created targetId(s) from an add-keyword/negative response."""
+    ids: List[str] = []
+    data = (res or {}).get("data") if isinstance(res, dict) else None
+    if isinstance(data, dict):
+        for key in ("success", "successTargets", "results", "successKeywords"):
+            v = data.get(key)
+            if isinstance(v, list):
+                for it in v:
+                    tid = (it or {}).get("targetId") or (it or {}).get("keywordId")
+                    if tid:
+                        ids.append(str(tid))
+    return ids
+
+
+def _op_summary(intent: Dict[str, Any]) -> str:
+    op = OP_TYPES.get(intent.get("op_type") or "")
+    if op and op["category"] == "add":
+        return f"{op['label']}「{intent.get('keyword_text')}」({intent.get('match_type')}) 活动{intent.get('campaign_id')}"
+    return f"{intent.get('change')}"
+
+
 async def create_manual_ticket(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Build a ticket from a hand-entered operation (any supported op type)."""
     op_type = payload.get("op_type")
     op = OP_TYPES.get(op_type or "")
     if not op:
         raise _gw.LingXingError(f"不支持的操作类型: {op_type}")
+    if not payload.get("sid"):
+        raise _gw.LingXingError("缺少 sid")
+
+    if op["category"] == "add":
+        kw = (payload.get("keyword_text") or "").strip()
+        if not payload.get("campaign_id") or not kw:
+            raise _gw.LingXingError("加词/否词需 活动ID + 词")
+        intent: Dict[str, Any] = {
+            "op_type": op_type, "op_label": op["label"], "sid": payload["sid"],
+            "campaign_id": str(payload["campaign_id"]),
+            "ad_group_id": str(payload["ad_group_id"]) if payload.get("ad_group_id") else None,
+            "keyword_text": kw, "match_type": payload.get("match_type") or op["match_options"][0],
+            "target_name": kw, "rationale": payload.get("rationale") or "(人工新建)",
+        }
+        if op.get("has_bid") and payload.get("bid") not in (None, ""):
+            intent["bid"] = float(payload["bid"])
+        return await create_ticket(intent, source="manual")
+
     nf = op["num_field"]
-    if not payload.get("sid") or not payload.get("target_id"):
-        raise _gw.LingXingError("缺少 sid 或 目标ID")
+    if not payload.get("target_id"):
+        raise _gw.LingXingError("缺少 目标ID")
     change: Dict[str, Any] = {}
     before: Dict[str, Any] = {}
     if payload.get("new_value") not in (None, ""):
@@ -366,6 +470,16 @@ async def create_manual_ticket(payload: Dict[str, Any]) -> Dict[str, Any]:
         before["state"] = payload["cur_state"]
     if not change:
         raise _gw.LingXingError("未指定任何改动（数值或状态）")
+    # prefer the LIVE current value (read from LingXing) for the magnitude
+    # guardrail + display — don't trust a hand-typed number.
+    try:
+        live = await _current_value({"op_type": op_type, "sid": payload["sid"], "target_id": str(payload["target_id"])})
+        if live.get(nf) is not None:
+            before[nf] = live[nf]
+        if live.get("state"):
+            before.setdefault("state", live["state"])
+    except Exception:  # noqa: BLE001
+        pass  # master may be off / not found → fall back to entered value
     change_pct = None
     if change.get(nf) is not None and before.get(nf):
         try:
@@ -417,9 +531,11 @@ async def confirm_ticket(tid: str, decided_by: str = "human", dry_run: bool = Fa
             res = await _gw.call_openapi(route, body, method="POST",
                                          caller="operate", allow_write=True)
             t["result"] = res
+            if OP_TYPES[intent["op_type"]]["category"] == "add":
+                t["snapshot"] = {"target_ids": _extract_target_ids(res), "add": True}
             t["status"] = "executed"
             _save(t)
-            await send_alert(f"已执行：店铺{intent['sid']} {intent.get('target_name') or intent.get('target_id')} → {intent['change']}")
+            await send_alert(f"已执行：店铺{intent['sid']} {_op_summary(intent)}")
         except _gw.LingXingError as e:
             t["status"] = "failed"; t["error"] = str(e)
             _save(t)
@@ -454,6 +570,22 @@ async def rollback_ticket(tid: str, decided_by: str = "human") -> Dict[str, Any]
             raise _gw.LingXingError("无回滚快照")
         intent = t["intent"]
         op = OP_TYPES[intent["op_type"]]
+
+        if op["category"] == "add":
+            if not op.get("reversible"):
+                raise _gw.LingXingError(f"{op['label']} 不支持一键回滚（请到领星暂停/归档该词）")
+            tids = snap.get("target_ids") or []
+            if not tids:
+                raise _gw.LingXingError("无可归档的 targetId（执行响应未返回ID）")
+            res = await _gw.call_openapi(op["archive_route"],
+                                         {"sid": int(intent["sid"]), "targetIds": tids},
+                                         method="POST", caller="operate-rollback", allow_write=True)
+            t["status"] = "rolled_back"; t["result"] = {"rollback": res, "prev": t.get("result")}
+            t["decided_by"] = decided_by
+            _save(t)
+            await send_alert(f"已回滚(归档)：店铺{intent['sid']}「{intent.get('keyword_text')}」")
+            return t
+
         nf = op["num_field"]
         change = {}
         if snap.get(nf) is not None:

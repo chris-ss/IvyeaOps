@@ -144,12 +144,19 @@ class ConfirmRequest(BaseModel):
 class ManualTicket(BaseModel):
     op_type: str
     sid: int
-    target_id: str
+    # modify-type
+    target_id: str | None = None
     target_name: str | None = None
     cur_value: float | None = None
     cur_state: str | None = None
     new_value: float | None = None
     new_state: str | None = None
+    # add-type (加词 / 否词)
+    campaign_id: str | None = None
+    ad_group_id: str | None = None
+    keyword_text: str | None = None
+    match_type: str | None = None
+    bid: float | None = None
     rationale: str | None = None
 
 

@@ -61,6 +61,42 @@ READ_DATASETS: Dict[str, Dict[str, Any]] = {
                     _col("daily_budget", "日预算"), _col("targeting_type", "投放")],
         "hint": "广告活动的预算/状态 —— 也是后续受控写操作的前置数据。",
     },
+    "sp_adgroups": {
+        "label": "SP 广告组", "group": "广告", "route": "/pb/openapi/newad/spAdGroups",
+        "method": "POST",
+        "params": [
+            {"name": "sid", "required": True, "type": "int", "label": "店铺SID"},
+            {"name": "state", "type": "string", "label": "状态(enabled/paused/archived)"},
+            {"name": "length", "type": "int", "default": 100}, {"name": "offset", "type": "int", "default": 0},
+        ],
+        "columns": [_col("ad_group_id", "广告组ID"), _col("name", "名称"), _col("default_bid", "默认竞价"),
+                    _col("state", "状态"), _col("campaign_id", "活动ID")],
+        "hint": "广告组默认竞价 —— 调默认竞价(adgroup_bid)的目标ID与当前值看这里。",
+    },
+    "sp_keywords": {
+        "label": "SP 关键词", "group": "广告", "route": "/pb/openapi/newad/spKeywords",
+        "method": "POST",
+        "params": [
+            {"name": "sid", "required": True, "type": "int", "label": "店铺SID"},
+            {"name": "state", "type": "string", "label": "状态(enabled/paused/archived)"},
+            {"name": "length", "type": "int", "default": 100}, {"name": "offset", "type": "int", "default": 0},
+        ],
+        "columns": [_col("keyword_id", "关键词ID"), _col("keyword_text", "词"), _col("match_type", "匹配"),
+                    _col("bid", "竞价"), _col("state", "状态"), _col("campaign_id", "活动ID")],
+        "hint": "关键词竞价 —— 调 bid(keyword_bid)的目标ID与当前竞价看这里。",
+    },
+    "sp_targets": {
+        "label": "SP 定向", "group": "广告", "route": "/pb/openapi/newad/spTargets",
+        "method": "POST",
+        "params": [
+            {"name": "sid", "required": True, "type": "int", "label": "店铺SID"},
+            {"name": "state", "type": "string", "label": "状态(enabled/paused/archived)"},
+            {"name": "length", "type": "int", "default": 100}, {"name": "offset", "type": "int", "default": 0},
+        ],
+        "columns": [_col("target_id", "定向ID"), _col("bid", "竞价"), _col("state", "状态"),
+                    _col("expression", "表达式"), _col("campaign_id", "活动ID")],
+        "hint": "定向竞价 —— 调 bid(target_bid)的目标ID与当前竞价看这里。",
+    },
     "sp_campaign_report": {
         "label": "SP 活动报表", "group": "广告", "route": "/pb/openapi/newad/spCampaignReports",
         "method": "POST",
