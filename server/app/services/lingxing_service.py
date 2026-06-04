@@ -295,6 +295,7 @@ def status() -> Dict[str, Any]:
         "operate_expires_at": exp,
         "operate_remaining_seconds": remaining,
         "require_human": bool(cfg.get("lingxing_operate_require_human")),
+        "circuit_reason": cfg.get("lingxing_circuit_reason") or "",
         "scope_stores": cfg.get("lingxing_scope_stores") or "",
         "scope_asins": cfg.get("lingxing_scope_asins") or "",
         "max_ops_per_run": cfg.get("lingxing_max_ops_per_run"),

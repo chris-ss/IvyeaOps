@@ -62,6 +62,15 @@ export default function LingXingOperate() {
 
   return (
     <div>
+      {/* circuit breaker tripped */}
+      {status?.circuit_reason && (
+        <div className="card" style={{ padding: "10px 12px", marginBottom: 10, border: "1px solid var(--red)", background: "color-mix(in srgb, var(--red) 8%, transparent)" }}>
+          <span style={{ fontSize: 11, color: "var(--red)", fontWeight: 600 }}>⚠ 熔断已触发：</span>
+          <span style={{ fontSize: 11, color: "var(--t2)" }}> {status.circuit_reason}</span>
+          <span style={{ fontSize: 10, color: "var(--t3)" }}>（重新开启操作开关即确认并清除）</span>
+        </div>
+      )}
+
       {/* operate switch (danger) */}
       <div className="card" style={{ padding: 12, marginBottom: 10, border: active ? "1px solid var(--red)" : "1px solid var(--b)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

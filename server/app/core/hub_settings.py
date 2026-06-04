@@ -112,6 +112,9 @@ _DEFAULTS: Dict[str, Any] = {
     # Every write requires a human final confirmation in the UI (locked on by
     # decision — no threshold-based auto-execute tier).
     "lingxing_operate_require_human": True,
+    # Circuit breaker: set (with a reason) when an execution fails; operate is
+    # forced off and stays off until an operator re-enables (which clears this).
+    "lingxing_circuit_reason": "",
     # Deterministic guardrails (hard caps, enforced in code regardless of AI
     # reviews). Empty scope lists = nothing is writable until you whitelist.
     "lingxing_scope_stores": "",          # comma-separated store ids/names allowed for writes

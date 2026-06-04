@@ -132,12 +132,16 @@ class ConfirmRequest(BaseModel):
 
 @router.post("/operate/enable")
 async def operate_enable() -> Dict[str, Any]:
-    return {"status": lxo.enable_operate()}
+    st = lxo.enable_operate()
+    await lxo.send_alert("🔓 操作开关已开启（进入可写态，写操作仍需三重复核+人工确认）")
+    return {"status": st}
 
 
 @router.post("/operate/disable")
 async def operate_disable() -> Dict[str, Any]:
-    return {"status": lxo.disable_operate()}
+    st = lxo.disable_operate()
+    await lxo.send_alert("🔒 操作开关已关闭（恢复只读）")
+    return {"status": st}
 
 
 @router.get("/operate/tickets")

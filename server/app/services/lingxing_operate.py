@@ -110,7 +110,7 @@ def get_ticket(tid: str) -> Optional[Dict[str, Any]]:
 
 
 # --- best-effort alert ------------------------------------------------------
-async def _alert(text: str) -> None:
+async def send_alert(text: str) -> None:
     url = (_hs.get("alert_webhook") or "").strip()
     if not url:
         return
@@ -125,7 +125,9 @@ async def _alert(text: str) -> None:
 def enable_operate() -> Dict[str, Any]:
     ttl = int(_hs.get("lingxing_operate_ttl_minutes") or 120)
     exp = (datetime.now(timezone.utc) + timedelta(minutes=ttl)).isoformat()
-    _hs.save({"lingxing_operate_enabled": True, "lingxing_operate_expires_at": exp})
+    # re-enabling acknowledges + clears any tripped circuit breaker
+    _hs.save({"lingxing_operate_enabled": True, "lingxing_operate_expires_at": exp,
+              "lingxing_circuit_reason": ""})
     return _gw.status()
 
 
@@ -329,13 +331,13 @@ async def confirm_ticket(tid: str, decided_by: str = "human", dry_run: bool = Fa
             t["result"] = res
             t["status"] = "executed"
             _save(t)
-            await _alert(f"已执行：店铺{intent['sid']} 活动{intent.get('campaign_name') or intent['campaign_id']} → {intent['change']}")
+            await send_alert(f"已执行：店铺{intent['sid']} 活动{intent.get('campaign_name') or intent['campaign_id']} → {intent['change']}")
         except _gw.LingXingError as e:
             t["status"] = "failed"; t["error"] = str(e)
             _save(t)
             # circuit breaker: API-level failure auto-disables the operate switch
             disable_operate()
-            await _alert(f"执行失败已熔断（操作开关已关闭）：{e}")
+            await send_alert(f"执行失败已熔断（操作开关已关闭）：{e}")
             raise
         return t
 
@@ -374,5 +376,5 @@ async def rollback_ticket(tid: str, decided_by: str = "human") -> Dict[str, Any]
         t["status"] = "rolled_back"; t["result"] = {"rollback": res, "prev": t.get("result")}
         t["decided_by"] = decided_by
         _save(t)
-        await _alert(f"已回滚：店铺{intent['sid']} 活动{intent.get('campaign_name') or intent['campaign_id']} → {change}")
+        await send_alert(f"已回滚：店铺{intent['sid']} 活动{intent.get('campaign_name') or intent['campaign_id']} → {change}")
         return t
