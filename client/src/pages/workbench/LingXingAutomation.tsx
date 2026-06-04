@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
+import { sidCurrencyMap, fmtBudget, type Cur } from "./lingxingCurrency";
 
 const inputStyle: React.CSSProperties = {
   background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: 3,
@@ -24,12 +25,18 @@ export default function LingXingAutomation() {
   const [sel, setSel] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [sellers, setSellers] = useState<any[]>([]);
+  const curMap = useMemo(() => sidCurrencyMap(sellers), [sellers]);
+  const curOf = (sid: any): Cur | undefined => curMap[String(sid)];
 
   useEffect(() => { void load(); }, []);
   async function load() {
     try {
-      const [c, r] = await Promise.all([api.get("/lingxing/auto/config"), api.get("/lingxing/auto/runs")]);
-      setCfg(c.data.config || {}); setRuns(r.data.runs || []);
+      const [c, r, sl] = await Promise.all([
+        api.get("/lingxing/auto/config"), api.get("/lingxing/auto/runs"),
+        api.post("/lingxing/read/sellers", { params: {} }).catch(() => ({ data: { rows: [] } })),
+      ]);
+      setCfg(c.data.config || {}); setRuns(r.data.runs || []); setSellers(sl.data.rows || []);
     } catch (e: any) { setMsg(humanErr(e)); }
   }
   async function saveCfg() {
@@ -125,8 +132,8 @@ export default function LingXingAutomation() {
                         <tr key={i} style={{ borderBottom: "1px solid var(--b)" }}>
                           <td style={td}>{p.campaign_name || p.campaign_id}</td>
                           <td style={td}><b>{p.action}</b></td>
-                          <td style={td}>{fmtState(p.current)}</td>
-                          <td style={td}>{fmtState(p.proposed)}</td>
+                          <td style={td}>{fmtState(p.current, curOf(p.sid))}</td>
+                          <td style={td}>{fmtState(p.proposed, curOf(p.sid))}</td>
                           <td style={td}>{p.change_pct != null ? `${p.change_pct}%` : "—"}{p.guardrail_flag && <span title={p.guardrail_flag} style={{ color: "var(--amber)" }}> ⚠</span>}</td>
                           <td style={{ ...td, maxWidth: 240, whiteSpace: "normal" }}>{p.rationale}</td>
                           <td style={{ ...td, maxWidth: 200, whiteSpace: "normal" }}>{p.expected_impact}</td>
@@ -161,10 +168,10 @@ function RiskTag({ r }: { r: string }) {
   const c = r === "high" ? "var(--red)" : r === "medium" ? "var(--amber)" : "var(--acc)";
   return <span style={{ color: c }}>{r || "—"}</span>;
 }
-function fmtState(o: any) {
+function fmtState(o: any, cur?: Cur) {
   if (!o || typeof o !== "object") return "—";
   const b = o.daily_budget, s = o.state;
-  return [s, b != null ? `${b}` : null].filter(Boolean).join(" / ") || "—";
+  return [s, b != null ? fmtBudget(b, cur) : null].filter(Boolean).join(" / ") || "—";
 }
 function fmtTs(ts?: string) { if (!ts) return "—"; try { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); } catch { return ts; } }
 function humanErr(e: any): string { return e?.response?.data?.detail || e?.message || "请求失败"; }

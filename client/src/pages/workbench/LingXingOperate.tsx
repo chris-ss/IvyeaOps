@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
+import { sidCurrencyMap, fmtBudget, type Cur } from "./lingxingCurrency";
 
 const inputStyle: React.CSSProperties = {
   background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: 3,
@@ -21,16 +22,21 @@ export default function LingXingOperate() {
   const [sel, setSel] = useState<any | null>(null);
   const [runs, setRuns] = useState<any[]>([]);
   const [runId, setRunId] = useState("");
+  const [sellers, setSellers] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const curMap = useMemo(() => sidCurrencyMap(sellers), [sellers]);
+  const curOf = (sid: any): Cur | undefined => curMap[String(sid)];
 
   useEffect(() => { void load(); const t = setInterval(refreshStatus, 5000); return () => clearInterval(t); }, []);
   async function load() {
     try {
-      const [s, t, r] = await Promise.all([
+      const [s, t, r, sl] = await Promise.all([
         api.get("/lingxing/status"), api.get("/lingxing/operate/tickets"), api.get("/lingxing/auto/runs"),
+        api.post("/lingxing/read/sellers", { params: {} }).catch(() => ({ data: { rows: [] } })),
       ]);
       setStatus(s.data); setTickets(t.data.tickets || []); setRuns(r.data.runs || []);
+      setSellers(sl.data.rows || []);
       if (!runId && r.data.runs?.[0]) setRunId(r.data.runs[0].id);
     } catch (e: any) { setMsg(humanErr(e)); }
   }
@@ -114,7 +120,7 @@ export default function LingXingOperate() {
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.intent?.campaign_name || t.intent?.campaign_id}</span>
                 <TicketStatus s={t.status} />
               </div>
-              <div style={{ fontSize: 10, color: "var(--t3)" }}>{fmtChange(t.intent?.change)}</div>
+              <div style={{ fontSize: 10, color: "var(--t3)" }}>{fmtChange(t.intent?.change, curOf(t.intent?.sid))}</div>
             </div>
           ))}
         </div>
@@ -129,7 +135,7 @@ export default function LingXingOperate() {
                 <span style={{ fontSize: 11, color: "var(--t3)" }}>店铺 {sel.intent?.sid}</span>
               </div>
               <div style={{ fontSize: 11, marginBottom: 8 }}>
-                改动：<b>{fmtChange(sel.intent?.change)}</b>（当前 {fmtState(sel.intent?.before)}）<br />
+                改动：<b>{fmtChange(sel.intent?.change, curOf(sel.intent?.sid))}</b>（当前 {fmtState(sel.intent?.before, curOf(sel.intent?.sid))}）<br />
                 依据：<span style={{ color: "var(--t2)" }}>{sel.intent?.rationale || "—"}</span>
               </div>
 
@@ -196,14 +202,14 @@ function TicketStatus({ s }: { s: string }) {
   };
   return <span style={{ fontSize: 10, color: map[s] || "var(--t3)" }}>{zh[s] || s}</span>;
 }
-function fmtChange(c: any) {
+function fmtChange(c: any, cur?: Cur) {
   if (!c) return "—";
   const a = [];
-  if (c.daily_budget != null) a.push(`预算→${c.daily_budget}`);
+  if (c.daily_budget != null) a.push(`预算→${fmtBudget(c.daily_budget, cur)}`);
   if (c.state) a.push(`状态→${c.state}`);
   return a.join(" / ") || "—";
 }
-function fmtState(o: any) { if (!o) return "—"; const a = []; if (o.state) a.push(o.state); if (o.daily_budget != null) a.push(`${o.daily_budget}`); return a.join(" / ") || "—"; }
+function fmtState(o: any, cur?: Cur) { if (!o) return "—"; const a = []; if (o.state) a.push(o.state); if (o.daily_budget != null) a.push(fmtBudget(o.daily_budget, cur)); return a.join(" / ") || "—"; }
 function fmtDur(s: number) { const m = Math.floor(s / 60); return m >= 60 ? `${Math.floor(m / 60)}h${m % 60}m` : `${m}m`; }
 function fmtTs(ts?: string) { if (!ts) return "—"; try { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); } catch { return ts; } }
 function humanErr(e: any): string { return e?.response?.data?.detail || e?.message || "请求失败"; }
