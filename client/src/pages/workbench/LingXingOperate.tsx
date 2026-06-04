@@ -218,7 +218,7 @@ export default function LingXingOperate() {
                 {(sel.reviews?.reviews || []).map((r: any, i: number) => (
                   <div key={i} style={{ fontSize: 11, marginBottom: 4 }}>
                     <span style={{ color: r.approve ? "var(--acc)" : "var(--red)" }}>{r.approve ? "批准" : "否决"}</span>
-                    {" · "}<b>{r.reviewer}</b>{" · 风险 "}{Math.round((r.risk_score ?? 1) * 100)}%
+                    {" · "}<b>{r.reviewer}</b>{r.provider && <span style={{ color: "var(--t3)" }}> [{({ deepseek: "DeepSeek", apimart: "Claude", fallback: "兜底", none: "不可用" } as any)[r.provider] || r.provider}]</span>}{" · 风险 "}{Math.round((r.risk_score ?? 1) * 100)}%
                     <div style={{ color: "var(--t3)" }}>{r.reasons}</div>
                   </div>
                 ))}

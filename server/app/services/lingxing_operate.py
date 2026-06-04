@@ -315,7 +315,8 @@ def _parse_review(text: str) -> Dict[str, Any]:
         return {"approve": False, "risk_score": 1.0, "reasons": "复核响应解析失败（fail-closed 视为不通过）"}
 
 
-async def _one_review(persona: str, framing: str, intent: Dict[str, Any]) -> Dict[str, Any]:
+async def _one_review(persona: str, framing: str, intent: Dict[str, Any],
+                      provider: str = "deepseek") -> Dict[str, Any]:
     prompt = f"""{framing}
 
 待审操作（仅审核，不要执行）：
@@ -333,19 +334,29 @@ async def _one_review(persona: str, framing: str, intent: Dict[str, Any]) -> Dic
 
 只输出 JSON：{{"approve": true/false, "risk_score": 0~1, "reasons": "中文理由"}}
 approve=是否批准；risk_score=重大风险概率(越高越危险)；理由要具体、点名关键指标。"""
+    used = provider
     try:
-        raw = await _ai.generate_text(prompt)
+        raw = await _ai.generate_text_provider(provider, prompt)
         r = _parse_review(raw)
-    except Exception as e:  # noqa: BLE001
-        r = {"approve": False, "risk_score": 1.0, "reasons": f"复核模型不可用：{e}（fail-closed）"}
+    except Exception:  # noqa: BLE001 — that provider unavailable → fall back to chain
+        try:
+            raw = await _ai.generate_text(prompt)
+            used = "fallback"
+            r = _parse_review(raw)
+        except Exception as e:  # noqa: BLE001
+            r = {"approve": False, "risk_score": 1.0, "reasons": f"复核模型不可用：{e}（fail-closed）"}
+            used = "none"
     r["reviewer"] = persona
+    r["provider"] = used
     return r
 
 
 async def review_intent(intent: Dict[str, Any]) -> Dict[str, Any]:
+    provs = str(_hs.get("lingxing_review_providers") or "deepseek,apimart,deepseek").replace("，", ",").split(",")
     reviews = []
-    for persona, framing in _REVIEWERS:
-        reviews.append(await _one_review(persona, framing, intent))
+    for i, (persona, framing) in enumerate(_REVIEWERS):
+        prov = (provs[i].strip() if i < len(provs) and provs[i].strip() else "deepseek")
+        reviews.append(await _one_review(persona, framing, intent, prov))
     approved = all(r["approve"] for r in reviews) and max(r["risk_score"] for r in reviews) <= _RISK_THRESHOLD
     return {"approved": approved, "reviews": reviews,
             "max_risk": max(r["risk_score"] for r in reviews)}

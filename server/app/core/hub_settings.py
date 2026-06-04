@@ -115,6 +115,10 @@ _DEFAULTS: Dict[str, Any] = {
     # Circuit breaker: set (with a reason) when an execution fails; operate is
     # forced off and stays off until an operator re-enables (which clears this).
     "lingxing_circuit_reason": "",
+    # Heterogeneous triple review: provider per persona (data-rigour / devil's-
+    # advocate / business-balance). 'apimart' = Claude. Missing provider falls
+    # back to the default deepseek→apimart chain.
+    "lingxing_review_providers": "deepseek,apimart,deepseek",
     # Deterministic guardrails (hard caps, enforced in code regardless of AI
     # reviews). Empty scope lists = nothing is writable until you whitelist.
     "lingxing_scope_stores": "",          # comma-separated store ids/names allowed for writes

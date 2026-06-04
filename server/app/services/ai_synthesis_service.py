@@ -817,6 +817,37 @@ async def generate_text(prompt: str) -> str:
     )
 
 
+async def generate_text_provider(provider: str, prompt: str) -> str:
+    """Generate text via a SPECIFIC HTTP provider ('deepseek' | 'apimart').
+
+    Raises if that provider isn't configured/usable — caller can fall back. Used
+    for heterogeneous multi-model review (different personas → different models).
+    """
+    provider = (provider or "").lower().strip()
+    if provider == "deepseek":
+        dkey = _deepseek_key()
+        if not dkey:
+            raise RuntimeError("DeepSeek 未配置")
+        parts: list[str] = []
+        async for chunk in _stream_openai_compat(dkey, "https://api.deepseek.com", "deepseek-chat", prompt):
+            parts.append(chunk)
+        text = "".join(parts).strip()
+        if not text:
+            raise RuntimeError("DeepSeek 返回空")
+        return text
+    if provider == "apimart":
+        if not _apimart_key():
+            raise RuntimeError("Apimart 未配置")
+        parts = []
+        async for chunk in _stream_apimart(prompt):
+            parts.append(chunk)
+        text = "".join(parts).strip()
+        if not text:
+            raise RuntimeError("Apimart 返回空")
+        return text
+    raise RuntimeError(f"未知 provider: {provider}")
+
+
 # ---------------------------------------------------------------------------
 # Vision provider helpers
 # ---------------------------------------------------------------------------

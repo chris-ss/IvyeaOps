@@ -146,16 +146,18 @@ def _optimization_points(tot: Dict[str, Any], intent: Dict[str, Any]) -> List[st
 
 
 def _reviews_html(reviews: Dict[str, Any]) -> str:
+    pmap = {"deepseek": "DeepSeek", "apimart": "Claude", "fallback": "兜底", "none": "不可用"}
     rows = ""
     for r in (reviews or {}).get("reviews", []):
         ok = "通过" if r.get("approve") else "否决"
         cls = "ok" if r.get("approve") else "bad"
-        rows += (f'<tr><td>{_e(r.get("reviewer"))}</td><td class="{cls}">{ok}</td>'
-                 f'<td>{int((r.get("risk_score") or 0)*100)}%</td><td>{_e(r.get("reasons"))}</td></tr>')
+        rows += (f'<tr><td>{_e(r.get("reviewer"))}</td><td>{_e(pmap.get(r.get("provider"), r.get("provider")))}</td>'
+                 f'<td class="{cls}">{ok}</td><td>{int((r.get("risk_score") or 0)*100)}%</td>'
+                 f'<td>{_e(r.get("reasons"))}</td></tr>')
     verdict = "全部通过 ✓" if (reviews or {}).get("approved") else "未全部通过 ✗"
     return (f'<p><b>结论：</b><span class="{"ok" if (reviews or {}).get("approved") else "bad"}">{verdict}</span> '
             f'（最高风险 {int((reviews or {}).get("max_risk", 0)*100)}%）</p>'
-            f'<table><tr><th>复核员</th><th>结论</th><th>风险</th><th>理由</th></tr>{rows}</table>')
+            f'<table><tr><th>复核员</th><th>模型</th><th>结论</th><th>风险</th><th>理由</th></tr>{rows}</table>')
 
 
 def _guardrail_html(guard: Dict[str, Any]) -> str:
