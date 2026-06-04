@@ -23,16 +23,24 @@ export default function LingXingConfig() {
   const [secret, setSecret] = useState(""); const [mcp, setMcp] = useState("");
   const [probe, setProbe] = useState<any>(null);
   const [msg, setMsg] = useState(""); const [busy, setBusy] = useState(false);
+  const [avail, setAvail] = useState<any[]>([]); const [personas, setPersonas] = useState<string[]>([]);
+  const [provs, setProvs] = useState<string[]>(["deepseek", "apimart", "deepseek"]);
+  const [models, setModels] = useState<any[]>([]); const [cm, setCm] = useState<any>({});
 
   useEffect(() => { void load(); }, []);
   async function load() {
     try {
-      const [stat, set] = await Promise.all([api.get("/lingxing/status"), api.get("/settings")]);
+      const [stat, set, rp] = await Promise.all([api.get("/lingxing/status"), api.get("/settings"), api.get("/lingxing/review/providers")]);
       setStatus(stat.data); setSecrets(set.data.secret_keys || []);
       const cfg = set.data.settings || {}; setS(cfg);
       setHost(cfg.lingxing_openapi_host || ""); setAppid(cfg.lingxing_openapi_appid || "");
+      setAvail(rp.data.available || []); setPersonas(rp.data.personas || []);
+      setProvs(String(rp.data.review_providers || "deepseek,apimart,deepseek").split(",").map((x: string) => x.trim()));
+      try { setModels(JSON.parse(cfg.lingxing_custom_models || "[]")); } catch { setModels([]); }
     } catch (e: any) { setMsg(humanErr(e)); }
   }
+  async function saveProvs(next: string[]) { setProvs(next); await patch({ lingxing_review_providers: next.join(",") }, "复核模型已保存"); }
+  async function saveModels(next: any[]) { setModels(next); await patch({ lingxing_custom_models: JSON.stringify(next) }, "自定义模型已保存"); }
   async function patch(updates: Record<string, any>, okMsg = "已保存") {
     setBusy(true); setMsg("");
     try { await api.patch("/settings", { settings: updates }); setMsg(okMsg); await load(); }
@@ -113,6 +121,41 @@ export default function LingXingConfig() {
           }, "参数已保存")} disabled={busy}>保存参数</Btn>
         </div>
         <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 6 }}>白名单为空时，任何写操作都会被护栏拦截（fail-closed）；只放你确认要自动优化的店铺。</div>
+      </Card>
+
+      {/* ⑤ review models */}
+      <Card title="⑤ 复核模型（三重复核每位可用不同模型/智能体）">
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {personas.map((pn, i) => (
+            <Field key={i} label={`复核${i + 1}：${pn}`}>
+              <select value={provs[i] || "deepseek"} onChange={(e) => { const n = [...provs]; n[i] = e.target.value; void saveProvs(n); }} style={{ ...inputStyle, minWidth: 170 }}>
+                {avail.map((a) => <option key={a.id} value={a.id} disabled={!a.ok}>{a.label}{a.ok ? "" : "（未配置/未装）"}</option>)}
+              </select>
+            </Field>
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 6 }}>
+          可选：HTTP 文本(DeepSeek/Apimart) · CLI 智能体(hermes/claude/codex,较慢) · 下方自定义模型。某个不可用会自动回退默认链。建议把「魔鬼代言人」设成与其它不同的模型做真异构。
+        </div>
+
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--b)" }}>
+          <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>自定义模型（OpenAI 兼容）</div>
+          {models.map((m, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11, marginBottom: 4 }}>
+              <b>{m.label || m.id}</b><span style={{ color: "var(--t3)" }}>{m.model} @ {m.base_url}</span>
+              <span style={{ color: "var(--t3)" }}>引用名 custom:{m.id}</span>
+              <Btn onClick={() => saveModels(models.filter((_, j) => j !== i))}>删除</Btn>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
+            <Field label="id"><input value={cm.id || ""} onChange={(e) => setCm({ ...cm, id: e.target.value })} style={{ ...inputStyle, width: 80 }} /></Field>
+            <Field label="名称"><input value={cm.label || ""} onChange={(e) => setCm({ ...cm, label: e.target.value })} style={{ ...inputStyle, width: 110 }} /></Field>
+            <Field label="base_url"><input value={cm.base_url || ""} onChange={(e) => setCm({ ...cm, base_url: e.target.value })} style={{ ...inputStyle, width: 220 }} placeholder="https://openrouter.ai/api/v1" /></Field>
+            <Field label="model"><input value={cm.model || ""} onChange={(e) => setCm({ ...cm, model: e.target.value })} style={{ ...inputStyle, width: 180 }} /></Field>
+            <Field label="api_key"><input type="password" value={cm.api_key || ""} onChange={(e) => setCm({ ...cm, api_key: e.target.value })} style={{ ...inputStyle, width: 150 }} /></Field>
+            <Btn primary disabled={!cm.id || !cm.base_url || !cm.model} onClick={() => { void saveModels([...models.filter((x) => x.id !== cm.id), cm]); setCm({}); }}>添加</Btn>
+          </div>
+        </div>
       </Card>
 
       {msg && <div style={{ fontSize: 11, color: "var(--t3)" }}>{msg}</div>}

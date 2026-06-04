@@ -848,6 +848,19 @@ async def generate_text_provider(provider: str, prompt: str) -> str:
     raise RuntimeError(f"未知 provider: {provider}")
 
 
+async def generate_openai_compat(base_url: str, api_key: str, model: str, prompt: str) -> str:
+    """Generate text via any OpenAI-compatible endpoint (custom model slots)."""
+    if not (base_url and model):
+        raise RuntimeError("自定义模型缺少 base_url/model")
+    parts: list[str] = []
+    async for chunk in _stream_openai_compat(api_key or "", base_url.rstrip("/"), model, prompt):
+        parts.append(chunk)
+    text = "".join(parts).strip()
+    if not text:
+        raise RuntimeError("自定义模型返回空")
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Vision provider helpers
 # ---------------------------------------------------------------------------

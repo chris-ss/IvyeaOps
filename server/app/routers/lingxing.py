@@ -177,6 +177,14 @@ class ManualTicket(BaseModel):
     opt: Dict[str, Any] | None = None  # optimizer rule trail (rule/metrics/significance)
 
 
+@router.get("/review/providers")
+async def review_providers() -> Dict[str, Any]:
+    cfg = _hs.load()
+    return {"available": lxo.available_providers(),
+            "review_providers": cfg.get("lingxing_review_providers") or "deepseek,apimart,deepseek",
+            "personas": [p[0] for p in lxo._REVIEWERS]}
+
+
 @router.get("/operate/op-types")
 async def operate_op_types() -> Dict[str, Any]:
     return {"op_types": lxo.op_types_catalog()}

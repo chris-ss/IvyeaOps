@@ -119,6 +119,11 @@ _DEFAULTS: Dict[str, Any] = {
     # advocate / business-balance). 'apimart' = Claude. Missing provider falls
     # back to the default deepseek→apimart chain.
     "lingxing_review_providers": "deepseek,apimart,deepseek",
+    # Custom review/analysis model slots: JSON list of
+    # {"id","label","base_url","api_key","model"} (OpenAI-compatible). Reference
+    # in lingxing_review_providers as "custom:<id>". CLI agents
+    # (hermes/claude/codex) are also valid providers.
+    "lingxing_custom_models": "[]",
     # Deterministic guardrails (hard caps, enforced in code regardless of AI
     # reviews). Empty scope lists = nothing is writable until you whitelist.
     "lingxing_scope_stores": "",          # comma-separated store ids/names allowed for writes

@@ -315,6 +315,65 @@ def _parse_review(text: str) -> Dict[str, Any]:
         return {"approve": False, "risk_score": 1.0, "reasons": "复核响应解析失败（fail-closed 视为不通过）"}
 
 
+_CLI_AGENTS = ("hermes", "claude", "codex")
+
+
+def _custom_models() -> Dict[str, Dict[str, Any]]:
+    try:
+        arr = json.loads(_hs.get("lingxing_custom_models") or "[]")
+        return {str(m.get("id")): m for m in arr if m.get("id")}
+    except Exception:
+        return {}
+
+
+def available_providers() -> List[Dict[str, Any]]:
+    """All selectable review providers + availability (for the config UI)."""
+    from app.services.runners import _find_bin
+    out = [
+        {"id": "deepseek", "label": "DeepSeek", "kind": "http", "ok": bool(_ai._deepseek_key())},
+        {"id": "apimart", "label": "Apimart(Claude)", "kind": "http", "ok": bool(_ai._apimart_key())},
+    ]
+    for a in _CLI_AGENTS:
+        out.append({"id": a, "label": f"{a}(智能体)", "kind": "cli", "ok": bool(_find_bin(a))})
+    for cid, m in _custom_models().items():
+        out.append({"id": f"custom:{cid}", "label": m.get("label") or cid, "kind": "custom",
+                    "ok": bool(m.get("base_url") and m.get("model"))})
+    return out
+
+
+async def _run_cli_agent(runner: str, prompt: str) -> str:
+    from app.services.runners import _find_bin, _build_runner_cmd, build_child_env
+    binary = _find_bin(runner)
+    if not binary:
+        raise RuntimeError(f"{runner} 未安装")
+    cmd = _build_runner_cmd(runner, binary, prompt)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        stdin=asyncio.subprocess.DEVNULL, env=build_child_env(binary))
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise RuntimeError(f"{runner} 复核超时")
+    text = (out or b"").decode("utf-8", "replace").strip()
+    if not text:
+        raise RuntimeError(f"{runner} 返回空")
+    return text
+
+
+async def _review_generate(provider: str, prompt: str) -> str:
+    """Route a review prompt to its provider: http builtin / CLI agent / custom."""
+    p = (provider or "").strip()
+    if p in _CLI_AGENTS:
+        return await _run_cli_agent(p, prompt)
+    if p.startswith("custom:"):
+        m = _custom_models().get(p.split(":", 1)[1])
+        if not m:
+            raise RuntimeError(f"未找到自定义模型 {p}")
+        return await _ai.generate_openai_compat(m.get("base_url"), m.get("api_key"), m.get("model"), prompt)
+    return await _ai.generate_text_provider(p, prompt)
+
+
 async def _one_review(persona: str, framing: str, intent: Dict[str, Any],
                       provider: str = "deepseek") -> Dict[str, Any]:
     prompt = f"""{framing}
@@ -336,7 +395,7 @@ async def _one_review(persona: str, framing: str, intent: Dict[str, Any],
 approve=是否批准；risk_score=重大风险概率(越高越危险)；理由要具体、点名关键指标。"""
     used = provider
     try:
-        raw = await _ai.generate_text_provider(provider, prompt)
+        raw = await _review_generate(provider, prompt)
         r = _parse_review(raw)
     except Exception:  # noqa: BLE001 — that provider unavailable → fall back to chain
         try:
