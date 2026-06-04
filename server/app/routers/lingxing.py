@@ -72,6 +72,17 @@ async def audit(limit: int = 100) -> Dict[str, Any]:
     return {"rows": lx.recent_audit(limit=max(1, min(limit, 500)))}
 
 
+@router.get("/dashboard")
+async def dashboard(sids: str = "", days: int = 7) -> Dict[str, Any]:
+    """广告数据大盘聚合（按店铺/活动/天）。sids 逗号分隔，空=全部店铺。"""
+    from app.services import lingxing_dashboard as lxdash
+    sid_list = [int(x) for x in sids.replace("，", ",").split(",") if x.strip().isdigit()] or None
+    try:
+        return await lxdash.dashboard(sid_list, days)
+    except lx.LingXingError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.get("/datasets")
 async def datasets() -> Dict[str, Any]:
     """Read-dataset registry that drives the 浏览/分析 panels."""

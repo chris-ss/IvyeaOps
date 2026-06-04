@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import LingXingAutomation from "./LingXingAutomation";
 import LingXingOperate from "./LingXingOperate";
 import LingXingAudit from "./LingXingAudit";
+import LingXingDashboard from "./LingXingDashboard";
 
 /* ── shared mini-styles (match workbench look) ─────────────────────────── */
 const inputStyle: React.CSSProperties = {
@@ -31,7 +32,7 @@ function readLS(): any { try { return JSON.parse(localStorage.getItem(LS_KEY) ||
 export default function LingXing() {
   const [status, setStatus] = useState<Status | null>(null);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [view, setView] = useState<"browse" | "auto" | "operate" | "audit">(() => readLS().view || "browse");
+  const [view, setView] = useState<"dashboard" | "browse" | "auto" | "operate" | "audit">(() => readLS().view || "dashboard");
   const [active, setActive] = useState<string>(() => readLS().active || "sellers");
   const [sellers, setSellers] = useState<any[]>([]);
   const [storeSid, setStoreSid] = useState<string>(() => readLS().storeSid || "");
@@ -157,7 +158,7 @@ export default function LingXing() {
       ) : (
         <>
         <div style={{ display: "flex", gap: 2, marginBottom: 10 }}>
-          {([["browse", "数据浏览"], ["auto", "自动化建议"], ["operate", "操作执行"], ["audit", "审计"]] as const).map(([v, l]) => (
+          {([["dashboard", "大盘"], ["browse", "数据浏览"], ["auto", "自动化建议"], ["operate", "操作执行"], ["audit", "审计"]] as const).map(([v, l]) => (
             <button key={v} onClick={() => setView(v)} style={{
               padding: "6px 14px", fontSize: 11, border: "none", borderRadius: 4, cursor: "pointer",
               background: view === v ? "var(--acc)" : "var(--bg2)", color: view === v ? "#000" : "var(--t2)",
@@ -165,7 +166,7 @@ export default function LingXing() {
             }}>{l}</button>
           ))}
         </div>
-        {view === "auto" ? <LingXingAutomation /> : view === "operate" ? <LingXingOperate /> : view === "audit" ? <LingXingAudit /> : (
+        {view === "dashboard" ? <LingXingDashboard storeSid={storeSid} /> : view === "auto" ? <LingXingAutomation /> : view === "operate" ? <LingXingOperate /> : view === "audit" ? <LingXingAudit /> : (
         <div style={{ display: "flex", gap: 12 }}>
           {/* dataset list */}
           <div style={{ width: 180, flexShrink: 0 }}>
