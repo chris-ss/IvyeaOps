@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfirm } from "../../components/ConfirmDialog";
 import { fetchAgents, createSession, type AgentInfo } from "../../api/agents";
+import SheetSelect from "../../components/SheetSelect";
+import { marketplaceOptions } from "../../lib/marketplaces";
 import {
   auditDownloadUrl,
   auditGet,
@@ -199,51 +201,45 @@ function AsinAuditPanel() {
           onKeyDown={(e) => e.key === "Enter" && !isRunning && onStart()}
           disabled={isRunning}
         />
-        <select
+        <SheetSelect
           className="inp"
           value={marketplace}
-          onChange={(e) => setMarketplace(e.target.value)}
+          onChange={setMarketplace}
           disabled={isRunning}
           style={{ width: 74 }}
-        >
-          {MARKETPLACES.map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
-        <select
+          flags
+          title="选择站点"
+          options={marketplaceOptions(MARKETPLACES)}
+        />
+        <SheetSelect
           className="inp"
           value={mode}
-          onChange={(e) => setMode(e.target.value as "full" | "rewrite_only")}
+          onChange={(v) => setMode(v as "full" | "rewrite_only")}
           disabled={isRunning}
           style={{ width: 140 }}
-        >
-          <option value="full">完整 11 板块</option>
-          <option value="rewrite_only">精简 + 改写稿</option>
-        </select>
-        <select
+          title="分析模式"
+          options={[
+            { value: "full", label: "完整 11 板块" },
+            { value: "rewrite_only", label: "精简 + 改写稿" },
+          ]}
+        />
+        <SheetSelect
           className="inp"
           value={runner}
-          onChange={(e) => setRunner(e.target.value as RunnerName)}
+          onChange={(v) => setRunner(v as RunnerName)}
           disabled={isRunning || runners.length === 0}
           title="选择执行审计的智能体 CLI"
           style={{ width: 180 }}
-        >
-          {runners.length === 0 ? (
-            <option value="auto">自动</option>
-          ) : (
-            runners.map((r) => (
-              <option
-                key={r.name}
-                value={r.name}
-                disabled={!r.available}
-              >
-                {r.available ? "🤖 " : "⊘ "}
-                {r.label}
-                {!r.available && r.reason ? `（${r.reason}）` : ""}
-              </option>
-            ))
-          )}
-        </select>
+          options={
+            runners.length === 0
+              ? [{ value: "auto", label: "自动" }]
+              : runners.map((r) => ({
+                  value: r.name,
+                  label: `${r.available ? "🤖 " : "⊘ "}${r.label}${!r.available && r.reason ? `（${r.reason}）` : ""}`,
+                  disabled: !r.available,
+                }))
+          }
+        />
         <button className="tbtn" onClick={onStart} disabled={isRunning}>
           {isRunning ? (
             <><span className="spin" /> 分析中…</>
@@ -494,16 +490,14 @@ function AsinDeepAnalysisPanel({ data }: { data: AuditFull }) {
         ))}
       </div>
       <div className="market-deep-row">
-        <select
+        <SheetSelect
           className="inp"
           value={selectedAgent}
-          onChange={(e) => setSelectedAgent(e.target.value)}
+          onChange={setSelectedAgent}
           style={{ flex: 1 }}
-        >
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>{a.display_name}</option>
-          ))}
-        </select>
+          title="选择智能体"
+          options={agents.map((a) => ({ value: a.id, label: a.display_name }))}
+        />
         <button
           className="tbtn market-deep-go"
           onClick={handleStart}

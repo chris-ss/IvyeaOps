@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfirm } from "../../components/ConfirmDialog";
 import { fetchAgents, createSession, type AgentInfo } from "../../api/agents";
+import SheetSelect from "../../components/SheetSelect";
+import { marketplaceOptions } from "../../lib/marketplaces";
 import {
   adAuditClearFailed,
   adAuditDelete,
@@ -313,16 +315,15 @@ export default function AdAuditPanel() {
                 支持 .xlsx / .xls / .csv / .tsv，≤ 20MB · 广告类型自动识别
               </div>
               <div style={{ marginTop: 10 }}>
-                <select
+                <SheetSelect
                   className="inp"
                   value={marketplace}
-                  onChange={(e) => { e.stopPropagation(); setMarketplace(e.target.value); }}
-                  onClick={(e) => e.stopPropagation()}
+                  onChange={setMarketplace}
                   style={{ width: 90 }}
+                  flags
                   title="报告所属站点"
-                >
-                  {MARKETPLACES.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
+                  options={marketplaceOptions(MARKETPLACES)}
+                />
               </div>
             </>
           )}
@@ -557,25 +558,23 @@ function UploadedForm({
       />
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <select
+        <SheetSelect
           className="inp"
           value={runner}
-          onChange={(e) => setRunner(e.target.value as RunnerName)}
+          onChange={(v) => setRunner(v as RunnerName)}
           disabled={runners.length === 0}
           title="选择执行分析的智能体 CLI"
           style={{ width: 180 }}
-        >
-          {runners.length === 0 ? (
-            <option value="auto">自动</option>
-          ) : (
-            runners.map((r) => (
-              <option key={r.name} value={r.name} disabled={!r.available}>
-                {r.available ? "🤖 " : "⊘ "}{r.label}
-                {!r.available && r.reason ? `（${r.reason}）` : ""}
-              </option>
-            ))
-          )}
-        </select>
+          options={
+            runners.length === 0
+              ? [{ value: "auto", label: "自动" }]
+              : runners.map((r) => ({
+                  value: r.name,
+                  label: `${r.available ? "🤖 " : "⊘ "}${r.label}${!r.available && r.reason ? `（${r.reason}）` : ""}`,
+                  disabled: !r.available,
+                }))
+          }
+        />
         <button className="tbtn" onClick={onStart}>🚀 开始分析</button>
         <span style={{ fontSize: 10, color: "var(--t3)" }}>预计 3-8 分钟</span>
       </div>
@@ -962,16 +961,14 @@ function AdDeepAnalysisPanel({ data }: { data: AdAuditFull }) {
         ))}
       </div>
       <div className="market-deep-row">
-        <select
+        <SheetSelect
           className="inp"
           value={selectedAgent}
-          onChange={(e) => setSelectedAgent(e.target.value)}
+          onChange={setSelectedAgent}
           style={{ flex: 1 }}
-        >
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>{a.display_name}</option>
-          ))}
-        </select>
+          title="选择智能体"
+          options={agents.map((a) => ({ value: a.id, label: a.display_name }))}
+        />
         <button
           className="tbtn market-deep-go"
           onClick={handleStart}

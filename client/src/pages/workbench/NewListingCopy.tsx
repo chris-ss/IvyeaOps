@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import SheetSelect from "../../components/SheetSelect";
+import { marketplaceOptions } from "../../lib/marketplaces";
 
 type JobStatus = "pending" | "uploaded" | "running" | "done" | "failed";
 
@@ -211,10 +213,9 @@ export default function NewListingCopy({ initialAsins }: { initialAsins?: string
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: 11, color: "var(--t3)", fontFamily: "var(--font)" }}>站点</label>
-              <select className="hub-input" value={marketplace} onChange={e => setMarketplace(e.target.value)}
-                style={{ fontSize: 12 }}>
-                {MARKETPLACES.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+              <SheetSelect className="hub-input" value={marketplace} onChange={setMarketplace}
+                style={{ fontSize: 12 }} flags title="选择站点"
+                options={marketplaceOptions(MARKETPLACES)} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: 11, color: "var(--t3)", fontFamily: "var(--font)" }}>产品类型 *</label>

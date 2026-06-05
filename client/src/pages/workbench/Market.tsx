@@ -11,6 +11,8 @@ import {
   type HistoryEntry,
 } from "../../api/market";
 import { fetchAgents, createSession, type AgentInfo } from "../../api/agents";
+import { FLAG_URL, MARKETPLACES } from "../../lib/marketplaces";
+import SheetSelect from "../../components/SheetSelect";
 
 // Local display shape — uses camelCase; converted from the snake_case API type.
 interface LocalHistoryEntry {
@@ -134,16 +136,14 @@ function DeepAnalysisPanel({
         {/* Agent selector + start */}
         <div className="market-deep-actions">
           {agents.length > 0 ? (
-            <select
+            <SheetSelect
               className="market-deep-agent-select"
               value={selectedAgent}
-              onChange={(e) => setSelectedAgent(e.target.value)}
+              onChange={setSelectedAgent}
               disabled={loading}
-            >
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>{a.display_name || a.id}</option>
-              ))}
-            </select>
+              title="选择智能体"
+              options={agents.map((a) => ({ value: a.id, label: a.display_name || a.id }))}
+            />
           ) : (
             <span className="market-deep-no-agent">暂无可用智能体</span>
           )}
@@ -161,20 +161,6 @@ function DeepAnalysisPanel({
     </div>
   );
 }
-
-const FLAG_URL = (code: string) => `https://flagcdn.com/w20/${code === "UK" ? "gb" : code.toLowerCase()}.png`;
-const MARKETPLACES: { code: string; name: string }[] = [
-  { code: "US", name: "美国" },
-  { code: "UK", name: "英国" },
-  { code: "DE", name: "德国" },
-  { code: "FR", name: "法国" },
-  { code: "CA", name: "加拿大" },
-  { code: "JP", name: "日本" },
-  { code: "ES", name: "西班牙" },
-  { code: "IT", name: "意大利" },
-  { code: "MX", name: "墨西哥" },
-  { code: "AU", name: "澳大利亚" },
-];
 
 const EXAMPLE_QUERIES: Record<ResearchMode, string[]> = {
   keyword: ["wireless earbuds", "yoga mat", "air fryer", "led desk lamp"],
@@ -597,7 +583,7 @@ export default function Market() {
 
       {/* Report */}
       {(report || phase === "synthesizing") && (
-        <div className="market-report-wrap">
+        <div className="market-report-wrap wb-enter">
           <div className="market-report-toolbar">
             <span className="market-report-meta">
               {phase === "done" && elapsedS !== null
@@ -640,8 +626,21 @@ export default function Market() {
             )}
           </div>
           <div ref={reportRef} className="market-report-body">
-            <MarkdownReport text={report} />
-            {phase === "synthesizing" && <span className="cursor-blink">▋</span>}
+            {!report && phase === "synthesizing" ? (
+              <div aria-busy="true" aria-live="polite">
+                <div className="skeleton line lg" />
+                <div className="skeleton line md" />
+                <div className="skeleton line lg" />
+                <div className="skeleton line sm" />
+                <div className="skeleton line md" />
+                <div className="skeleton line lg" />
+              </div>
+            ) : (
+              <>
+                <MarkdownReport text={report} />
+                {phase === "synthesizing" && <span className="cursor-blink">▋</span>}
+              </>
+            )}
           </div>
         </div>
       )}

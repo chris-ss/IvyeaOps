@@ -246,7 +246,7 @@ export default function Assistant() {
             style={{ resize: "none", height: 44, paddingTop: 10 }}
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
             placeholder="输入问题或写作要求，Enter 发送（Shift+Enter 换行）"
             disabled={streaming}
           />

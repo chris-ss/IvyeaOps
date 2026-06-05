@@ -998,6 +998,7 @@ export default function Terminal() {
                       className="terminal-legacy-frame"
                       style={{ width: "100%", height: "100%", border: "none", background: "#000" }}
                     />
+                    <TerminalToolbar iframeRef={legacyFrameRef} iframeUrl={ttydStatus.url} variant="bottom" />
                   </div>
                 ) : (
                   <div className="terminal-empty" style={{ gap: 10, padding: 24, textAlign: "center" }}>

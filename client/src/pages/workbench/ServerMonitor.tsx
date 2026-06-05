@@ -174,8 +174,18 @@ export default function ServerMonitor() {
     return (
       <div>
         <div className="ptitle">/ 服务器监控</div>
-        <div className="card" style={{ color: "var(--t3)", fontSize: 11 }}>
-          <span className="spin" /> 加载中...
+        <div aria-busy="true" aria-live="polite" style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="card" style={{ padding: 12 }}>
+                <div className="skeleton line sm" />
+                <div className="skeleton" style={{ height: 22, marginTop: 6, borderRadius: 4 }} />
+              </div>
+            ))}
+          </div>
+          <div className="card" style={{ padding: 12 }}>
+            <div className="skeleton" style={{ height: 120, borderRadius: 6 }} />
+          </div>
         </div>
       </div>
     );

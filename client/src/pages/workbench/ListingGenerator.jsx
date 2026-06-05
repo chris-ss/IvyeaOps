@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "../../components/ConfirmDialog";
+import SheetSelect from "../../components/SheetSelect";
+import { marketplaceOptions } from "../../lib/marketplaces";
 import {
   aiAnalyze,
   applyTemplate,
@@ -140,6 +142,9 @@ const inputStyle = {
   fontSize: 10,
   color: "var(--t)",
   outline: "none",
+  fontFamily: "inherit",
+  lineHeight: 1.5,
+  boxSizing: "border-box",
 };
 
 export default function ListingGenerator({ onProjectAsin } = {}) {
@@ -791,9 +796,7 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
       <div className="card" style={{ padding: 12 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
           <span style={{ fontSize: 10, fontWeight: 600 }}>色系</span>
-          <select value={isAplus ? aplusColorScheme : colorScheme} onChange={(e) => isAplus ? setAplusColorScheme(e.target.value) : setColorScheme(e.target.value)} style={inputStyle}>
-            {COLOR_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <SheetSelect value={isAplus ? aplusColorScheme : colorScheme} onChange={(v) => isAplus ? setAplusColorScheme(v) : setColorScheme(v)} style={inputStyle} title="选择色系" options={COLOR_OPTIONS} />
           {(isAplus ? aplusColorScheme : colorScheme) === "custom" && (
             <input value={isAplus ? aplusCustomColor : customColor} onChange={(e) => isAplus ? setAplusCustomColor(e.target.value) : setCustomColor(e.target.value)} placeholder="输入自定义色系..." style={{ ...inputStyle, width: 180 }} />
           )}
@@ -904,10 +907,9 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
         <div className="listing-sidebar" style={{ width: 210, flexShrink: 0 }}>
           <div className="card" style={{ padding: "8px 10px" }}>
             <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-              <input value={newAsin} onChange={(e) => setNewAsin(e.target.value)} placeholder="ASIN..." style={{ ...inputStyle, flex: 1 }} />
-              <select value={newMkt} onChange={(e) => setNewMkt(e.target.value)} style={inputStyle}>
-                {["US", "UK", "DE", "JP", "FR", "IT", "ES", "CA", "AU"].map((m) => <option key={m}>{m}</option>)}
-              </select>
+              <input value={newAsin} onChange={(e) => setNewAsin(e.target.value)} placeholder="ASIN..." style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+              <SheetSelect value={newMkt} onChange={setNewMkt} style={inputStyle} className="xsel-compact" flags title="选择站点"
+                options={marketplaceOptions(["US", "UK", "DE", "JP", "FR", "IT", "ES", "CA", "AU"])} />
             </div>
             <Btn onClick={handleCreate} primary disabled={busy || !newAsin.trim()}>+ 新建</Btn>
             <div style={{ marginTop: 8 }}>
@@ -927,9 +929,19 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
 
         <div style={{ flex: 1, minWidth: 0 }}>
           {!project ? (
-            <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--t3)", fontSize: 11 }}>选择或新建项目</div>
+            activeId ? (
+              <div className="card wb-enter" style={{ padding: 12 }} aria-busy="true" aria-live="polite">
+                <div className="skeleton" style={{ height: 30, marginBottom: 12 }} />
+                <div className="skeleton line lg" />
+                <div className="skeleton line md" />
+                <div className="skeleton line lg" />
+                <div className="skeleton line sm" />
+              </div>
+            ) : (
+              <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--t3)", fontSize: 11 }}>选择或新建项目</div>
+            )
           ) : (
-            <>
+            <div className="wb-enter" key={activeId}>
               <div style={{ display: "flex", gap: 2, marginBottom: 8 }}>
                 {[["scrape", "① 采集"], ["copy", "② 文案"], ["images", "③ 主图"], ["aplus", "④ A+"], ["output", "⑤ 输出"]].map(([t, l]) => (
                   <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: "7px 0", fontSize: 10, border: "none", borderRadius: 3, cursor: "pointer", background: tab === t ? "var(--acc)" : "var(--bg2)", color: tab === t ? "#000" : "var(--t2)", fontWeight: tab === t ? 600 : 400 }}>{l}</button>
@@ -937,17 +949,18 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
               </div>
               {renderFlowStatus()}
 
+              <div key={tab} className="wb-enter">
               {tab === "scrape" && (
                 <div className="card" style={{ padding: 12 }}>
                   <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                     <Btn onClick={handleScrape} primary disabled={busy}>{loading === "scraping" ? "采集中..." : "采集ASIN数据"}</Btn>
                     <Btn onClick={handleAnalyze} disabled={busy}>{loading === "analyzing" ? "分析中..." : "AI分析"}</Btn>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8, marginBottom: 10 }}>
-                    <Field label="产品名称"><input value={productInfo.product_name} onChange={(e) => setProductInfo((p) => ({ ...p, product_name: e.target.value }))} style={inputStyle} /></Field>
-                    <Field label="目标受众"><input value={productInfo.target_audience} onChange={(e) => setProductInfo((p) => ({ ...p, target_audience: e.target.value }))} style={inputStyle} /></Field>
-                    <Field label="核心卖点"><textarea value={productInfo.selling_points} onChange={(e) => setProductInfo((p) => ({ ...p, selling_points: e.target.value }))} rows={3} style={{ ...inputStyle, resize: "vertical" }} /></Field>
-                    <Field label="产品描述"><textarea value={productInfo.description} onChange={(e) => setProductInfo((p) => ({ ...p, description: e.target.value }))} rows={3} style={{ ...inputStyle, resize: "vertical" }} /></Field>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8, marginBottom: 10, alignItems: "start" }}>
+                    <Field label="产品名称"><textarea value={productInfo.product_name} onChange={(e) => setProductInfo((p) => ({ ...p, product_name: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} /></Field>
+                    <Field label="目标受众"><textarea value={productInfo.target_audience} onChange={(e) => setProductInfo((p) => ({ ...p, target_audience: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} /></Field>
+                    <Field label="核心卖点"><textarea value={productInfo.selling_points} onChange={(e) => setProductInfo((p) => ({ ...p, selling_points: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} /></Field>
+                    <Field label="产品描述"><textarea value={productInfo.description} onChange={(e) => setProductInfo((p) => ({ ...p, description: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} /></Field>
                   </div>
                   <Btn onClick={handleSaveInfo} disabled={busy}>保存产品信息</Btn>
                   {renderScrapeResult()}
@@ -1201,7 +1214,8 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
                   </div>
                 </div>
               )}
-            </>
+              </div>
+            </div>
           )}
         </div>
       </div>

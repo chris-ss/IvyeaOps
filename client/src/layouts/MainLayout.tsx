@@ -261,7 +261,7 @@ export default function MainLayout() {
     <div className="app">
       {/* SIDEBAR */}
       {isMobile && mobileMenu && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 998 }} onClick={() => setMobileMenu(false)} />}
-      <aside className={"sb" + (collapsed && !mobileMenu ? " collapsed" : "")} style={isMobile ? { position: "fixed", zIndex: 999, height: "100%", width: 196, minWidth: 196, overflow: "auto", left: mobileMenu ? 0 : -200, transition: "left .2s ease" } : undefined}>
+      <aside className={"sb" + (collapsed && !mobileMenu ? " collapsed" : "")} style={isMobile ? { position: "fixed", zIndex: 999, height: "100%", width: 196, minWidth: 196, overflow: "auto", left: 0, transform: mobileMenu ? "translateX(0)" : "translateX(-200px)", transition: "transform .22s cubic-bezier(.4,0,.2,1)", willChange: "transform" } : undefined}>
         <div className="sb-logo">
           <div className="sb-logo-name" title="个人工作台">
             <span className="sb-logo-icon">◆</span>

@@ -4,6 +4,7 @@ import {
   listTools, runTool, pinTool, listRuns, getRun, deleteRun, repairTool,
   type SkillToolMeta, type SkillInput, type SseEvent, type SkillRunSummary, type RepairResult,
 } from "../../api/skillTools";
+import SheetSelect from "../../components/SheetSelect";
 import { deleteSkill, updateSkill } from "../../api/skill";
 import { useConfirm } from "../../components/ConfirmDialog";
 
@@ -160,22 +161,28 @@ export default function SkillTools() {
             style={{ paddingLeft: 26 }}
           />
         </div>
-        <select
+        <SheetSelect
           className="inp"
-          style={{ flex: "0 0 150px", cursor: "pointer" }}
+          style={{ flex: "0 0 150px" }}
           value={filterCat}
-          onChange={(e) => setFilterCat(e.target.value)}
-        >
-          <option value="">全部分类 ({tools.length})</option>
-          {Object.entries(categories).map(([cat, count]) => (
-            <option key={cat} value={cat}>{cat} ({count})</option>
-          ))}
-        </select>
+          onChange={setFilterCat}
+          title="选择分类"
+          options={[
+            { value: "", label: `全部分类 (${tools.length})` },
+            ...Object.entries(categories).map(([cat, count]) => ({ value: cat, label: `${cat} (${count})` })),
+          ]}
+        />
       </div>
 
       {loading && (
-        <div style={{ color: "var(--t3)", fontSize: 11, display: "flex", alignItems: "center", gap: 8, padding: "20px 0" }}>
-          <span className="spin" /> 加载中…
+        <div aria-busy="true" aria-live="polite" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10, paddingTop: 6 }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="card" style={{ padding: 12 }}>
+              <div className="skeleton line md" />
+              <div className="skeleton line lg" />
+              <div className="skeleton line sm" />
+            </div>
+          ))}
         </div>
       )}
 
@@ -345,10 +352,11 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
     );
 
     if (inp.type === "select" && inp.options?.length) return (
-      <select className="inp" style={{ cursor: "pointer" }} value={val} onChange={(e) => set(e.target.value)}>
-        <option value="">{inp.placeholder || "请选择…"}</option>
-        {inp.options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
+      <SheetSelect className="inp" value={val} onChange={set} title={inp.label || "请选择"}
+        options={[
+          { value: "", label: inp.placeholder || "请选择…" },
+          ...inp.options.map((o) => ({ value: o, label: o })),
+        ]} />
     );
     if (inp.type === "textarea") return (
       <textarea className="inp" rows={3} value={val} onChange={(e) => set(e.target.value)}

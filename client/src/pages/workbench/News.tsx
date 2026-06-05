@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import SheetSelect from "../../components/SheetSelect";
 import {
   DatesResponse,
   NewsCategory,
@@ -316,18 +317,13 @@ export default function News() {
         <span style={{ flex: 1 }} />
 
         {dates && dates.dates.length > 0 && (
-          <select
+          <SheetSelect
             className="rbtn"
             value={picked ?? ""}
-            onChange={(e) => setPicked(e.target.value)}
-            title="切换日期（仅保留今天/昨天）"
-          >
-            {dates.dates.map((d) => (
-              <option key={d} value={d}>
-                {fmtDate(d)} · {d}
-              </option>
-            ))}
-          </select>
+            onChange={setPicked}
+            title="切换日期"
+            options={dates.dates.map((d) => ({ value: d, label: `${fmtDate(d)} · ${d}` }))}
+          />
         )}
         <button
           className="rbtn"
@@ -378,8 +374,13 @@ export default function News() {
 
       <div className="card">
         {loading && (
-          <div style={{ padding: 12, fontSize: 10, color: "var(--t3)" }}>
-            加载中…
+          <div aria-busy="true" aria-live="polite" style={{ padding: 12, display: "grid", gap: 14 }}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i}>
+                <div className="skeleton line md" />
+                <div className="skeleton line lg" />
+              </div>
+            ))}
           </div>
         )}
 

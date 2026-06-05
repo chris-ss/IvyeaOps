@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import SheetSelect from "../../components/SheetSelect";
 import {
   getSettings, patchSettings, getHealth, changePassword,
   testSetting, autodetectSettings,
@@ -613,7 +614,16 @@ export default function HubSettings() {
 
   const [gbrainPathsOpen, setGbrainPathsOpen] = useState(false);
 
-  if (loading) return <div className="hs-loading">加载中…</div>;
+  if (loading) return (
+    <div aria-busy="true" aria-live="polite" style={{ display: "grid", gap: 12, maxWidth: 720 }}>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="card" style={{ padding: 14 }}>
+          <div className="skeleton line sm" />
+          <div className="skeleton" style={{ height: 30, marginTop: 8, borderRadius: 4 }} />
+        </div>
+      ))}
+    </div>
+  );
   if (loadErr) return <div className="hs-error">加载失败：{loadErr}</div>;
 
   return (
@@ -796,9 +806,8 @@ export default function HubSettings() {
             </div>
             <Field label={<><Tag kind="opt">可选</Tag>Embedding 服务商</>}
               hint={<>支持 embedding 的服务商。<code>ollama</code> 本地免费（需先 pull 模型），其余需对应 API Key。</>}>
-              <select className="hs-input" value={vals.gbrain_embed_provider}
-                onChange={e => {
-                  const p = e.target.value;
+              <SheetSelect className="hs-input" value={vals.gbrain_embed_provider} title="Embedding 服务商"
+                onChange={p => {
                   set("gbrain_embed_provider", p);
                   if (p && !vals.gbrain_embed_model) {
                     const dm: Record<string, string> = {
@@ -809,16 +818,17 @@ export default function HubSettings() {
                     };
                     if (dm[p]) set("gbrain_embed_model", dm[p]);
                   }
-                }}>
-                <option value="">未配置（关键词检索）</option>
-                <option value="ollama">Ollama（本地免费）</option>
-                <option value="zhipu">智谱 Zhipu</option>
-                <option value="dashscope">阿里 DashScope</option>
-                <option value="minimax">MiniMax</option>
-                <option value="openai">OpenAI</option>
-                <option value="voyage">Voyage</option>
-                <option value="google">Google</option>
-              </select>
+                }}
+                options={[
+                  { value: "", label: "未配置（关键词检索）" },
+                  { value: "ollama", label: "Ollama（本地免费）" },
+                  { value: "zhipu", label: "智谱 Zhipu" },
+                  { value: "dashscope", label: "阿里 DashScope" },
+                  { value: "minimax", label: "MiniMax" },
+                  { value: "openai", label: "OpenAI" },
+                  { value: "voyage", label: "Voyage" },
+                  { value: "google", label: "Google" },
+                ]} />
             </Field>
             {vals.gbrain_embed_provider && (
               <Field label="Embedding 模型" hint="已按服务商预填默认值，可改">

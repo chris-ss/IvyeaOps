@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { submitImage, imageStatus } from "../../api/assistant";
+import SheetSelect from "../../components/SheetSelect";
 
 const SIZES = ["1024x1024", "1024x1536", "1536x1024"];
 const SESSIONS_KEY = "ivyea-ops-imagegen-sessions";
@@ -293,14 +294,23 @@ export default function ImageGen() {
             </div>
             {/* Result */}
             {turn.loading ? (
-              <div className="pulse-loading" style={{ paddingLeft: 40 }}>
-                <span className="pulse-spin">◌</span>
-                生成中（约 1 分钟）{turn.progress ? `… ${turn.progress}%` : "…"}
+              <div style={{ marginLeft: 40 }} aria-busy="true" aria-live="polite">
+                <div className="pulse-loading" style={{ marginBottom: 8 }}>
+                  <span className="pulse-spin">◌</span>
+                  生成中（约 1 分钟）{turn.progress ? `… ${turn.progress}%` : "…"}
+                </div>
+                <div className="imggen-grid">
+                  {Array.from({ length: Math.max(1, n) }).map((_, i) => (
+                    <div key={i} className="imggen-card">
+                      <div className="skeleton" style={{ width: "100%", height: 180, borderRadius: 6 }} />
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : turn.error ? (
               <div className="market-error" style={{ marginLeft: 40 }}>{turn.error}</div>
             ) : (
-              <div className="imggen-grid" style={{ marginLeft: 40 }}>
+              <div className="imggen-grid wb-enter" style={{ marginLeft: 40 }}>
                 {turn.images.map((u, i) => (
                   <div key={i} className="imggen-card">
                     <img src={u} alt="" />
@@ -324,24 +334,24 @@ export default function ImageGen() {
           placeholder={turns.length > 0 ? "继续描述修改要求，Enter 发送（Shift+Enter 换行）" : "描述你想要的图片，英文效果更佳，Enter 发送"}
           disabled={loading}
         />
-        <select
+        <SheetSelect
           className="market-query-input"
           style={{ flex: "0 0 auto", minWidth: 110 }}
           value={size}
-          onChange={e => setSize(e.target.value)}
+          onChange={setSize}
           disabled={loading}
-        >
-          {SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select
+          title="图片尺寸"
+          options={SIZES}
+        />
+        <SheetSelect
           className="market-query-input"
           style={{ flex: "0 0 auto", minWidth: 60 }}
-          value={n}
-          onChange={e => setN(Number(e.target.value))}
+          value={String(n)}
+          onChange={v => setN(Number(v))}
           disabled={loading}
-        >
-          {[1, 2, 3, 4].map(x => <option key={x} value={x}>{x} 张</option>)}
-        </select>
+          title="生成数量"
+          options={[1, 2, 3, 4].map(x => ({ value: String(x), label: `${x} 张` }))}
+        />
         <button className="market-btn market-btn-submit" onClick={run} disabled={loading || !input.trim()}>
           {loading ? <><span className="spin" style={{ marginRight: 6 }} />生成中…</> : "生成"}
         </button>

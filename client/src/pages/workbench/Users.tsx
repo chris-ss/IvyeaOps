@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import SheetSelect from "../../components/SheetSelect";
 import {
   adminListUsers, adminSetUserStatus, adminResetUserPassword, adminDeleteUser,
   adminPermissionsCatalog, adminSetUserPermissions,
@@ -97,7 +98,14 @@ export default function Users() {
 
       {err && <div className="market-error">{err}</div>}
       {loading ? (
-        <div className="pulse-loading"><span className="pulse-spin">◌</span> 加载中…</div>
+        <div aria-busy="true" aria-live="polite" style={{ display: "grid", gap: 8, paddingTop: 6 }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="card" style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="skeleton" style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0 }} />
+              <div style={{ flex: 1 }}><div className="skeleton line sm" /><div className="skeleton line md" /></div>
+            </div>
+          ))}
+        </div>
       ) : users.length === 0 ? (
         <div className="market-empty"><div className="market-empty-icon">⊙</div><div className="market-empty-title">暂无注册用户</div></div>
       ) : (
@@ -147,10 +155,12 @@ export default function Users() {
 
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, color: "var(--t2)", display: "block", marginBottom: 6 }}>按职位套用预设</label>
-              <select value={editPos} onChange={(e) => applyPreset(e.target.value)} style={{ width: "100%", padding: "7px 10px", borderRadius: 4, border: "1px solid var(--b, #ccc)", background: "transparent", color: "inherit" }}>
-                <option value="">自定义（不套用职位）</option>
-                {Object.keys(catalog.positions).map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+              <SheetSelect value={editPos} onChange={applyPreset} title="按职位套用预设"
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 4, border: "1px solid var(--b, #ccc)", background: "transparent", color: "inherit" }}
+                options={[
+                  { value: "", label: "自定义（不套用职位）" },
+                  ...Object.keys(catalog.positions).map((p) => ({ value: p, label: p })),
+                ]} />
             </div>
 
             <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 8 }}>可访问板块（基础板块默认全员可用，这里只授权更高权限板块）</div>

@@ -98,7 +98,7 @@ export default function Home() {
       </div>
 
       {/* ── Tab body ── */}
-      <div className="home-tab-body">
+      <div className="home-tab-body wb-enter" key={tab}>
         {tab === "keyword" && <KeywordMonitor marketplace={marketplace} />}
         {tab === "competitor" && (
           <AsinMonitor kind="competitor" marketplace={marketplace} onChanged={() => setAlertReloadKey(k => k + 1)} />

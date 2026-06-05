@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listMCPServers, addMCPServer, removeMCPServer, type MCPServer } from "../../../api/mcp";
 import { useConfirm } from "../../../components/ConfirmDialog";
+import SheetSelect from "../../../components/SheetSelect";
 
 type Props = {
   open: boolean;
@@ -142,10 +143,8 @@ export default function MCPManager({ open, onClose }: Props) {
           <div className="mcp-form">
             <div className="mcp-form-row">
               <input className="inp" placeholder="服务器名（字母数字 _ . -）" value={name} onChange={(e) => setName(e.target.value)} />
-              <select className="inp" style={{ flex: "0 0 110px" }} value={transport} onChange={(e) => setTransport(e.target.value as Transport)}>
-                <option value="stdio">stdio</option>
-                <option value="http">http</option>
-              </select>
+              <SheetSelect className="inp" style={{ flex: "0 0 110px" }} value={transport} onChange={(v) => setTransport(v as Transport)}
+                title="传输方式" options={[{ value: "stdio", label: "stdio" }, { value: "http", label: "http" }]} />
             </div>
             {transport === "stdio" ? (
               <>

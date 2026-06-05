@@ -334,7 +334,13 @@ function KeywordCard({ keyword, state, marketplace, onRemove, onRefresh, onAdd, 
         </div>
       </div>
       {state.kind === "idle"    && <button className="asin-fetch-hint" onClick={onRefresh}>点击拉取数据 ↻</button>}
-      {state.kind === "loading" && <div className="pulse-loading"><span className="pulse-spin">◌</span> 查询中…</div>}
+      {state.kind === "loading" && (
+        <div aria-busy="true" aria-live="polite" style={{ display: "grid", gap: 8, paddingTop: 4 }}>
+          <div className="skeleton" style={{ height: 90, borderRadius: 6 }} />
+          <div className="skeleton line lg" />
+          <div className="skeleton line md" />
+        </div>
+      )}
       {state.kind === "err"     && <div className="pulse-err">⚠ {state.msg}</div>}
       {state.kind === "ok" && (
         <>

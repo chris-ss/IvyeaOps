@@ -71,7 +71,13 @@ export default function AsinCard({ asin, label, state, onRemove, onRefresh }: {
       {state.kind === "idle" && (
         <button className="asin-fetch-hint" onClick={onRefresh}>点击拉取数据 ↻</button>
       )}
-      {state.kind === "loading" && <div className="pulse-loading"><span className="pulse-spin">◌</span> 查询中…</div>}
+      {state.kind === "loading" && (
+        <div aria-busy="true" aria-live="polite" style={{ display: "grid", gap: 7, paddingTop: 4 }}>
+          <div className="skeleton" style={{ height: 56, borderRadius: 6 }} />
+          <div className="skeleton line lg" />
+          <div className="skeleton line sm" />
+        </div>
+      )}
       {state.kind === "err" && <div className="pulse-err">⚠ {state.msg}</div>}
       {state.kind === "ok" && pulse?.error && <div className="pulse-err">⚠ {pulse.error}</div>}
 

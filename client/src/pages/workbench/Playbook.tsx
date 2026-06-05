@@ -455,7 +455,7 @@ export default function Playbook() {
 
       {/* Report */}
       {(report || phase === "synthesizing") && (
-        <div className="market-report-wrap">
+        <div className="market-report-wrap wb-enter">
           <div className="market-report-toolbar">
             <span className="market-report-meta">
               {phase === "done" && elapsedS !== null
@@ -497,8 +497,21 @@ export default function Playbook() {
             )}
           </div>
           <div ref={reportRef} className="market-report-body">
-            <MarkdownReport text={report} />
-            {phase === "synthesizing" && <span className="cursor-blink">▋</span>}
+            {!report && phase === "synthesizing" ? (
+              <div aria-busy="true" aria-live="polite">
+                <div className="skeleton line lg" />
+                <div className="skeleton line md" />
+                <div className="skeleton line lg" />
+                <div className="skeleton line sm" />
+                <div className="skeleton line md" />
+                <div className="skeleton line lg" />
+              </div>
+            ) : (
+              <>
+                <MarkdownReport text={report} />
+                {phase === "synthesizing" && <span className="cursor-blink">▋</span>}
+              </>
+            )}
           </div>
         </div>
       )}

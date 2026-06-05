@@ -855,6 +855,56 @@ export async function brainChatSend(sessionId: string, content: string) {
   return data;
 }
 
+export type BrainChatStreamEvent =
+  | { type: "start"; user_message: BrainChatMessage | null; citations: BrainSearchItem[]; regenerated: boolean }
+  | { type: "token"; text: string }
+  | { type: "done"; assistant_message: BrainChatMessage; truncated?: boolean }
+  | { type: "error"; detail: string };
+
+/** Stream a hermes answer over SSE. Calls onEvent for each event; resolves when the stream ends. */
+export async function brainChatSendStream(
+  sessionId: string,
+  body: { content?: string; regenerate?: boolean; category?: string | null },
+  onEvent: (evt: BrainChatStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const resp = await fetch(`/api/brain/chat/sessions/${encodeURIComponent(sessionId)}/messages/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ content: body.content ?? "", regenerate: body.regenerate ?? false, category: body.category ?? null }),
+    signal,
+  });
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`HTTP ${resp.status}: ${text}`);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      try {
+        onEvent(JSON.parse(line.slice(5).trim()) as BrainChatStreamEvent);
+      } catch {
+        /* ignore malformed / heartbeat */
+      }
+    }
+  }
+}
+
+export async function brainChatDeleteMessage(messageId: string) {
+  const { data } = await api.delete<{ deleted: boolean; id: string }>(`/brain/chat/messages/${encodeURIComponent(messageId)}`);
+  return data;
+}
+
 // --- Token Usage ---
 
 export type TokenDayStat = {

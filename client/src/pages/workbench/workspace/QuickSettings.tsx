@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSession, updateSession, setSessionTools, setSessionPermissionMode, CLAUDE_TOOLS, PERMISSION_MODES, type AgentSession } from "../../../api/agents";
 import { refreshProjects, type Project, type ProjectSession } from "../../../api/projects";
+import SheetSelect from "../../../components/SheetSelect";
 
 type Props = {
   open: boolean;
@@ -164,16 +165,14 @@ export default function QuickSettings({
       {session?.source === "hub" && hubSession ? (
         <section className="qs-section">
           <div className="qs-section-title">权限模式</div>
-          <select
+          <SheetSelect
             className="qs-input"
             style={{ width: "100%", marginTop: 6 }}
             value={permissionMode}
-            onChange={(e) => void changePermissionMode(e.target.value)}
-          >
-            {PERMISSION_MODES.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
+            onChange={(v) => void changePermissionMode(v)}
+            title="权限模式"
+            options={PERMISSION_MODES.map((m) => ({ value: m.value, label: m.label }))}
+          />
         </section>
       ) : null}
 

@@ -43,10 +43,10 @@ export default function SkillHub() {
         </div>
       </div>
 
-      {tab === "tools" && <div className="skill-hub-tab"><SkillTools /></div>}
-      {tab === "create" && <div className="skill-hub-tab"><IdeaSkill /></div>}
+      {tab === "tools" && <div className="skill-hub-tab wb-enter"><SkillTools /></div>}
+      {tab === "create" && <div className="skill-hub-tab wb-enter"><IdeaSkill /></div>}
       {tab === "manage" && (
-        <div>
+        <div className="wb-enter">
           <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
             <button
               className="tbtn"

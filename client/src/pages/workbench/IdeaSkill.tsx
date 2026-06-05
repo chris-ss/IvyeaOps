@@ -10,6 +10,7 @@ import {
   type ArchitectClarification,
   type ArchitectValidation,
 } from "../../api/skill";
+import SheetSelect from "../../components/SheetSelect";
 
 interface GeneratedSkill {
   name: string;
@@ -234,18 +235,18 @@ export default function IdeaSkill() {
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
-        <select
+        <SheetSelect
           className="market-query-input"
           style={{ flex: "0 0 160px" }}
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
+          onChange={setCategory}
           disabled={busy}
-        >
-          <option value="">自动判断分类</option>
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+          title="选择分类"
+          options={[
+            { value: "", label: "自动判断分类" },
+            ...CATEGORIES.map((c) => ({ value: c, label: c })),
+          ]}
+        />
 
         {/* Mode toggle */}
         <div style={{ display: "flex", border: "1px solid var(--b)", borderRadius: 6, overflow: "hidden" }}>
@@ -305,14 +306,16 @@ export default function IdeaSkill() {
                 {c.why && <span style={{ color: "var(--t3)", marginLeft: 6 }}>（{c.why}）</span>}
               </label>
               {c.options?.length ? (
-                <select
+                <SheetSelect
                   className="market-query-input"
                   value={clarAnswers[c.question] || ""}
-                  onChange={(e) => setClarAnswers((a) => ({ ...a, [c.question]: e.target.value }))}
-                >
-                  <option value="">请选择…</option>
-                  {c.options.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                  onChange={(v) => setClarAnswers((a) => ({ ...a, [c.question]: v }))}
+                  title={c.question}
+                  options={[
+                    { value: "", label: "请选择…" },
+                    ...c.options.map((o) => ({ value: o, label: o })),
+                  ]}
+                />
               ) : (
                 <input
                   className="market-query-input"
@@ -362,10 +365,9 @@ export default function IdeaSkill() {
                 value={inp.name} onChange={(e) => patchInput(i, { name: e.target.value })} />
               <input className="market-query-input" style={{ flex: 1 }} placeholder="标签"
                 value={inp.label || ""} onChange={(e) => patchInput(i, { label: e.target.value })} />
-              <select className="market-query-input" style={{ flex: "0 0 110px" }}
-                value={inp.type || "text"} onChange={(e) => patchInput(i, { type: e.target.value })}>
-                {INPUT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <SheetSelect className="market-query-input" style={{ flex: "0 0 110px" }}
+                value={inp.type || "text"} onChange={(v) => patchInput(i, { type: v })}
+                title="参数类型" options={INPUT_TYPES} />
               <label style={{ fontSize: 10, color: "var(--t2)", display: "flex", alignItems: "center", gap: 3 }}>
                 <input type="checkbox" checked={!!inp.required}
                   onChange={(e) => patchInput(i, { required: e.target.checked })} />必填

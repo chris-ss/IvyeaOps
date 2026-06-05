@@ -218,7 +218,13 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
             </div>
           </div>
 
-          {loading && <div className="pulse-loading"><span className="pulse-spin">◌</span> 加载序列…</div>}
+          {loading && (
+            <div aria-busy="true" aria-live="polite" style={{ paddingTop: 6 }}>
+              <div className="skeleton" style={{ height: 140, borderRadius: 6, marginBottom: 10 }} />
+              <div className="skeleton line lg" />
+              <div className="skeleton line md" />
+            </div>
+          )}
 
           {!loading && series && (
             <>

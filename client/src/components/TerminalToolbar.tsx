@@ -39,9 +39,11 @@ function originOf(url: string): string {
 export default function TerminalToolbar({
   iframeRef,
   iframeUrl,
+  variant = "main",
 }: {
   iframeRef: RefObject<HTMLIFrameElement>;
   iframeUrl: string;
+  variant?: "main" | "bottom";
 }) {
   const IFRAME_ORIGIN = useMemo(() => originOf(iframeUrl), [iframeUrl]);
   const [visible, setVisible] = useState<boolean>(() => isTouchViewport());
@@ -75,14 +77,14 @@ export default function TerminalToolbar({
       if (!msg || typeof msg !== "object") return;
       if (msg.type === "ready") setWsReady(true);
       else if (msg.type === "ws-closed") setWsReady(false);
-      else if (msg.type === "bridge-loaded") {
+      else if (msg.type === "bridge-loaded" && variant === "main") {
         // Re-enter selection mode if the user had it on and the iframe reloaded.
         post({ type: "select-mode", on: selectMode });
       }
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [selectMode]);
+  }, [selectMode, variant]);
 
   function post(msg: Msg) {
     const win = iframeRef.current?.contentWindow;
@@ -116,15 +118,6 @@ export default function TerminalToolbar({
     post({ type: "key", bytes: String.fromCharCode(code) });
   }
 
-  async function doPaste() {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) post({ type: "key", bytes: text });
-    } catch {
-      alert("浏览器拒绝了剪贴板读取权限");
-    }
-  }
-
   function toggleSelectMode() {
     const next = !selectMode;
     setSelectMode(next);
@@ -150,27 +143,23 @@ export default function TerminalToolbar({
   );
 
   return (
-    <div className="tt-bar" data-ws-ready={wsReady ? "1" : "0"}>
-      <div className="tt-row">
-        {keyBtn("Esc", () => sendKey("\x1b"))}
-        {keyBtn("Tab", () => sendKey("\t"))}
-        {keyBtn("Ctrl", () => setStickyCtrl((v) => !v), stickyCtrl)}
-        {keyBtn("Alt", () => setStickyAlt((v) => !v), stickyAlt)}
-        {keyBtn("←", () => sendKey("\x1b[D"))}
-        {keyBtn("↓", () => sendKey("\x1b[B"))}
-        {keyBtn("↑", () => sendKey("\x1b[A"))}
-        {keyBtn("→", () => sendKey("\x1b[C"))}
-      </div>
-      <div className="tt-row">
-        {keyBtn("^C", () => sendCtrlLetter("c"))}
-        {keyBtn("^D", () => sendCtrlLetter("d"))}
-        {keyBtn("^Z", () => sendCtrlLetter("z"))}
-        {keyBtn("^L", () => sendCtrlLetter("l"))}
-        {keyBtn("^R", () => sendCtrlLetter("r"))}
-        {keyBtn("📋", () => doPaste())}
-        {keyBtn("🔍", toggleSelectMode, selectMode)}
-        {keyBtn("✕", () => setVisible(false))}
-      </div>
+    <div className={"tt-bar" + (variant === "bottom" ? " tt-bar-bottom" : "")} data-ws-ready={wsReady ? "1" : "0"}>
+      {variant === "bottom" ? (
+        <div className="tt-row">
+          {keyBtn("Tab", () => sendKey("\t"))}
+          {keyBtn("Enter", () => sendKey("\r"))}
+        </div>
+      ) : (
+        <div className="tt-row">
+          {keyBtn("Esc", () => sendKey("\x1b"))}
+          {keyBtn("←", () => sendKey("\x1b[D"))}
+          {keyBtn("↓", () => sendKey("\x1b[B"))}
+          {keyBtn("↑", () => sendKey("\x1b[A"))}
+          {keyBtn("→", () => sendKey("\x1b[C"))}
+          {keyBtn("^C", () => sendCtrlLetter("c"))}
+          {keyBtn("🔍", toggleSelectMode, selectMode)}
+        </div>
+      )}
       <style>{`
         .tt-bar{
           display:flex;flex-direction:column;gap:3px;
@@ -178,6 +167,7 @@ export default function TerminalToolbar({
           background:var(--bg1);border-bottom:1px solid var(--b);
           flex-shrink:0;
         }
+        .tt-bar-bottom{border-bottom:none;border-top:1px solid var(--b)}
         .tt-row{display:flex;gap:3px;width:100%}
         .tt-key{
           flex:1 1 0;min-width:0;height:34px;padding:0 2px;

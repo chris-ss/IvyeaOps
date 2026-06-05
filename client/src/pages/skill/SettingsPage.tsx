@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getSettings, updateSettings, StudioSettings } from "../../api/skill";
+import SheetSelect from "../../components/SheetSelect";
 
 /**
  * Settings are stored on the server (used by the snapshot prune job and trash
@@ -123,14 +124,16 @@ export default function SettingsPage() {
 
         <div className="sks-form-row">
           <label>主题</label>
-          <select
+          <SheetSelect
             className="sks-input"
             value={draft.theme}
-            onChange={(e) => update("theme", e.target.value as "dark" | "light")}
-          >
-            <option value="dark">暗色（当前唯一已实装）</option>
-            <option value="light">明色（保留字段，尚未样式化）</option>
-          </select>
+            onChange={(v) => update("theme", v as "dark" | "light")}
+            title="主题"
+            options={[
+              { value: "dark", label: "暗色（当前唯一已实装）" },
+              { value: "light", label: "明色（保留字段，尚未样式化）" },
+            ]}
+          />
         </div>
       </section>
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { useSearchParams } from "react-router-dom";
 import { listSkills, SkillMeta } from "../../api/skill";
+import SheetSelect from "../../components/SheetSelect";
 
 // SkillEditor brings in CodeMirror (~240KB gzip) — keep it off the list page.
 const SkillEditor = lazy(() => import("./SkillEditor"));
@@ -80,22 +81,22 @@ export default function SkillBrowse() {
           value={qInput}
           onChange={(e) => setQInput(e.target.value)}
         />
-        <select
+        <SheetSelect
           className="sks-input"
           style={{ flex: "0 0 auto", minWidth: 140 }}
           value={category}
-          onChange={(e) => {
+          title="选择分类"
+          onChange={(v) => {
             const next = new URLSearchParams(params);
-            if (e.target.value) next.set("category", e.target.value);
+            if (v) next.set("category", v);
             else next.delete("category");
             setParams(next, { replace: true });
           }}
-        >
-          <option value="">全部分类</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>{c || "(顶层)"}</option>
-          ))}
-        </select>
+          options={[
+            { value: "", label: "全部分类" },
+            ...categories.map((c) => ({ value: c, label: c || "(顶层)" })),
+          ]}
+        />
         <span style={{ color: "var(--t3)", fontSize: 10, marginLeft: "auto" }}>
           {loading ? "加载中…" : `共 ${skills.length} 项`}
         </span>
