@@ -15,7 +15,9 @@ const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   codex: 'gpt-5.4',
   gemini: 'gemini-3.1-pro-preview',
   opencode: 'anthropic/claude-sonnet-4-5',
-  hermes: 'gpt-5.4',
+  // Placeholder only — the real hermes default comes from /api/providers/hermes/models
+  // (config.yaml primary) and self-heals once the catalog loads.
+  hermes: 'default',
   agy: 'default',
 };
 

@@ -75,13 +75,39 @@ def _agent_models(provider: str) -> Optional[dict]:
 
 # Real model catalogs for the providers we actually drive (mirrors ops
 # agent_registry static_models). Others fall back to a single "default".
+# NOTE: hermes is deliberately NOT listed here — its picker is served live
+# from ~/.hermes/config.yaml via _hermes_catalog() (see the models endpoint).
 _PROVIDER_MODELS = {
     "claude": _CLAUDE_MODELS,
-    "hermes": _opts(["default", "gpt-5.5", "gpt-5.4", "anthropic/claude-sonnet-4.6",
-                     "anthropic/claude-opus-4.7", "anthropic/deepseek-3.2",
-                     "anthropic/qwen3-coder-next", "mimo-v2.5-pro", "mimo-v2.5"]),
     "codex": _opts(["gpt-5.5", "gpt-5", "gpt-5-codex", "o3", "o4-mini", "codex-mini"]),
 }
+
+
+def _hermes_catalog() -> dict:
+    """Honest hermes model list: ONLY the models ~/.hermes/config.yaml actually
+    uses (primary + fallbacks).
+
+    The chat picker cannot override hermes's model — hermes runs one-shot
+    without ``-m`` (chat_skip_model) and uses its persisted config, so listing
+    anything else would be misleading. To change or add models, edit the Hermes
+    provider/model in Hub Settings (枢纽设置), which writes config.yaml.
+    """
+    try:
+        from app.services.agent_registry import _read_hermes_models
+        configured = _read_hermes_models()
+    except Exception:
+        configured = []
+    if not configured:
+        return _DEFAULT_MODELS
+    options = []
+    for i, m in enumerate(configured):
+        if i == 0:
+            options.append({"value": m, "label": m,
+                            "description": "config.yaml 主模型 · 在枢纽设置中修改"})
+        else:
+            options.append({"value": m, "label": f"{m}（兜底）",
+                            "description": "config.yaml 兜底模型 · 主模型失败时自动启用"})
+    return {"OPTIONS": options, "DEFAULT": configured[0]}
 
 
 def _ok(data) -> dict:
@@ -144,6 +170,21 @@ async def auth_status(provider: str) -> dict:
                     "email": creds["email"] if not creds["authenticated"] else (creds["email"] or "Authenticated"),
                     "method": creds.get("method"),
                     "error": None if creds["authenticated"] else creds.get("error")})
+    if provider == "hermes":
+        # Hermes authenticates via API keys in ~/.hermes/config.yaml + .env — there
+        # is no interactive login, and the binary lives at ~/.local/bin (often not
+        # on the service PATH). So judge "connected" by whether config.yaml has a
+        # usable model, NOT by binary detection — and report it as key-based so the
+        # account panel hides the spurious "Login" button (mirrors claude's api_key).
+        try:
+            from app.services.agent_registry import _read_hermes_models
+            has_model = bool(_read_hermes_models())
+        except Exception:
+            has_model = False
+        return _ok({"installed": True, "provider": "hermes",
+                    "authenticated": has_model, "email": "API Key (config.yaml)",
+                    "method": "api_key",
+                    "error": None if has_model else "Hermes 未配置模型（在枢纽设置中配置）"})
     # Best-effort for other providers: installed CLI is treated as usable.
     return _ok({"installed": installed, "provider": provider, "authenticated": installed,
                 "email": None, "method": None,
@@ -153,9 +194,14 @@ async def auth_status(provider: str) -> dict:
 @router.get("/{provider}/models")
 async def models(provider: str, bypassCache: bool = False) -> dict:
     provider = provider.strip().lower()
-    # Prefer the real registry models; fall back to claude's rich catalog or a
-    # static list, then a bare default.
-    catalog = _agent_models(provider) or _PROVIDER_MODELS.get(provider) or _DEFAULT_MODELS
+    # Hermes is special: its effective model lives in ~/.hermes/config.yaml and
+    # the picker can't override it, so serve the live configured models only.
+    if provider == "hermes":
+        catalog = _hermes_catalog()
+    else:
+        # Prefer the real registry models; fall back to claude's rich catalog or
+        # a static list, then a bare default.
+        catalog = _agent_models(provider) or _PROVIDER_MODELS.get(provider) or _DEFAULT_MODELS
     # The frontend discards the catalog unless `cache` is a truthy
     # ProviderModelsCacheInfo {updatedAt, expiresAt, source} — so always send one.
     now = datetime.now(timezone.utc)

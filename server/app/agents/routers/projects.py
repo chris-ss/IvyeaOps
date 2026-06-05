@@ -35,7 +35,7 @@ _FORBIDDEN = {
 
 
 def _bucket_sessions(rows) -> dict:
-    buckets = {"claude": [], "cursor": [], "codex": [], "gemini": [], "opencode": []}
+    buckets = {"claude": [], "cursor": [], "codex": [], "gemini": [], "opencode": [], "hermes": [], "agy": []}
     for row in rows:
         provider = row["provider"]
         if provider not in buckets:
@@ -85,6 +85,8 @@ def _project_item(conn, row, *, include_archived: bool) -> dict:
         "codexSessions": buckets["codex"],
         "geminiSessions": buckets["gemini"],
         "opencodeSessions": buckets["opencode"],
+        "hermesSessions": buckets["hermes"],
+        "agySessions": buckets["agy"],
         "sessionMeta": {"hasMore": has_more, "total": total},
     }
 
@@ -138,6 +140,8 @@ async def project_sessions(
         "codexSessions": buckets["codex"],
         "geminiSessions": buckets["gemini"],
         "opencodeSessions": buckets["opencode"],
+        "hermesSessions": buckets["hermes"],
+        "agySessions": buckets["agy"],
         "sessionMeta": {"hasMore": off + len(srows) < total, "total": total},
     }
 
@@ -190,7 +194,8 @@ async def create_project(body: CreateProjectBody) -> dict:
             "displayName": _display_name(row), "customName": row["custom_project_name"],
             "isArchived": bool(row["isArchived"]), "isStarred": bool(row["isStarred"]),
             "sessions": [], "cursorSessions": [], "codexSessions": [], "geminiSessions": [],
-            "opencodeSessions": [], "sessionMeta": {"hasMore": False, "total": 0},
+            "opencodeSessions": [], "hermesSessions": [], "agySessions": [],
+            "sessionMeta": {"hasMore": False, "total": 0},
         }
     return {
         "success": True, "project": item,

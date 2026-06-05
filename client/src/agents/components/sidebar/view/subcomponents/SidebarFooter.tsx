@@ -1,4 +1,4 @@
-import { ArrowUpCircle, Settings } from 'lucide-react';
+import { ArrowUpCircle } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import type { ReleaseInfo } from '../../../../types/sharedTypes';
 
@@ -8,7 +8,6 @@ type SidebarFooterProps = {
   latestVersion: string | null;
   currentVersion: string;
   onShowVersionModal: () => void;
-  onShowSettings: () => void;
   t: TFunction;
 };
 
@@ -18,7 +17,6 @@ export default function SidebarFooter({
   latestVersion,
   currentVersion,
   onShowVersionModal,
-  onShowSettings,
   t,
 }: SidebarFooterProps) {
   return (
@@ -71,17 +69,6 @@ export default function SidebarFooter({
         </>
       )}
 
-      {/* Settings entry */}
-      <div className="nav-divider" />
-      <div className="px-2 py-1.5">
-        <button
-          className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-          onClick={onShowSettings}
-        >
-          <Settings className="h-4 w-4 transition-colors group-hover:text-foreground" />
-          <span>{t('actions.settings', 'Settings')}</span>
-        </button>
-      </div>
     </div>
   );
 }

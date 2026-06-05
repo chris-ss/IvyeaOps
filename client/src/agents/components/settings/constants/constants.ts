@@ -2,7 +2,6 @@ import type { ComponentType } from 'react';
 import {
   Bell,
   Bot,
-  GitBranch,
   Info,
   KeyRound,
   ListChecks,
@@ -28,7 +27,6 @@ export type SettingsMainTabMeta = {
 
 export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
   { id: 'agents', label: 'Agents', keywords: 'agents subagents claude code', icon: Bot },
-  { id: 'git', label: 'Git', keywords: 'git github commits', icon: GitBranch },
   { id: 'plugins', label: 'Plugins', keywords: 'plugins extensions integrations', icon: Plug },
 ];
 

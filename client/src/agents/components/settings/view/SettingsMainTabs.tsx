@@ -1,4 +1,4 @@
-import { GitBranch, Info, Key, Puzzle } from 'lucide-react';
+import { Info, Key, Puzzle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { SettingsMainTab } from '../types/types';
 
@@ -11,12 +11,11 @@ type MainTabConfig = {
   id: SettingsMainTab;
   labelKey?: string;
   label?: string;
-  icon?: typeof GitBranch;
+  icon?: typeof Puzzle;
 };
 
 const TAB_CONFIG: MainTabConfig[] = [
   { id: 'agents', labelKey: 'mainTabs.agents' },
-  { id: 'git', labelKey: 'mainTabs.git', icon: GitBranch },
   { id: 'plugins', labelKey: 'mainTabs.plugins', icon: Puzzle },
 ];
 

@@ -34,7 +34,7 @@ type CodexSettingsStorage = {
 
 type ActiveLoginProvider = AgentProvider | '';
 
-const KNOWN_MAIN_TABS: SettingsMainTab[] = ['agents', 'git', 'plugins'];
+const KNOWN_MAIN_TABS: SettingsMainTab[] = ['agents', 'plugins'];
 
 const normalizeMainTab = (tab: string): SettingsMainTab => {
   if (tab === 'tools') return 'agents';

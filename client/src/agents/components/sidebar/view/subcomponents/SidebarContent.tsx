@@ -520,7 +520,6 @@ export default function SidebarContent({
         latestVersion={latestVersion}
         currentVersion={currentVersion}
         onShowVersionModal={onShowVersionModal}
-        onShowSettings={onShowSettings}
         t={t}
       />
     </div>

@@ -4,7 +4,6 @@ import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
 import { Button } from '../../../shared/view/ui';
 import SettingsSidebar from '../view/SettingsSidebar';
 import AgentsSettingsTab from '../view/tabs/agents-settings/AgentsSettingsTab';
-import GitSettingsTab from '../view/tabs/git-settings/GitSettingsTab';
 import PluginSettingsTab from '../../plugins/view/PluginSettingsTab';
 import { useSettingsController } from '../hooks/useSettingsController';
 import type { SettingsProps } from '../types/types';
@@ -83,7 +82,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                   projects={projects}
                 />
               )}
-              {activeTab === 'git' && <GitSettingsTab />}
               {activeTab === 'plugins' && <PluginSettingsTab />}
             </div>
           </main>

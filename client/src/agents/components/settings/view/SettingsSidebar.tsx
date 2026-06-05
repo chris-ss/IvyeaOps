@@ -1,4 +1,4 @@
-import { Bot, GitBranch, Puzzle } from 'lucide-react';
+import { Bot, Puzzle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/utils';
 import { PillBar, Pill } from '../../../shared/view/ui';
@@ -17,7 +17,6 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'agents', labelKey: 'mainTabs.agents', icon: Bot },
-  { id: 'git', labelKey: 'mainTabs.git', icon: GitBranch },
   { id: 'plugins', labelKey: 'mainTabs.plugins', icon: Puzzle },
 ];
 

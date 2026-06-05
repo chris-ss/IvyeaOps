@@ -145,15 +145,15 @@ function ThinkingModeSelector({ selectedMode, onModeChange, onClose, className =
 
           setIsOpen(true);
         }}
-        className={`flex h-10 w-10 items-center justify-center rounded-full transition-all duration-200 sm:h-10 sm:w-10 ${selectedMode === 'none'
-            ? 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600'
-            : 'bg-blue-100 hover:bg-blue-200 dark:bg-blue-900 dark:hover:bg-blue-800'
+        className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 ${selectedMode === 'none'
+            ? 'border-border/60 bg-muted/50 hover:bg-muted'
+            : 'border-blue-300/60 bg-blue-50 hover:bg-blue-100 dark:border-blue-600/40 dark:bg-blue-900/15 dark:hover:bg-blue-900/25'
           }`}
         title={t('thinkingMode.buttonTitle', { mode: currentMode.name })}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
       >
-        <IconComponent className={`h-5 w-5 ${currentMode.color}`} />
+        <IconComponent className={`h-4 w-4 ${currentMode.color}`} />
       </button>
 
       {isOpen && typeof document !== 'undefined' && createPortal(

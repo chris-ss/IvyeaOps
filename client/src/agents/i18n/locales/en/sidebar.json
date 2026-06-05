@@ -114,6 +114,7 @@
   "search": {
     "modeProjects": "Projects",
     "modeConversations": "Conversations",
+    "archiveOnlyTooltip": "Archive only",
     "conversationsPlaceholder": "Search in conversations...",
     "searching": "Searching...",
     "noResults": "No results found",

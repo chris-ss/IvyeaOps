@@ -309,10 +309,11 @@ export default function ChatComposer({
         </PromptInputBody>
 
         <PromptInputFooter>
-          <PromptInputTools>
+          <PromptInputTools className="gap-1.5">
             <PromptInputButton
               tooltip={{ content: t('input.attachImages') }}
               onClick={openImagePicker}
+              className="h-9 w-9 rounded-lg"
             >
               <ImageIcon />
             </PromptInputButton>
@@ -320,7 +321,7 @@ export default function ChatComposer({
             <button
               type="button"
               onClick={onModeSwitch}
-              className={`rounded-lg border p-2 text-xs font-medium transition-all duration-200 sm:px-2.5 sm:py-1 ${
+              className={`inline-flex h-9 items-center rounded-lg border px-2.5 text-xs font-medium transition-all duration-200 ${
                 permissionMode === 'default'
                   ? 'border-border/60 bg-muted/50 text-muted-foreground hover:bg-muted'
                   : permissionMode === 'acceptEdits'
@@ -366,7 +367,7 @@ export default function ChatComposer({
             <PromptInputButton
               tooltip={{ content: t('input.showAllCommands') }}
               onClick={onToggleCommandMenu}
-              className="relative"
+              className="relative h-9 w-9 rounded-lg"
             >
               <MessageSquareIcon />
               {slashCommandsCount > 0 && (
