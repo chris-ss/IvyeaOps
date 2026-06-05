@@ -121,6 +121,9 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 打开 **http://127.0.0.1:8001**。
 
 > **注意**：Windows 不支持 PTY 多终端会话，其余功能正常。
+>
+> 📖 从零开始的 Windows 图文步骤（含环境安装与常见问题排查）见
+> [`docs/windows-install.md`](docs/windows-install.md)，适合直接转发给非开发的同事。
 
 ### 环境要求
 
