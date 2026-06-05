@@ -11,7 +11,7 @@
 SERVER_NAME=ops.example.com
 
 # Where the repo lives on disk.
-INSTALL_DIR=/root/ivyea-ops
+INSTALL_DIR=/opt/ivyeaops
 
 # OS user that runs the FastAPI process.
 IVYEA_OPS_USER=root

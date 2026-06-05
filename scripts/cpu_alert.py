@@ -37,7 +37,7 @@ fallback is purely a convenience for installs that co-host Hermes and
 can be ignored everywhere else.
 
 Cron entry (one minute interval):
-  * * * * * /usr/bin/python3 /root/ivyea-ops/scripts/cpu_alert.py
+  * * * * * /usr/bin/python3 /opt/ivyeaops/scripts/cpu_alert.py
 """
 from __future__ import annotations
 
