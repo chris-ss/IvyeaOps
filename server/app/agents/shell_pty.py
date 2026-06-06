@@ -145,9 +145,24 @@ async def _safe_send(ws, message: dict) -> None:
 def _proc_env() -> dict:
     env = os.environ.copy()
     env.update({"TERM": "xterm-256color", "COLORTERM": "truecolor", "FORCE_COLOR": "3"})
-    hermes_bin = os.path.expanduser("~/.hermes/node/bin")
-    if hermes_bin not in env.get("PATH", ""):
-        env["PATH"] = hermes_bin + ":" + env.get("PATH", "/usr/bin:/bin")
+    # systemd hands us a thin PATH, so make every agent CLI discoverable:
+    #   ~/.hermes/node/bin                 -> claude / codex (npm-installed)
+    #   ~/.local/bin                       -> hermes symlink
+    #   ~/.hermes/hermes-agent/venv/bin    -> hermes (real venv entrypoint)
+    #   ~/.bun/bin                         -> gbrain / bun-based CLIs
+    home = os.path.expanduser("~")
+    extra_dirs = [
+        os.path.join(home, ".hermes", "node", "bin"),
+        os.path.join(home, ".local", "bin"),
+        os.path.join(home, ".hermes", "hermes-agent", "venv", "bin"),
+        os.path.join(home, ".bun", "bin"),
+        "/usr/local/bin",
+    ]
+    cur = env.get("PATH", "/usr/bin:/bin")
+    cur_parts = cur.split(os.pathsep)
+    missing = [d for d in extra_dirs if d not in cur_parts]
+    if missing:
+        env["PATH"] = os.pathsep.join(missing + [cur])
     env.setdefault("IS_SANDBOX", "1")  # so `claude` runs unattended as root
     return env
 
@@ -360,7 +375,8 @@ class ShellConnection:
         if is_plain:
             welcome = f"\x1b[36mStarting terminal in: {project_path}\x1b[0m\r\n"
         else:
-            names = {"cursor": "Cursor", "codex": "Codex", "gemini": "Gemini", "opencode": "OpenCode"}
+            names = {"cursor": "Cursor", "codex": "Codex", "gemini": "Gemini",
+                     "opencode": "OpenCode", "hermes": "Hermes", "agy": "Antigravity"}
             pname = names.get(provider, "Claude")
             welcome = (f"\x1b[36mResuming {pname} session {session_id} in: {project_path}\x1b[0m\r\n"
                        if has_session else f"\x1b[36mStarting new {pname} session in: {project_path}\x1b[0m\r\n")

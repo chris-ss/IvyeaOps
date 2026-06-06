@@ -254,6 +254,11 @@ export function useChatRealtimeHandlers({
           can_interrupt: true,
         });
         onNavigateToSession?.(newSessionId);
+        // Surface the brand-new session in the sidebar without a manual reload.
+        // Streaming providers (claude/codex) write the session file early, so a
+        // short delay is enough; providers that only flush on exit (hermes) are
+        // also covered by the refresh in the `complete` handler below.
+        setTimeout(() => { void paletteOps.refreshProjects(); }, 1200);
         break;
       }
 
@@ -309,6 +314,10 @@ export function useChatRealtimeHandlers({
           break;
         }
 
+        // No id swap (e.g. hermes, which only flushes its session file on exit):
+        // still refresh so a brand-new session — and the finished turn's updated
+        // title/preview — appear in the sidebar without a manual reload.
+        setTimeout(() => { void paletteOps.refreshProjects(); }, 500);
         break;
       }
 

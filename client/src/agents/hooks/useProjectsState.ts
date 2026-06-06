@@ -62,7 +62,9 @@ const projectsHaveChanges = (
       serialize(nextProject.cursorSessions) !== serialize(prevProject.cursorSessions) ||
       serialize(nextProject.codexSessions) !== serialize(prevProject.codexSessions) ||
       serialize(nextProject.geminiSessions) !== serialize(prevProject.geminiSessions) ||
-      serialize(nextProject.opencodeSessions) !== serialize(prevProject.opencodeSessions)
+      serialize(nextProject.opencodeSessions) !== serialize(prevProject.opencodeSessions) ||
+      serialize(nextProject.hermesSessions) !== serialize(prevProject.hermesSessions) ||
+      serialize(nextProject.agySessions) !== serialize(prevProject.agySessions)
     );
   });
 };
@@ -100,6 +102,8 @@ const getProjectSessions = (project: Project): ProjectSession[] => {
     ...(project.cursorSessions ?? []),
     ...(project.geminiSessions ?? []),
     ...(project.opencodeSessions ?? []),
+    ...(project.hermesSessions ?? []),
+    ...(project.agySessions ?? []),
   ];
 };
 
@@ -148,6 +152,8 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
       codexSessions: mergeSessionProviderLists(incomingProject.codexSessions ?? [], previousProject.codexSessions ?? []),
       geminiSessions: mergeSessionProviderLists(incomingProject.geminiSessions ?? [], previousProject.geminiSessions ?? []),
       opencodeSessions: mergeSessionProviderLists(incomingProject.opencodeSessions ?? [], previousProject.opencodeSessions ?? []),
+      hermesSessions: mergeSessionProviderLists(incomingProject.hermesSessions ?? [], previousProject.hermesSessions ?? []),
+      agySessions: mergeSessionProviderLists(incomingProject.agySessions ?? [], previousProject.agySessions ?? []),
     };
 
     const totalSessions = Number(incomingProject.sessionMeta?.total ?? previousLoadedCount);
@@ -163,7 +169,7 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
 
 const mergeProjectSessionPage = (
   existingProject: Project,
-  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'opencodeSessions' | 'sessionMeta'>,
+  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'opencodeSessions' | 'hermesSessions' | 'agySessions' | 'sessionMeta'>,
 ): Project => {
   const mergedProject: Project = {
     ...existingProject,
@@ -172,6 +178,8 @@ const mergeProjectSessionPage = (
     codexSessions: mergeSessionProviderLists(existingProject.codexSessions ?? [], sessionsPage.codexSessions ?? []),
     geminiSessions: mergeSessionProviderLists(existingProject.geminiSessions ?? [], sessionsPage.geminiSessions ?? []),
     opencodeSessions: mergeSessionProviderLists(existingProject.opencodeSessions ?? [], sessionsPage.opencodeSessions ?? []),
+    hermesSessions: mergeSessionProviderLists(existingProject.hermesSessions ?? [], sessionsPage.hermesSessions ?? []),
+    agySessions: mergeSessionProviderLists(existingProject.agySessions ?? [], sessionsPage.agySessions ?? []),
   };
 
   const totalSessions = Number(sessionsPage.sessionMeta?.total ?? existingProject.sessionMeta?.total ?? 0);
@@ -574,6 +582,36 @@ export function useProjectsState({
         }
         return;
       }
+
+      const hermesSession = project.hermesSessions?.find((session) => session.id === sessionId);
+      if (hermesSession) {
+        const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
+        const shouldUpdateSession =
+          selectedSession?.id !== sessionId || selectedSession.__provider !== 'hermes';
+
+        if (shouldUpdateProject) {
+          setSelectedProject(project);
+        }
+        if (shouldUpdateSession) {
+          setSelectedSession({ ...hermesSession, __provider: 'hermes' });
+        }
+        return;
+      }
+
+      const agySession = project.agySessions?.find((session) => session.id === sessionId);
+      if (agySession) {
+        const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
+        const shouldUpdateSession =
+          selectedSession?.id !== sessionId || selectedSession.__provider !== 'agy';
+
+        if (shouldUpdateProject) {
+          setSelectedProject(project);
+        }
+        if (shouldUpdateSession) {
+          setSelectedSession({ ...agySession, __provider: 'agy' });
+        }
+        return;
+      }
     }
 
     // Session id is in the URL but not yet present on any project payload (common
@@ -604,6 +642,10 @@ export function useProjectsState({
             ? 'gemini'
             : providerFromStorage === 'opencode'
               ? 'opencode'
+              : providerFromStorage === 'hermes'
+                ? 'hermes'
+                : providerFromStorage === 'agy'
+                  ? 'agy'
             : 'claude';
 
     setSelectedSession({
@@ -687,6 +729,8 @@ export function useProjectsState({
           const codexSessions = project.codexSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const geminiSessions = project.geminiSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const opencodeSessions = project.opencodeSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
+          const hermesSessions = project.hermesSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
+          const agySessions = project.agySessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
 
           const removedFromProject = (
             sessions.length !== (project.sessions?.length ?? 0)
@@ -694,6 +738,8 @@ export function useProjectsState({
             || codexSessions.length !== (project.codexSessions?.length ?? 0)
             || geminiSessions.length !== (project.geminiSessions?.length ?? 0)
             || opencodeSessions.length !== (project.opencodeSessions?.length ?? 0)
+            || hermesSessions.length !== (project.hermesSessions?.length ?? 0)
+            || agySessions.length !== (project.agySessions?.length ?? 0)
           );
 
           if (!removedFromProject) {
@@ -707,6 +753,8 @@ export function useProjectsState({
             codexSessions,
             geminiSessions,
             opencodeSessions,
+            hermesSessions,
+            agySessions,
           };
 
           const totalSessions = Math.max(0, Number(project.sessionMeta?.total ?? 0) - 1);
@@ -800,7 +848,7 @@ export function useProjectsState({
       throw new Error(message);
     }
 
-    const sessionsPage = (await response.json()) as Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'opencodeSessions' | 'sessionMeta'>;
+    const sessionsPage = (await response.json()) as Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'opencodeSessions' | 'hermesSessions' | 'agySessions' | 'sessionMeta'>;
 
     let mergedProjectForSelection: Project | null = null;
     setProjects((previousProjects) =>
