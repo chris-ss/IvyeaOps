@@ -1,6 +1,15 @@
 /* IvyeaOps workbench theme — dark terminal style. Ported from the design mock. */
 
 *{margin:0;padding:0;box-sizing:border-box}
+/* Slim scrollbars by default — the native (~15px) bar is too chunky for this
+   theme. Containers with their own ::-webkit-scrollbar rule (higher specificity)
+   keep their custom size. NB: do NOT set scrollbar-width/scrollbar-color here —
+   in Chrome that would disable ::-webkit-scrollbar sizing/colour below. */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--b2);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--t3)}
+::-webkit-scrollbar-corner{background:transparent}
 /* ── Terminal Green (default dark) ── */
 :root{
   --bg:rgba(12,12,12,.72);--bg1:rgba(17,17,17,.76);--bg2:rgba(22,22,22,.72);--bg3:rgba(28,28,28,.68);
@@ -2115,7 +2124,9 @@ body::after{
 .home-alerts{display:flex;align-items:center;gap:8px;flex-shrink:0;padding:0 20px 8px;min-width:0}
 .home-alerts-empty{font-size:11px;color:var(--t3);line-height:1.6;padding-top:2px;padding-bottom:10px}
 .home-alerts-icon{flex-shrink:0;color:var(--amber);font-size:13px}
-.home-alerts-track{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:thin}
+/* No scrollbar-width here: it makes Chrome ignore the slim ::-webkit-scrollbar
+   (the global 6px rule) and fall back to the chunkier native "thin" preset. */
+.home-alerts-track{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
 .home-alert-chip{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 9px;border-radius:20px;border:1px solid var(--b);background:var(--bg2);color:var(--t2);font-family:var(--font);font-size:11px;cursor:pointer;white-space:nowrap;transition:all .12s}
 .home-alert-chip:hover{border-color:var(--b2);color:var(--t)}
 .home-alert-chip.up .home-alert-dir{color:var(--amber)}
