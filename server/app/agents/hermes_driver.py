@@ -109,6 +109,10 @@ async def query_hermes(command: str, options: dict, writer) -> None:
     argv = [_hermes_bin(), "chat", "-q", command or "", "-Q", "--yolo"]
     if model and str(model) not in ("default", "auto"):
         argv += ["-m", str(model)]
+    # Resume the real hermes session so multi-turn chats stay in one session
+    # (the agents UI passes back the real id captured on the previous turn).
+    if requested:
+        argv += ["--resume", str(requested)]
 
     logger.info("hermes chat start session=%s model=%s cwd=%s", session_id, model, cwd)
     try:
@@ -164,11 +168,17 @@ async def query_hermes(command: str, options: dict, writer) -> None:
     if aborted:
         return
 
-    # `-Q` still prints a trailing "session_id: <id>" line; drop it.
-    text = "\n".join(
-        ln for ln in "".join(chunks).splitlines()
-        if not ln.strip().startswith("session_id:")
-    ).strip()
+    # `-Q` prints a trailing "session_id: <real_id>" line: capture it (hermes
+    # mints its own id; ours was a provisional handle) and drop it from the reply.
+    real_id = None
+    body_lines = []
+    for ln in "".join(chunks).splitlines():
+        if ln.strip().startswith("session_id:"):
+            real_id = ln.split(":", 1)[1].strip() or real_id
+            continue
+        body_lines.append(ln)
+    text = "\n".join(body_lines).strip()
+    final_id = real_id or session_id
 
     if timed_out:
         await writer.send(create_normalized_message(
@@ -185,9 +195,46 @@ async def query_hermes(command: str, options: dict, writer) -> None:
         await writer.send(create_normalized_message(
             kind="text", role="assistant", content=text, sessionId=session_id, provider=PROVIDER))
 
+    # Index this session into the projects DB *now*, under hermes' REAL id (which
+    # is also what the full sync uses) so it appears in the sidebar immediately
+    # without waiting for the throttled (60s) full sync — and without creating a
+    # duplicate phantom row under our provisional id.
+    if text and not _looks_like_error(text):
+        try:
+            from app.agents import synchronizer
+            synchronizer.index_hermes_session(final_id, command if not requested else None)
+        except Exception:
+            logger.exception("index_hermes_session after turn failed")
+
+    # If hermes minted a different id than our provisional handle, tell the client
+    # to swap (replaceSessionId) — same contract claude/codex use — so the sidebar
+    # entry and the open chat both point at the real, resumable session id.
     await writer.send(create_normalized_message(
         kind="complete", exitCode=proc.returncode or 0,
-        isNewSession=bool(not requested and command), sessionId=session_id, provider=PROVIDER))
+        isNewSession=bool(not requested and command), sessionId=session_id,
+        actualSessionId=(final_id if final_id != session_id else None),
+        provider=PROVIDER))
+
+
+async def purge_session(session_id: str) -> bool:
+    """Delete a session from hermes' SQLite store so the next sync can't
+    resurrect it after the user deletes it in the UI. Best-effort."""
+    safe = "".join(c for c in str(session_id) if c.isalnum() or c in "_-")
+    if not safe:
+        return False
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _hermes_bin(), "sessions", "delete", safe, "--yes",
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT, env=_proc_env(), **no_window_kwargs())
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        if proc.returncode != 0:
+            logger.warning("hermes sessions delete rc=%s: %s", proc.returncode, (out or b"")[:200])
+            return False
+        return True
+    except Exception:
+        logger.exception("hermes purge_session failed for %s", session_id)
+        return False
 
 
 def _export_messages(safe_id: str) -> list:

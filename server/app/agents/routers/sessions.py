@@ -127,6 +127,14 @@ async def delete_session(
                 removed = False
             except OSError:
                 removed = False
+        # Hermes sessions live in hermes' own SQLite store; without purging it
+        # there too, the next sync re-indexes (resurrects) the deleted session.
+        if session["provider"] == "hermes":
+            try:
+                from app.agents import hermes_driver
+                await hermes_driver.purge_session(sid)
+            except Exception:
+                pass
         if not repos.delete_session_by_id(conn, sid):
             raise HTTPException(404, f'Session "{sid}" was not found.')
     return {"success": True, "data": {"sessionId": sid, "action": "deleted",

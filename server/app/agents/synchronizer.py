@@ -312,6 +312,11 @@ def synchronize_hermes() -> int:
             updated = _to_iso(s.get("last_active")) or created
             json_path = sessions_dir / f"session_{sid}.json"
             jsonl_path = str(json_path) if json_path.exists() else None
+            # Don't resurrect a session the user archived: create_session would
+            # otherwise reset isArchived=0 on every sync.
+            existing = repos.get_session_by_id(conn, sid)
+            if existing and existing["isArchived"]:
+                continue
             repos.create_session(conn, sid, "hermes", _HERMES_PROJECT, name, created, updated, jsonl_path)
             processed += 1
         # Give the synthetic project a friendly display name (once).
@@ -320,6 +325,40 @@ def synchronize_hermes() -> int:
             repos.update_custom_project_name_by_id(conn, row["project_id"], _HERMES_PROJECT_NAME)
     logger.info("hermes sync indexed %s sessions", processed)
     return processed
+
+
+def index_hermes_session(session_id: str, name: Optional[str] = None) -> bool:
+    """Index ONE hermes session into the DB immediately (no CLI export), so a
+    freshly-created session shows up in the sidebar without waiting for the
+    throttled (60s) full hermes sync. `name` is the user's first prompt, used as
+    the title for brand-new sessions; pass None to keep an existing title.
+    Best-effort — any failure returns False."""
+    sid = "".join(c for c in str(session_id) if c.isalnum() or c in "_-")
+    if not sid:
+        return False
+    json_path = Path.home() / ".hermes" / "sessions" / f"session_{sid}.json"
+    jsonl_path = str(json_path) if json_path.exists() else None
+    title = _normalize_session_name(name, "") if name else None
+    try:
+        with db_conn() as conn:
+            existing = repos.get_session_by_id(conn, sid)
+            if existing and existing["isArchived"]:
+                return False  # respect an archived/deleted session
+            # Keep an existing custom title unless we have a fresh one.
+            final_name = title or (existing["custom_name"] if existing else None) or _HERMES_PROJECT_NAME
+            # Write an explicit tz-aware UTC timestamp (not NULL → CURRENT_TIMESTAMP,
+            # which is tz-naive and renders ~8h off in the browser). The full sync
+            # later refines these from hermes' started_at/last_active.
+            now_iso = datetime.now(timezone.utc).isoformat()
+            created = existing["created_at"] if existing and existing["created_at"] else now_iso
+            repos.create_session(conn, sid, "hermes", _HERMES_PROJECT, final_name, created, now_iso, jsonl_path)
+            row = repos.get_project_by_path(conn, _HERMES_PROJECT)
+            if row and (row["custom_project_name"] or "") != _HERMES_PROJECT_NAME:
+                repos.update_custom_project_name_by_id(conn, row["project_id"], _HERMES_PROJECT_NAME)
+        return True
+    except Exception:
+        logger.exception("index_hermes_session failed for %s", session_id)
+        return False
 
 
 def maybe_synchronize(min_interval: float = 3.0) -> int:

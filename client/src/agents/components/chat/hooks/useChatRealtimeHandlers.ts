@@ -310,14 +310,21 @@ export function useChatRealtimeHandlers({
           if (isVisibleSession) {
             onNavigateToSession?.(actualSessionId, { replace: true });
             setTimeout(() => { void paletteOps.refreshProjects(); }, 500);
+            // Pull the persisted reply from the server in case live streaming
+            // never bound to this freshly-created session id (otherwise the
+            // reply only appears after a manual reload).
+            setTimeout(() => { void sessionStore.refreshFromServer(actualSessionId); }, 600);
           }
           break;
         }
 
-        // No id swap (e.g. hermes, which only flushes its session file on exit):
-        // still refresh so a brand-new session — and the finished turn's updated
-        // title/preview — appear in the sidebar without a manual reload.
+        // No id swap (e.g. a resumed session): still refresh the sidebar (new
+        // title/preview) and re-pull the visible session's messages so the just-
+        // finished reply is shown without a manual reload.
         setTimeout(() => { void paletteOps.refreshProjects(); }, 500);
+        if (isVisibleSession && sid) {
+          setTimeout(() => { void sessionStore.refreshFromServer(sid); }, 600);
+        }
         break;
       }
 
