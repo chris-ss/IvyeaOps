@@ -104,9 +104,33 @@ info "  Python deps installed into server/.venv."
 # ── 3. Frontend build ────────────────────────────────────────────────────────
 info "Building frontend..."
 cd "$REPO_ROOT/client"
+
+# The production bundle is large; vite/rollup peaks around 1.5–2 GB RAM. On small
+# cloud servers the build gets OOM-killed *silently* (exit 137, no message). If
+# RAM is tight and we're root, add a temporary swapfile so the build survives.
+ram_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+swap_mb=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+if [ "${ram_mb:-0}" -lt 1900 ] && [ "${swap_mb:-0}" -lt 1024 ] && [ "$(id -u)" = 0 ] && [ ! -e /swapfile ]; then
+  warn "内存偏小（${ram_mb}MB），前端构建可能 OOM —— 临时创建 2G swap..."
+  if (fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null) \
+       && chmod 600 /swapfile && mkswap /swapfile >/dev/null 2>&1 && swapon /swapfile 2>/dev/null; then
+    info "  已启用 2G swap（/swapfile；装完想移除：swapoff /swapfile && rm /swapfile）。"
+  else
+    warn "  swap 创建失败；若构建报 Killed 即为内存不足，请手动加 swap 或换 ≥2G 内存的机器。"
+  fi
+fi
+
+# No --silent: a hidden npm failure here is exactly what makes the install look
+# like it "just stopped". Show output so errors are visible.
 # shellcheck disable=SC2086  # $NPM_MIRROR is intentionally word-split
-npm install --silent $NPM_MIRROR
-npm run build
+if ! npm install --no-audit --no-fund $NPM_MIRROR; then
+  die "npm install 失败（详见上方错误）。常见：npm 镜像/网络、磁盘空间不足。"
+fi
+# Cap node heap so the build is gentler on RAM (helps small servers + swap).
+if ! NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}" npm run build; then
+  die "前端构建失败。若上面显示 'Killed' 即为内存不足（OOM）：加 swap 或换 ≥2G 内存的机器后重试。"
+fi
+[ -f "$REPO_ROOT/client/dist/index.html" ] || die "构建未产出 client/dist/index.html，请检查上方报错。"
 info "  Frontend built into client/dist."
 
 # ── 4. Generate server/.env ──────────────────────────────────────────────────
