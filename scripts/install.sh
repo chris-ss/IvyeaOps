@@ -57,6 +57,28 @@ info "  Python: $($PYTHON --version)"
 info "  Node:   $(node --version)"
 info "  npm:    $(npm --version)"
 
+# ── 1.5 China mirror auto-detection ───────────────────────────────────────────
+# pip (PyPI) and npm are slow/unreliable from mainland China. If google is
+# unreachable we assume a mainland network and route both through fast domestic
+# mirrors (Tsinghua PyPI + npmmirror). Override: IVYEA_CN=1 (force on) /
+# IVYEA_CN=0 (force off). The exported env vars also speed up the optional
+# Hermes/GBrain installers' own pip/npm steps.
+PIP_MIRROR=""
+NPM_MIRROR=""
+_use_cn=""
+case "${IVYEA_CN:-auto}" in
+  1) _use_cn=1 ;;
+  0) _use_cn="" ;;
+  *) curl -fsS -o /dev/null -m 4 https://www.google.com 2>/dev/null || _use_cn=1 ;;
+esac
+if [ -n "$_use_cn" ]; then
+  info "检测到国内网络 —— 启用清华 PyPI + 淘宝 npm 镜像加速（设 IVYEA_CN=0 可关闭）"
+  PIP_MIRROR="-i https://pypi.tuna.tsinghua.edu.cn/simple"
+  NPM_MIRROR="--registry=https://registry.npmmirror.com"
+  export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+  export npm_config_registry="https://registry.npmmirror.com"
+fi
+
 # ── 2. Python dependencies (in an isolated venv) ──────────────────────────────
 # A venv avoids polluting system Python and, crucially, sidesteps PEP 668
 # ("externally-managed-environment") which makes `pip install` into the system
@@ -74,14 +96,16 @@ fi
 VENV_PY="$VENV_DIR/bin/python"
 
 info "Installing Python dependencies..."
-"$VENV_PY" -m pip install -q --upgrade pip
-"$VENV_PY" -m pip install -q -r requirements.txt
+# shellcheck disable=SC2086  # $PIP_MIRROR is intentionally word-split (URL, no spaces)
+"$VENV_PY" -m pip install -q $PIP_MIRROR --upgrade pip
+"$VENV_PY" -m pip install -q $PIP_MIRROR -r requirements.txt
 info "  Python deps installed into server/.venv."
 
 # ── 3. Frontend build ────────────────────────────────────────────────────────
 info "Building frontend..."
 cd "$REPO_ROOT/client"
-npm install --silent
+# shellcheck disable=SC2086  # $NPM_MIRROR is intentionally word-split
+npm install --silent $NPM_MIRROR
 npm run build
 info "  Frontend built into client/dist."
 

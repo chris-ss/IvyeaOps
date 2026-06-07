@@ -83,6 +83,25 @@ if (-not (Find-Node)) {
 Write-Info "  Python: $(& $Python --version)"
 Write-Info "  Node:   $(& node --version)"
 
+# ── 1.5 国内镜像自动检测 ──────────────────────────────────────────────────────
+# pip / npm 从中国大陆很慢。若 google 不可达则判定为大陆网络，pip/npm 走清华
+# + 淘宝镜像。覆盖：环境变量 IVYEA_CN=1（强制开）/ IVYEA_CN=0（强制关）。
+$PipMirror = @(); $NpmMirror = @()
+$useCN = $false
+if ($env:IVYEA_CN -eq "1") { $useCN = $true }
+elseif ($env:IVYEA_CN -eq "0") { $useCN = $false }
+else {
+    try { Invoke-WebRequest -Uri "https://www.google.com" -TimeoutSec 4 -UseBasicParsing -ErrorAction Stop | Out-Null }
+    catch { $useCN = $true }
+}
+if ($useCN) {
+    Write-Info "检测到国内网络 —— 启用清华 PyPI + 淘宝 npm 镜像加速（设 IVYEA_CN=0 可关闭）"
+    $PipMirror = @("-i", "https://pypi.tuna.tsinghua.edu.cn/simple")
+    $env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple"
+    $NpmMirror = @("--registry=https://registry.npmmirror.com")
+    $env:npm_config_registry = "https://registry.npmmirror.com"
+}
+
 # ── 2. 后端依赖（独立虚拟环境）────────────────────────────────────────────────
 Write-Info "创建虚拟环境并安装后端依赖..."
 $VenvPy = "$RepoRoot\server\.venv\Scripts\python.exe"
@@ -90,14 +109,14 @@ if (-not (Test-Path $VenvPy)) {
     & $Python -m venv "$RepoRoot\server\.venv"
 }
 if (-not (Test-Path $VenvPy)) { Write-Fail "创建虚拟环境失败。" }
-& $VenvPy -m pip install -q --upgrade pip
-& $VenvPy -m pip install -q -r "$RepoRoot\server\requirements.txt"
+& $VenvPy -m pip install -q @PipMirror --upgrade pip
+& $VenvPy -m pip install -q @PipMirror -r "$RepoRoot\server\requirements.txt"
 Write-Info "  后端依赖已装进 server\.venv。"
 
 # ── 3. 前端构建 ───────────────────────────────────────────────────────────────
 Write-Info "构建前端..."
 Set-Location "$RepoRoot\client"
-& npm install --silent
+& npm install --silent @NpmMirror
 & npm run build
 Set-Location $RepoRoot
 Write-Info "  前端已构建到 client\dist。"
