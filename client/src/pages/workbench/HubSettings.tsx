@@ -17,11 +17,12 @@ function Dot({ ok, loading }: { ok?: boolean; loading?: boolean }) {
 }
 
 function Section({
-  title, desc, children, keys, vals, onSave,
+  title, desc, children, keys, vals, onSave, dataTour,
 }: {
   title: React.ReactNode; desc?: React.ReactNode; children: React.ReactNode;
   keys: (keyof HubSettings)[]; vals: Partial<HubSettings>;
   onSave: (keys: (keyof HubSettings)[], vals: Partial<HubSettings>) => Promise<void>;
+  dataTour?: string;
 }) {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const save = async () => {
@@ -30,7 +31,7 @@ function Section({
     catch { setStatus("error"); setTimeout(() => setStatus("idle"), 3000); }
   };
   return (
-    <div className="hs-section">
+    <div className="hs-section" data-tour={dataTour}>
       <div className="hs-section-hd">
         <div>
           <div className="hs-section-title">{title}</div>
@@ -456,7 +457,7 @@ function HealthPanel() {
   };
 
   return (
-    <div className="hs-health">
+    <div className="hs-health" data-tour="settings-health">
       <div className="hs-health-hd">
         <div>
           <div className="hs-section-title">系统状态</div>
@@ -720,6 +721,7 @@ export default function HubSettings() {
       {/* -- 应用模型：AI 问答 / AI 生图（直连大模型，不走智能体）-- */}
       <Section
         title="应用模型"
+        dataTour="settings-fallback"
         desc={<>「全局兜底大模型」是所有板块的<strong>统一降级出口</strong>：当 Hermes/Codex/Claude 都不可用时各板块都会调它，同时它也是「AI 问答」用的模型。「AI 生图」直接调生图 API。均<strong>不经过智能体</strong>；留空则回退默认链路（DeepSeek→Apimart）。</>}
         keys={[
           "assistant_provider", "assistant_model", "assistant_api_key", "assistant_base_url",

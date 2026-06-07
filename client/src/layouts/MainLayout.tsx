@@ -5,6 +5,8 @@ import { useAuth } from "../App";
 import Terminal from "../pages/workbench/Terminal";
 import Agents from "../pages/workbench/Agents";
 import ManualModal from "../components/ManualModal";
+import Tour from "../components/Tour";
+import { TOURS, hasTour } from "../lib/tours";
 
 type NavItem = {
   to: string;
@@ -220,6 +222,22 @@ export default function MainLayout() {
   const [clock, setClock] = useState("");
   const [manualOpen, setManualOpen] = useState(false);
 
+  // Interactive tour: auto-run a board's tour on first visit (remembered per
+  // board in localStorage); replayable via the "?" button.
+  const [tourOn, setTourOn] = useState(false);
+  useEffect(() => {
+    const p = location.pathname;
+    if (!hasTour(p)) { setTourOn(false); return; }
+    let seen = false;
+    try { seen = localStorage.getItem("ivyea-tour:" + p) === "1"; } catch { /* ignore */ }
+    if (seen) return;
+    const t = window.setTimeout(() => {
+      setTourOn(true);
+      try { localStorage.setItem("ivyea-tour:" + p, "1"); } catch { /* ignore */ }
+    }, 700); // let the board render first
+    return () => clearTimeout(t);
+  }, [location.pathname]);
+
   // Clock
   useEffect(() => {
     const tick = () =>
@@ -278,7 +296,7 @@ export default function MainLayout() {
             {collapsed ? "▶" : "◀"}
           </button>
         </div>
-        <nav>
+        <nav data-tour="sidebar">
           {navSections.map((sec, si) => (
             <div key={sec.title}>
               {si > 0 && <div style={{height:1,background:"var(--b)",margin:"4px 12px"}} />}
@@ -341,11 +359,21 @@ export default function MainLayout() {
             <div className="tb-time">{clock}</div>
             <button
               className="tbtn"
+              data-tour="tour-help"
               onClick={() => setManualOpen(true)}
               title="使用手册"
             >
               📖
             </button>
+            {hasTour(location.pathname) && (
+              <button
+                className="tbtn"
+                onClick={() => setTourOn(true)}
+                title="本板块使用引导"
+              >
+                ?
+              </button>
+            )}
             <button
               className="tbtn"
               onClick={() => {
@@ -410,6 +438,9 @@ export default function MainLayout() {
         </div>
       </div>
       {manualOpen && <ManualModal onClose={() => setManualOpen(false)} />}
+      {tourOn && hasTour(location.pathname) && (
+        <Tour steps={TOURS[location.pathname]} onClose={() => setTourOn(false)} />
+      )}
     </div>
   );
 }

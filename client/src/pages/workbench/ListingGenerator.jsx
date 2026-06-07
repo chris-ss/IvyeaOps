@@ -942,7 +942,7 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
             )
           ) : (
             <div className="wb-enter" key={activeId}>
-              <div style={{ display: "flex", gap: 2, marginBottom: 8 }}>
+              <div data-tour="listing-tabs" style={{ display: "flex", gap: 2, marginBottom: 8 }}>
                 {[["scrape", "① 采集"], ["copy", "② 文案"], ["images", "③ 主图"], ["aplus", "④ A+"], ["output", "⑤ 输出"]].map(([t, l]) => (
                   <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: "7px 0", fontSize: 10, border: "none", borderRadius: 3, cursor: "pointer", background: tab === t ? "var(--acc)" : "var(--bg2)", color: tab === t ? "#000" : "var(--t2)", fontWeight: tab === t ? 600 : 400 }}>{l}</button>
                 ))}

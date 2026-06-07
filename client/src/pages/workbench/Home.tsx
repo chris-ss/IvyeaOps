@@ -82,7 +82,7 @@ export default function Home() {
           <span style={{ color: "var(--acc)" }}>◧</span> 运营驾驶舱
           <span className="home-date">{today}</span>
         </span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div data-tour="home-source" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <DataSourcePicker value={dataSource} onChange={changeDataSource} />
           <div className="market-mkt-wrap" ref={pickerRef}>
           <button className="market-mkt-btn" onClick={() => setPickerOpen(o => !o)} title="选择站点">
