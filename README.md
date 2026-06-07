@@ -145,6 +145,30 @@ bash scripts/start.sh
 
 ---
 
+## 更新升级（不影响你的数据）
+
+代码与数据是分离的：你的配置和数据**全部被 `.gitignore` 保护、不在版本控制里**，更新时不会被动到——
+- `server/.env`（密钥/密码/API Key）
+- `data/`（所有 `*.sqlite3` 数据库、`hub_settings.json` 设置、上传文件）
+- `~/.hermes/skill-studio/`（Skill、快照）
+
+**Linux / macOS** —— 一条命令：
+```bash
+bash scripts/update.sh
+```
+> 等价于 `git pull` + 刷新依赖 + 重建前端；`.env`/`data/` 原样保留。完成后按提示重启服务
+> （systemd：`sudo systemctl restart ivyea-ops`；脚本启动：Ctrl+C 后 `bash scripts/start.sh`）。
+
+**Windows** —— 在仓库目录里：
+```powershell
+git pull
+```
+然后**重新双击「安装 IvyeaOps.bat」**（可选安装项一路回车/选 N 即可；`.env` 已存在会自动跳过、不覆盖），完成后重新双击「启动 IvyeaOps.bat」。
+
+> 用 ZIP 装的没有 `.git`、无法 `git pull`：重新下载最新 ZIP 覆盖**代码**即可，但**千万别动 `server/.env` 和 `data/`**（把它们先备份出来再覆盖最稳）。建议改用 `git clone` 安装，以后更新一条命令。
+
+---
+
 ## 配置模型（两层）
 
 IvyeaOps 采用两层配置：
