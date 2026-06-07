@@ -173,6 +173,11 @@ function TxtInput({ value, onChange, placeholder }: { value: string; onChange: (
     placeholder={placeholder} spellCheck={false} autoComplete="off" />;
 }
 
+function AreaInput({ value, onChange, placeholder, rows = 4 }: { value: string; onChange: (v: string) => void; placeholder?: string; rows?: number }) {
+  return <textarea className="hs-input" value={value} onChange={e => onChange(e.target.value)}
+    placeholder={placeholder} spellCheck={false} rows={rows} style={{ resize: "vertical", fontFamily: "var(--font)", lineHeight: 1.5 }} />;
+}
+
 function NumInput({ value, onChange, min, max, unit }: { value: number; onChange: (v: number) => void; min?: number; max?: number; unit?: string }) {
   return (
     <div className="hs-num-wrap">
@@ -571,6 +576,7 @@ const EMPTY: HubSettings = {
   gbrain_embed_provider: "", gbrain_embed_model: "", gbrain_embed_api_key: "",
   apimart_key: "", apimart_base: "https://api.apimart.ai/v1",
   text_ai_providers: "hermes,assistant,codex,claude",
+  vision_ai_providers: "openai,assistant", deepseek_api_key: "", news_feeds: "",
   sorftime_key: "", sif_key: "", sellersprite_key: "",
   imgflow_url: "http://127.0.0.1:3001",
   gbrain_bin: "", brain_root: "", openai_api_key: "",
@@ -751,6 +757,7 @@ export default function HubSettings() {
         title="智能体"
         desc={<>Hermes、Claude、GBrain 均从系统 PATH <strong>自动发现</strong>，绿色即代表可用，无需手动配置路径。</>}
         keys={["hermes_bin", "codex_bin", "claude_bin", "text_ai_providers", "autofix_enabled",
+          "vision_ai_providers", "openai_api_key", "deepseek_api_key",
           "gbrain_bin", "brain_root",
           "gbrain_embed_provider", "gbrain_embed_model", "gbrain_embed_api_key"]}
         vals={vals} onSave={save}
@@ -786,6 +793,18 @@ export default function HubSettings() {
             <Field label={<><Tag kind="opt">可选</Tag>AI 提供商顺序（全局降级链）</>}
               hint={<>逗号分隔，按顺序尝试：<code>hermes</code> <code>assistant</code>（全局兜底大模型）<code>codex</code> <code>claude</code> <code>apimart</code> <code>deepseek</code>。所有板块的文本 AI 都走这条链。</>}>
               <TxtInput value={vals.text_ai_providers} onChange={v => set("text_ai_providers", v)} placeholder="hermes,assistant,codex,claude" />
+            </Field>
+            <Field label={<><Tag kind="opt">可选</Tag>视觉识别顺序（图片分析）</>}
+              hint={<>逗号分隔，按顺序尝试：<code>openai</code> <code>assistant</code>（支持视觉的全局兜底）。Listing「AI 图片分析」走这条链。apimart 只生图、无视觉，不在此列。</>}>
+              <TxtInput value={vals.vision_ai_providers} onChange={v => set("vision_ai_providers", v)} placeholder="openai,assistant" />
+            </Field>
+            <Field label={<><Tag kind="opt">可选</Tag>OpenAI API Key（视觉识别）</>}
+              hint={<>用于「AI 图片分析」的视觉模型（GPT‑4o 系）。登录 platform.openai.com → API Keys。</>}>
+              <SecretInput value={vals.openai_api_key} onChange={v => set("openai_api_key", v)} placeholder="sk-..." />
+            </Field>
+            <Field label={<><Tag kind="opt">可选 · 进阶</Tag>DeepSeek 专用 Key</>}
+              hint={<>仅当把 <code>deepseek</code> 单独加进上面「AI 提供商顺序」时才需要；多数人用上面的「全局兜底大模型」选 DeepSeek 即可，无需在此填。</>}>
+              <SecretInput value={vals.deepseek_api_key} onChange={v => set("deepseek_api_key", v)} placeholder="sk-..." />
             </Field>
             <Field label={<><Tag kind="opt">可选</Tag>Hermes 路径</>} hint="留空 = PATH 自动发现">
               <TxtInput value={vals.hermes_bin} onChange={v => set("hermes_bin", v)} placeholder="留空 = PATH 自动发现" />
@@ -901,9 +920,15 @@ export default function HubSettings() {
           desc="Listing 图片后端、嵌入服务 URL、Token 监控 DB 路径、Kiro 集成等。通常无需改动。"
           keys={["imgflow_url", "dashboard_url", "terminal_url", "hermes_db", "codex_db", "claude_projects_dir",
             "apimart_base", "kiro_cli_bin", "kiro_gateway_db", "kiro_cli_db", "kiro_cli_sessions_dir",
-            "feishu_codex_db", "hermes_node_bin", "bun_bin"]}
+            "feishu_codex_db", "hermes_node_bin", "bun_bin", "news_feeds"]}
           vals={vals} onSave={save}
         >
+          <div className="hs-field-group-title">资讯 RSS 源</div>
+          <Field label={<><Tag kind="opt">可选</Tag>资讯 RSS 源</>}
+            hint={<>「资讯」板块的抓取源，每行一条 <code>url | 来源名 | 分类</code>（分类 = <code>ai_industry</code> 或 <code>amazon_seller</code>）。留空 = 用内置默认源。</>}>
+            <AreaInput value={vals.news_feeds} onChange={v => set("news_feeds", v)} rows={4}
+              placeholder={"https://example.com/feed.xml | 来源名 | ai_industry\nhttps://.../rss | 卖家资讯 | amazon_seller"} />
+          </Field>
           <div className="hs-field-group-title">图片生成 · 嵌入服务</div>
           <Field label={<><Tag kind="opt">可选</Tag>Imgflow 地址</>} hint={<>Listing 图片处理后端，默认 <code>http://127.0.0.1:3001</code>。</>}>
             <TxtInput value={vals.imgflow_url} onChange={v => set("imgflow_url", v)} placeholder="http://127.0.0.1:3001" />

@@ -24,6 +24,7 @@ _DEFAULTS: Dict[str, Any] = {
     # models — add 'apimart' here only if your key has Claude text access.
     # Valid values: hermes, assistant, codex, claude, apimart, deepseek
     "text_ai_providers": "hermes,assistant,codex,claude",
+    "deepseek_api_key": "",     # dedicated DeepSeek key (only used when 'deepseek' in text_ai_providers)
     # Comma-separated vision-AI fallback chain (for skills that accept file/image inputs).
     # Tried in order; first provider with a configured key wins.
     # Valid values: apimart (Claude Vision), openai (GPT-4o), assistant (custom provider)
@@ -210,6 +211,7 @@ _DEFAULTS: Dict[str, Any] = {
 _ENV_MAP: Dict[str, str] = {
     "apimart_key": "APIMART_KEY",
     "text_ai_providers": "IVYEA_OPS_TEXT_AI_PROVIDERS",
+    "deepseek_api_key": "DEEPSEEK_API_KEY",
     "sorftime_key": "SORFTIME_KEY",
     "openai_api_key": "OPENAI_API_KEY",
     "gbrain_bin": "IVYEA_OPS_GBRAIN_BIN",

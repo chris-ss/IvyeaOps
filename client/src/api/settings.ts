@@ -29,6 +29,12 @@ export interface HubSettings {
   apimart_base: string;
   // Comma-separated text-AI fallback order for IvyeaOps internal synthesis
   text_ai_providers: string;
+  // Vision provider order (openai, assistant) for 图片分析
+  vision_ai_providers: string;
+  // Dedicated DeepSeek key (only used when 'deepseek' is in text_ai_providers)
+  deepseek_api_key: string;
+  // 资讯 RSS sources, newline-separated: url | name | category
+  news_feeds: string;
   // Market data
   sorftime_key: string;
   // Listing Generator
