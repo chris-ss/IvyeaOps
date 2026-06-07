@@ -439,3 +439,11 @@ if _CLIENT_DIST.exists():
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache", "Expires": "0",
         })
+
+
+if __name__ == "__main__":
+    # Lets the launcher run a short `python -m app.main` instead of the long
+    # uvicorn invocation; host/port come from .env via settings (single source).
+    import uvicorn
+
+    uvicorn.run(app, host=settings.host, port=settings.port)

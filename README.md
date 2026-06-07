@@ -96,8 +96,7 @@ cd IvyeaOps
 bash scripts/install.sh
 
 # 3. 启动
-cd server
-python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+bash scripts/start.sh
 ```
 
 浏览器打开 **http://127.0.0.1:8001**，首启向导会引导你完成智能体检测与 API 密钥设置。
