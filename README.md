@@ -107,9 +107,10 @@ bash scripts/start.sh
 > - **图省事（不推荐）**：`.env` 里设 `IVYEA_OPS_HOST=0.0.0.0` 并放行防火墙端口，直接 `http://服务器IP:8001`——等于裸暴露公网，务必配合强密码/防火墙。
 
 > **🇨🇳 国内网络加速**
-> - **克隆慢**：优先用 **Gitee 镜像**（自动同步、最快最稳）：
->   `git clone https://gitee.com/hectorxue/IvyeaOps.git`
->   备选 gh 代理：`git clone https://gh-proxy.com/https://github.com/Hector-xue/IvyeaOps.git`
+> - **克隆慢**：推荐 **gh 代理**（零登录、Windows 也不弹凭据框）：
+>   `git clone https://gh-proxy.com/https://github.com/Hector-xue/IvyeaOps.git`
+>   或 **Gitee 镜像**（最快，但 Windows 的 Git Credential Manager 可能弹 Gitee 登录——仓库是公开的、其实不用账号，可加 `-c credential.interactive=never` 强制匿名）：
+>   `git -c credential.interactive=never clone https://gitee.com/hectorxue/IvyeaOps.git`
 > - **装依赖慢**：`install.sh` / `install.ps1` 会**自动检测**是否在大陆网络，自动把 pip、npm 切到清华 + 淘宝镜像（无需手动；可用 `IVYEA_CN=1` 强制开、`IVYEA_CN=0` 关）。
 > - **hermes / GBrain 慢**：这两个是境外安装器，可选、可稍后单独重试；镜像环境变量会顺带加速它们内部的 pip/npm 步骤。
 
