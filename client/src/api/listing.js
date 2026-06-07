@@ -31,10 +31,10 @@ export const downloadPsd = async (id, url, slot) => {
     a.click();
     URL.revokeObjectURL(a.href);
 };
-export const generateMainPrompts = async (id, { sizes, color_scheme, slots } = {}) => (await api.post(`/projects/${id}/generate-main-prompts`, { sizes, color_scheme, slots }, { timeout: 300000 })).data;
+export const generateMainPrompts = async (id, { sizes, color_scheme, slots } = {}) => (await api.post(`/projects/${id}/generate-main-prompts`, { sizes, color_scheme, slots }, { timeout: 900000 })).data;
 export const saveImageSlots = async (id, slots) => (await api.post(`/projects/${id}/image-slots`, slots)).data;
-export const generateAplusPrompts = async (id, { sizes, color_scheme, slots } = {}) => (await api.post(`/projects/${id}/generate-aplus-prompts`, { sizes, color_scheme, slots }, { timeout: 300000 })).data;
-export const saveTemplate = async (id, { name, content }) => (await api.post(`/projects/${id}/templates`, { name, content }, { timeout: 300000 })).data;
+export const generateAplusPrompts = async (id, { sizes, color_scheme, slots } = {}) => (await api.post(`/projects/${id}/generate-aplus-prompts`, { sizes, color_scheme, slots }, { timeout: 900000 })).data;
+export const saveTemplate = async (id, { name, content }) => (await api.post(`/projects/${id}/templates`, { name, content }, { timeout: 900000 })).data;
 export const getTemplates = async (id) => (await api.get(`/projects/${id}/templates`)).data;
-export const applyTemplate = async (id, { template_id, slot, color_scheme, target_group, slots }) => (await api.post(`/projects/${id}/apply-template`, { template_id, slot, color_scheme, target_group, slots }, { timeout: 300000 })).data;
-export const reviewImagePrompt = async (id, payload) => (await api.post(`/projects/${id}/review-image-prompt`, payload, { timeout: 120000 })).data;
+export const applyTemplate = async (id, { template_id, slot, color_scheme, target_group, slots }) => (await api.post(`/projects/${id}/apply-template`, { template_id, slot, color_scheme, target_group, slots }, { timeout: 900000 })).data;
+export const reviewImagePrompt = async (id, payload) => (await api.post(`/projects/${id}/review-image-prompt`, payload, { timeout: 900000 })).data;

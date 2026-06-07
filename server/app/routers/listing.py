@@ -399,18 +399,16 @@ async def _call_ai(prompt: str, max_tokens: int = 2000, web_search: bool = True)
         "输出要求：直接输出最终内容，不要解释调用过程，不要添加 Markdown 代码块。"
     )
 
-    # Listing prompts/copy are PURE TEXT (the prompt forbids tools/commands), so
-    # prefer the fast HTTP text models over the heavyweight agent CLIs. A big
-    # 8k-token generation on hermes (a tool-using CLI, 600s timeout) can block
-    # this synchronous request long past any client/proxy patience → "Network
-    # Error". HTTP text models answer in seconds; CLIs stay as a last-resort
-    # fallback. NOTE: apimart is IMAGE-GEN ONLY (no text) — never in this chain.
-    order = ["assistant", "deepseek", "hermes", "codex", "claude"]
+    # Use the user's configured provider order (text_ai_providers — hermes-first
+    # by default). Hermes is slow for big generations but the long-request path
+    # is sized for it (frontend 15-min axios timeout + nginx 900s on the listing
+    # generate endpoints), so a slow hermes run completes instead of being cut.
+    # (apimart is image-gen only and is already excluded from the text chain.)
     try:
-        _provider, text = await ai_synthesis_service.run_text_chain(task_prompt, order=order)
+        _provider, text = await ai_synthesis_service.run_text_chain(task_prompt)
         return text
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"AI 调用失败（全局兜底 / DeepSeek / Hermes / Codex / Claude 均不可用）：{e}")
+        raise HTTPException(502, f"AI 调用失败（Hermes / 全局兜底 / Codex / Claude 均不可用）：{e}")
 
 
 async def _review_single_prompt(
