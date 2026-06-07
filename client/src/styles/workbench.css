@@ -1,15 +1,20 @@
 /* IvyeaOps workbench theme — dark terminal style. Ported from the design mock. */
 
 *{margin:0;padding:0;box-sizing:border-box}
-/* Slim scrollbars by default — the native (~15px) bar is too chunky for this
-   theme. Containers with their own ::-webkit-scrollbar rule (higher specificity)
-   keep their custom size. NB: do NOT set scrollbar-width/scrollbar-color here —
-   in Chrome that would disable ::-webkit-scrollbar sizing/colour below. */
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--b2);border-radius:4px}
-::-webkit-scrollbar-thumb:hover{background:var(--t3)}
-::-webkit-scrollbar-corner{background:transparent}
+/* Slim scrollbars on desktop (mouse) — the native (~15px) bar is too chunky for
+   this theme. Scoped to fine-pointer/hover devices ONLY: on touch screens this
+   would turn the OS's auto-hiding overlay scrollbars into always-visible bars,
+   so phones keep their native scroll-then-fade behaviour. Containers with their
+   own ::-webkit-scrollbar rule (higher specificity) keep their custom size.
+   NB: do NOT set scrollbar-width/scrollbar-color here — in Chrome that would
+   disable the ::-webkit-scrollbar sizing/colour below. */
+@media (any-pointer:fine){
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--b2);border-radius:4px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--t3)}
+  ::-webkit-scrollbar-corner{background:transparent}
+}
 /* ── Terminal Green (default dark) ── */
 :root{
   --bg:rgba(12,12,12,.72);--bg1:rgba(17,17,17,.76);--bg2:rgba(22,22,22,.72);--bg3:rgba(28,28,28,.68);
@@ -2121,12 +2126,15 @@ body::after{
 .home-date{font-size:10px;color:var(--t3);font-weight:400;letter-spacing:.03em}
 
 /* Alert strip */
-.home-alerts{display:flex;align-items:center;gap:8px;flex-shrink:0;padding:0 20px 8px;min-width:0}
+.home-alerts{display:flex;align-items:center;gap:6px;flex-shrink:0;padding:0 20px 8px;min-width:0}
 .home-alerts-empty{font-size:11px;color:var(--t3);line-height:1.6;padding-top:2px;padding-bottom:10px}
-.home-alerts-icon{flex-shrink:0;color:var(--amber);font-size:13px}
+.home-alerts-icon{flex-shrink:0;color:var(--amber);font-size:11px;line-height:1}
 /* No scrollbar-width here: it makes Chrome ignore the slim ::-webkit-scrollbar
    (the global 6px rule) and fall back to the chunkier native "thin" preset. */
-.home-alerts-track{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+/* overflow-y:hidden is required: with only overflow-x:auto the spec promotes
+   overflow-y to auto, which pops a stray vertical scrollbar when content is a
+   hair too tall. This row only ever scrolls horizontally. */
+.home-alerts-track{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;padding-bottom:2px}
 .home-alert-chip{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 9px;border-radius:20px;border:1px solid var(--b);background:var(--bg2);color:var(--t2);font-family:var(--font);font-size:11px;cursor:pointer;white-space:nowrap;transition:all .12s}
 .home-alert-chip:hover{border-color:var(--b2);color:var(--t)}
 .home-alert-chip.up .home-alert-dir{color:var(--amber)}
@@ -2270,7 +2278,9 @@ body::after{
 @media(max-width:680px){
   .home-topbar{padding:10px 12px 8px}
   .home-alerts{padding:0 12px 8px}
-  .home-tabs{padding:0 8px;overflow-x:auto;flex-wrap:nowrap}
+  /* 2px here + the tab's own 10px padding-left lands the first tab icon at 12px,
+     aligning it with the header / data-source / ⚡ / chart content edge above. */
+  .home-tabs{padding:0 2px;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap}
   .home-tab{padding:8px 10px;font-size:12px;flex-shrink:0}
   .home-tab-label{display:inline}
   /* Mobile: one card per row, full width — no horizontal scrolling. */
