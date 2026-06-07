@@ -102,7 +102,9 @@ bash scripts/start.sh
 浏览器打开 **http://127.0.0.1:8001**，首启向导会引导你完成智能体检测与 API 密钥设置。
 
 > **🇨🇳 国内网络加速**
-> - **克隆慢**：用 gh 代理 `git clone https://gh-proxy.com/https://github.com/Hector-xue/IvyeaOps.git`；或用 Gitee 镜像（最稳，见仓库说明）。
+> - **克隆慢**：优先用 **Gitee 镜像**（自动同步、最快最稳）：
+>   `git clone https://gitee.com/hectorxue/IvyeaOps.git`
+>   备选 gh 代理：`git clone https://gh-proxy.com/https://github.com/Hector-xue/IvyeaOps.git`
 > - **装依赖慢**：`install.sh` / `install.ps1` 会**自动检测**是否在大陆网络，自动把 pip、npm 切到清华 + 淘宝镜像（无需手动；可用 `IVYEA_CN=1` 强制开、`IVYEA_CN=0` 关）。
 > - **hermes / GBrain 慢**：这两个是境外安装器，可选、可稍后单独重试；镜像环境变量会顺带加速它们内部的 pip/npm 步骤。
 
