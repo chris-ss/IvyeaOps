@@ -327,6 +327,7 @@ export default function News() {
         )}
         <button
           className="rbtn"
+          data-tour="news-refresh"
           onClick={onRefresh}
           disabled={refreshing}
           title="触发后端重新抓取"

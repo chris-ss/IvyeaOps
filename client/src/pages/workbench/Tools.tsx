@@ -189,7 +189,7 @@ function AsinAuditPanel() {
       </div>
 
       {/* Input row */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div data-tour="tools-asin" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <input
           className="inp"
           placeholder="B0XXXXXXXX"
