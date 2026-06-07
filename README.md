@@ -141,6 +141,8 @@ bash scripts/start.sh
 | Node.js | 18+ | 18+ |
 | npm | 随 Node 安装 | 随 Node 安装 |
 
+> 🛠 **装不上 / 起不来 / 打开是 404 / AI 报错？** 先看 [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) —— 国内克隆、依赖慢、内存不足、Windows 编码、端口占用、前端没构建、远程访问、AI 失败等高频问题都在里面，多数能自助解决。
+
 ---
 
 ## 配置模型（两层）
@@ -236,6 +238,7 @@ IvyeaOps/
     ├── CONFIG.md          完整配置参考
     ├── INSTALL.md         生产部署指南
     ├── INTEGRATIONS.md    可选集成
+    ├── TROUBLESHOOTING.md 常见问题排查
     └── lingxing-erp-guide.md  领星 ERP 使用文档
 ```
 
