@@ -125,7 +125,13 @@ bash scripts/start.sh
 1. **双击「安装 IvyeaOps.bat」** —— 自动检测/安装 Python+Node（缺则 winget 自动装）、
    装依赖、构建前端、生成配置、并在**桌面创建「IvyeaOps」快捷方式**，最后可直接启动。
 2. 以后**双击桌面「IvyeaOps」**（或「启动 IvyeaOps.bat」）—— 服务自动起、浏览器自动
-   打开 **http://127.0.0.1:8001**，像启动一个软件一样。
+   打开 **http://127.0.0.1:8001**，像启动一个软件一样（仅本机访问）。
+
+> **团队共享（同一局域网，其他电脑/手机零安装）**：双击 **「启动 IvyeaOps (局域网共享).bat」**。
+> 它会自动探测本机局域网 IP、把服务绑到 `0.0.0.0`、将该 IP 加入 CSRF 白名单（否则跨机登录会
+> 403）、放行防火墙 8001 端口，并在窗口里打印让同事访问的网址——对方浏览器打开即可，**无需安装任何东西**。
+> IP 变了重跑一次即可；只在你信任的内网用，务必配强密码。详见
+> [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) §11。
 
 > 喜欢命令行也可以：`powershell -ExecutionPolicy Bypass -File scripts\install.ps1`。
 >
