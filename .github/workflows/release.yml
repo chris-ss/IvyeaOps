@@ -1,0 +1,83 @@
+name: Release (prebuilt bundle)
+
+# 打 tag（vX.Y.Z）或手动触发时：构建好前端 client/dist，打包成「已含前端的发行包」
+# 并作为 GitHub Release 资产上传。普通用户下载它即可零构建安装（连 Node 都不用装）。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布标签，例如 v1.0.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        working-directory: client
+        run: |
+          npm ci --include=dev --no-audit --no-fund
+          npm run build
+          test -f dist/index.html
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package prebuilt bundle
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          STAGE="staging/IvyeaOps"
+          mkdir -p "$STAGE"
+          # 复制整棵仓库（含刚构建出的 client/dist），排除开发/运行期产物。
+          rsync -a \
+            --exclude='.git' \
+            --exclude='staging' \
+            --exclude='client/node_modules' \
+            --exclude='server/.venv' \
+            --exclude='data' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='server/.env' \
+            ./ "$STAGE/"
+          test -f "$STAGE/client/dist/index.html"   # 确保预构建前端进了包
+          ( cd staging && zip -rq "../IvyeaOps-${TAG}.zip" IvyeaOps )
+          ls -lh "IvyeaOps-${TAG}.zip"
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: IvyeaOps-${{ steps.tag.outputs.tag }}.zip
+          body: |
+            **预构建发行包** —— 已包含编译好的前端 `client/dist`，下载即用、无需在本机构建。
+
+            ### 普通 / Windows 用户（推荐，无需安装 Node）
+            下载下方的 `IvyeaOps-${{ steps.tag.outputs.tag }}.zip` → 解压 → 双击「安装 IvyeaOps.bat」。
+            安装脚本检测到已自带前端，会**跳过 Node 安装与前端构建**，只配置 Python 后端，
+            从而避开绝大多数「前端构建失败 / npm 报错 / 内存不足」的坑。
+
+            ### 开发者
+            也可 `git clone` 源码自行构建（需 Node 18+）：`bash scripts/install.sh` 或双击「安装 IvyeaOps.bat」。
