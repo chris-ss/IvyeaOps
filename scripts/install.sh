@@ -42,20 +42,29 @@ for bin in python3 python; do
 done
 [ -n "$PYTHON" ] || die "Python 3.9+ is required. Install it with your package manager and re-run."
 
-NODE=""
-if command -v node &>/dev/null; then
-  node_major=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))")
-  if [ "$node_major" -ge 18 ]; then
-    NODE="node"
-  fi
-fi
-[ -n "$NODE" ] || die "Node.js 18+ is required. Download from https://nodejs.org/ and re-run."
+# 预构建发行包已自带 client/dist —— 此时无需 Node/npm 与前端构建。
+PREBUILT=0
+[ -f "$REPO_ROOT/client/dist/index.html" ] && PREBUILT=1
 
-NPM=$(command -v npm) || die "npm not found. Ensure Node.js is properly installed."
+if [ "$PREBUILT" = 0 ]; then
+  NODE=""
+  if command -v node &>/dev/null; then
+    node_major=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))")
+    if [ "$node_major" -ge 18 ]; then
+      NODE="node"
+    fi
+  fi
+  [ -n "$NODE" ] || die "Node.js 18+ is required. Download from https://nodejs.org/ and re-run."
+  command -v npm &>/dev/null || die "npm not found. Ensure Node.js is properly installed."
+fi
 
 info "  Python: $($PYTHON --version)"
-info "  Node:   $(node --version)"
-info "  npm:    $(npm --version)"
+if [ "$PREBUILT" = 1 ]; then
+  info "  检测到预构建前端 dist —— 跳过 Node 与前端构建。"
+else
+  info "  Node:   $(node --version)"
+  info "  npm:    $(npm --version)"
+fi
 
 # ── 1.5 China mirror auto-detection ───────────────────────────────────────────
 # pip (PyPI) and npm are slow/unreliable from mainland China. If google is
@@ -105,7 +114,8 @@ info "Installing Python dependencies..."
 "$VENV_PY" -m pip install -q $PIP_MIRROR -r requirements.txt
 info "  Python deps installed into server/.venv."
 
-# ── 3. Frontend build ────────────────────────────────────────────────────────
+# ── 3. Frontend build（预构建包已自带 dist 则整段跳过）───────────────────────────
+if [ "$PREBUILT" = 0 ]; then
 info "Building frontend..."
 cd "$REPO_ROOT/client"
 
@@ -138,6 +148,10 @@ if ! NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}" npm run build; th
 fi
 [ -f "$REPO_ROOT/client/dist/index.html" ] || die "构建未产出 client/dist/index.html，请检查上方报错。"
 info "  Frontend built into client/dist."
+else
+  info "  使用预构建前端 client/dist（已跳过构建）。"
+fi
+cd "$REPO_ROOT"
 
 # ── 4. Generate server/.env ──────────────────────────────────────────────────
 cd "$REPO_ROOT/server"

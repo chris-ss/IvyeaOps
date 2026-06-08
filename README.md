@@ -120,10 +120,16 @@ bash scripts/start.sh
 
 ### Windows（双击即装、双击即用）
 
-下载 ZIP 解压后：
+> **推荐：下载「预构建发行包」，无需安装 Node。** 到 [Releases](https://github.com/Hector-xue/IvyeaOps/releases)
+> 下载最新的 `IvyeaOps-vX.Y.Z.zip`（已含编译好的前端）→ 解压。安装时会**自动跳过 Node 与前端构建**，
+> 只配置 Python 后端，从而避开绝大多数「前端构建失败 / npm 报错 / 内存不足」的坑。
+> （从 GitHub 主页「Code → Download ZIP」下的是**源码包**，需要本机装 Node 现场构建，仅建议开发者用。）
 
-1. **双击「安装 IvyeaOps.bat」** —— 自动检测/安装 Python+Node（缺则 winget 自动装）、
-   装依赖、构建前端、生成配置、并在**桌面创建「IvyeaOps」快捷方式**，最后可直接启动。
+解压后：
+
+1. **双击「安装 IvyeaOps.bat」** —— 自动检测/安装 Python（缺则 winget 自动装）、装后端依赖、
+   生成配置、并在**桌面创建「IvyeaOps」快捷方式**，最后可直接启动。
+   （若用的是源码包而非预构建包，这一步还会自动装 Node 并构建前端。）
 2. 以后**双击桌面「IvyeaOps」**（或「启动 IvyeaOps.bat」）—— 服务自动起、浏览器自动
    打开 **http://127.0.0.1:8001**，像启动一个软件一样（仅本机访问）。
 
