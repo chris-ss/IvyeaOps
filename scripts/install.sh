@@ -137,9 +137,9 @@ fi
 # No --silent: a hidden npm failure here is exactly what makes the install look
 # like it "just stopped". Show output so errors are visible.
 # shellcheck disable=SC2086  # $NPM_MIRROR is intentionally word-split
-# --include=dev: vite/tsc are devDependencies; if NODE_ENV=production they'd be
-# skipped and the build fails with 'tsc: command not found'.
-if ! NODE_ENV=development npm install --include=dev --no-audit --no-fund $NPM_MIRROR; then
+# NODE_ENV=development 确保安装 devDependencies（vite/tsc）。不用 --include=dev flag：
+# 该 flag 在部分 npm 版本上会触发 "Exit handler never called!" 崩溃，用环境变量等效更稳。
+if ! NODE_ENV=development npm install --no-audit --no-fund $NPM_MIRROR; then
   die "npm install 失败（详见上方错误）。常见：npm 镜像/网络、磁盘空间不足。"
 fi
 # Cap node heap so the build is gentler on RAM (helps small servers + swap).

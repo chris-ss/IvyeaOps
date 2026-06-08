@@ -126,11 +126,12 @@ Write-Info "构建前端..."
 Set-Location "$RepoRoot\client"
 # 关键修复：
 #  · 不要 --silent —— 它会吞掉 npm 的安装/构建错误，正是“看起来装好了其实没构建”的根因。
-#  · --include=dev —— vite / tsc 都是 devDependencies；若环境里 NODE_ENV=production
-#    （某些 Windows 机器默认如此），普通 npm install 会跳过它们 → 构建时 'tsc 不是内部命令'。
+#  · NODE_ENV=development —— 确保安装 devDependencies（vite/tsc）。不用 --include=dev flag：
+#    该 flag 在部分 npm 版本上会触发 "Exit handler never called!" 崩溃（崩却假装成功、
+#    留下残缺 node_modules）；用环境变量等效且更稳。
 #  · 逐步检查退出码 + 最后校验 dist\index.html，绝不再谎报成功。
 $env:NODE_ENV = "development"
-& npm install --include=dev --no-audit --no-fund @NpmMirror
+& npm install --no-audit --no-fund @NpmMirror
 if ($LASTEXITCODE -ne 0) { Set-Location $RepoRoot; Write-Fail "前端依赖安装失败（npm install）。常见：npm 镜像/网络不通、磁盘空间不足。修复后重跑安装。" }
 & npm run build
 if ($LASTEXITCODE -ne 0) { Set-Location $RepoRoot; Write-Fail "前端构建失败。若提示 'tsc/vite 不是内部或外部命令'，多为 devDependencies 未装全。请在 client 目录手动执行：npm install --include=dev 然后 npm run build" }

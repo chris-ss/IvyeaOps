@@ -30,8 +30,25 @@ jobs:
 
       - name: Build frontend
         working-directory: client
+        env:
+          NODE_ENV: development   # 确保装 devDependencies，且不用会触发 npm 崩溃的 --include=dev flag
         run: |
-          npm ci --include=dev --no-audit --no-fund
+          echo "node $(node -v), npm $(npm -v)"
+          # npm 的 "Exit handler never called" bug 会崩却假装成功(exit 0)、留下残缺 node_modules，
+          # 后续 tsc 便爆出一堆 "Cannot find module 'react'"。这里不信任退出码，实际校验关键依赖，
+          # 不全就清缓存重装，最多 3 次。
+          deps_ok() { [ -d node_modules/react ] && [ -x node_modules/.bin/vite ] && [ -x node_modules/.bin/tsc ]; }
+          for i in 1 2 3; do
+            echo "::group::npm ci (attempt $i)"
+            npm cache clean --force >/dev/null 2>&1 || true
+            rm -rf node_modules
+            npm ci --no-audit --no-fund || true
+            echo "::endgroup::"
+            if deps_ok; then echo "依赖完整 (第 $i 次)"; break; fi
+            echo "依赖残缺（疑似 npm Exit-handler bug，假成功）——重试…"
+            [ "$i" = 3 ] && { echo "npm 始终未能装全依赖"; exit 1; }
+            sleep 4
+          done
           npm run build
           test -f dist/index.html
 
