@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -19,6 +20,106 @@ def _runtime_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _desktop_paths() -> list[Path]:
+    paths: list[Path] = []
+    for raw in (
+        os.environ.get("USERPROFILE", "") and os.path.join(os.environ["USERPROFILE"], "Desktop"),
+        os.path.expandvars(r"%OneDrive%\Desktop"),
+        os.path.expandvars(r"%PUBLIC%\Desktop"),
+    ):
+        if raw and "%" not in raw:
+            p = Path(raw)
+            if p.exists() and p not in paths:
+                paths.append(p)
+    return paths
+
+
+def _write_credentials(root: Path, password: str) -> Path:
+    credentials = "\n".join(
+        [
+            "IvyeaOps 本机登录信息",
+            "",
+            "访问地址: http://127.0.0.1:8001",
+            "用户名: admin",
+            f"密码: {password}",
+            "",
+            "首次登录后可在 系统配置 -> 账号安全 修改密码。",
+            "请只保存在自己的电脑上，不要发给他人。",
+        ]
+    )
+    data_dir = root / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    cred_file = data_dir / "IvyeaOps 登录信息.txt"
+    cred_file.write_text(credentials, encoding="utf-8")
+    for desktop in _desktop_paths():
+        try:
+            (desktop / "IvyeaOps 登录信息.txt").write_text(credentials, encoding="utf-8")
+        except Exception:
+            pass
+    return cred_file
+
+
+def _create_desktop_shortcut(root: Path) -> None:
+    if not sys.platform.startswith("win") or not getattr(sys, "frozen", False):
+        return
+    exe = Path(sys.executable).resolve()
+    ps = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+$Target = $env:IVYEA_SHORTCUT_TARGET
+$WorkDir = $env:IVYEA_SHORTCUT_WORKDIR
+$Candidates = @()
+try { $Candidates += [Environment]::GetFolderPath('Desktop') } catch {}
+try { $Candidates += (New-Object -ComObject WScript.Shell).SpecialFolders.Item('Desktop') } catch {}
+if ($env:OneDrive) { $Candidates += (Join-Path $env:OneDrive 'Desktop') }
+if ($env:PUBLIC) { $Candidates += (Join-Path $env:PUBLIC 'Desktop') }
+$Candidates = $Candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+foreach ($Desktop in $Candidates) {
+  try {
+    $Shell = New-Object -ComObject WScript.Shell
+    $Shortcut = $Shell.CreateShortcut((Join-Path $Desktop 'IvyeaOps.lnk'))
+    $Shortcut.TargetPath = $Target
+    $Shortcut.WorkingDirectory = $WorkDir
+    $Shortcut.Description = '启动 IvyeaOps 工作台'
+    $Shortcut.IconLocation = $Target
+    $Shortcut.Save()
+    break
+  } catch {}
+}
+"""
+    env = {**os.environ, "IVYEA_SHORTCUT_TARGET": str(exe), "IVYEA_SHORTCUT_WORKDIR": str(root)}
+    try:
+        kwargs = {}
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+            env=env,
+            cwd=str(root),
+            timeout=15,
+            **kwargs,
+        )
+    except Exception:
+        pass
+
+
+def _open_text_file(path: Path) -> None:
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def _already_running(host: str, port: int) -> bool:
+    health_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    try:
+        with urllib.request.urlopen(f"http://{health_host}:{port}/api/health", timeout=1) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
 def _bootstrap_frozen_env() -> None:
     if not getattr(sys, "frozen", False):
         return
@@ -32,6 +133,14 @@ def _bootstrap_frozen_env() -> None:
 
     env_file = root / "server" / ".env"
     if env_file.exists():
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                if line.startswith("ADMIN_PASSWORD="):
+                    _write_credentials(root, line.split("=", 1)[1])
+                    break
+        except Exception:
+            pass
+        _create_desktop_shortcut(root)
         return
 
     password = os.getenv("IVYEA_OPS_ADMIN_PASSWORD") or os.getenv("ADMIN_PASSWORD") or secrets.token_urlsafe(12)
@@ -54,25 +163,9 @@ def _bootstrap_frozen_env() -> None:
         ),
         encoding="utf-8",
     )
-    credentials = "\n".join(
-        [
-            "IvyeaOps local login",
-            "",
-            "URL: http://127.0.0.1:8001",
-            "Username: admin",
-            f"Password: {password}",
-            "",
-            "Change this password after first login in Settings -> Account Security.",
-        ]
-    )
-    cred_file = root / "data" / "IvyeaOps-login.txt"
-    cred_file.write_text(credentials, encoding="utf-8")
-    try:
-        desktop = Path(os.path.expandvars(r"%USERPROFILE%\Desktop"))
-        if desktop.exists():
-            (desktop / "IvyeaOps-login.txt").write_text(credentials, encoding="utf-8")
-    except Exception:
-        pass
+    cred_file = _write_credentials(root, password)
+    _create_desktop_shortcut(root)
+    _open_text_file(cred_file)
 
 
 _bootstrap_frozen_env()
@@ -97,6 +190,10 @@ def _open_browser_when_ready() -> None:
 
 
 if __name__ == "__main__":
+    if getattr(sys, "frozen", False) and _already_running(settings.host, settings.port):
+        browser_host = "127.0.0.1" if settings.host in {"0.0.0.0", "::"} else settings.host
+        webbrowser.open(f"http://{browser_host}:{settings.port}")
+        sys.exit(0)
     if getattr(sys, "frozen", False) and os.getenv("IVYEA_OPS_SERVER_OPEN_BROWSER", "1") != "0":
         threading.Thread(target=_open_browser_when_ready, daemon=True).start()
     uvicorn.run(app, host=settings.host, port=settings.port)

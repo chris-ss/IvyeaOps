@@ -140,6 +140,7 @@ bash scripts/start.sh
 > [Releases](https://github.com/Hector-xue/IvyeaOps/releases) 下载最新的
 > `IvyeaOps-Windows-x64.zip` → 解压 → 双击 **「安装 IvyeaOps Windows x64.bat」**。
 > 安装器会生成配置、把登录信息保存到桌面和 `data\IvyeaOps 登录信息.txt`、创建桌面快捷方式并自动打开浏览器；以后双击桌面 `IvyeaOps` 即可后台启动，不常驻终端窗口。
+> 如果直接双击 `IvyeaOpsServer.exe`，它也会补齐桌面快捷方式和登录信息文件。
 
 如果你想保留 Python venv 方式，也可以下载普通 `IvyeaOps.zip`：它已含编译好的前端和 Windows Python 3.12 后端依赖 wheels，安装时优先离线装依赖，失败再回退在线 pip。
 
