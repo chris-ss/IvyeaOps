@@ -1,7 +1,7 @@
 """First-run Setup Wizard endpoints.
 
 GET  /api/setup/status              — check whether the wizard needs to run
-GET  /api/setup/install-stream      — SSE stream: install codex or claude via npm
+GET  /api/setup/install-stream      — SSE stream: install optional local CLIs
 POST /api/setup/complete            — mark setup as done (write setup_done flag)
 
 Design notes
@@ -10,8 +10,8 @@ Design notes
   has been set yet (covers fresh installs).  Users who already configured the
   server manually before this feature existed will have setup_done=False but
   a password set, so they won't be forced through the wizard.
-- The install-stream endpoint runs `npm install -g <package>` in a subprocess
-  and streams stdout/stderr as SSE events so the frontend can show a live log.
+- The install-stream endpoint runs the platform installer in a subprocess and
+  streams stdout/stderr as SSE events so the frontend can show a live log.
 - All endpoints require authentication so an unauthenticated visitor cannot
   trigger package installations.
 """
@@ -39,7 +39,7 @@ _INSTALLABLE: dict[str, str] = {
     "codex":  "@openai/codex",
     "claude": "@anthropic-ai/claude-code",
 }
-_COMPONENTS = {"hermes", "gbrain", "all"}
+_COMPONENTS = {"hermes", "gbrain", "codex", "claude", "all"}
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +101,10 @@ def _npm_bin() -> str | None:
     return None
 
 
+def _powershell_bin() -> str | None:
+    return shutil.which("powershell") or shutil.which("powershell.exe") or shutil.which("pwsh")
+
+
 async def _component_install_stream(component: str) -> AsyncGenerator[str, None]:
     if component not in _COMPONENTS:
         yield f"data: ERROR: unknown component '{component}'. Supported: {', '.join(sorted(_COMPONENTS))}\n\n"
@@ -109,12 +113,25 @@ async def _component_install_stream(component: str) -> AsyncGenerator[str, None]
 
     root = Path(__file__).resolve().parents[3]
     script = root / "scripts" / "install-components.ps1"
-    if sys.platform.startswith("win") and script.is_file():
-        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Component", component]
+    ps = _powershell_bin()
+    if sys.platform.startswith("win"):
+        if not script.is_file():
+            yield f"data: ERROR: Windows installer not found: {script}\n\n"
+            yield "data: __ERROR__\n\n"
+            return
+        if not ps:
+            yield "data: ERROR: PowerShell not found. Please start IvyeaOps from a normal Windows environment.\n\n"
+            yield "data: __ERROR__\n\n"
+            return
+        cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Component", component]
     elif component == "hermes":
         cmd = ["bash", "-lc", "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"]
     elif component == "gbrain":
         cmd = ["bash", "-lc", "command -v bun >/dev/null || curl -fsSL https://bun.sh/install | bash; export PATH=\"$HOME/.bun/bin:$PATH\"; bun install -g github:garrytan/gbrain; mkdir -p \"$HOME/brain\"; cd \"$HOME/brain\" && (gbrain init --pglite || true)"]
+    elif component in _INSTALLABLE:
+        async for event in _npm_install_stream(component, _INSTALLABLE[component]):
+            yield event
+        return
     else:
         cmd = ["bash", "-lc", "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash; command -v bun >/dev/null || curl -fsSL https://bun.sh/install | bash; export PATH=\"$HOME/.bun/bin:$PATH\"; bun install -g github:garrytan/gbrain; mkdir -p \"$HOME/brain\"; cd \"$HOME/brain\" && (gbrain init --pglite || true)"]
 
@@ -158,18 +175,7 @@ async def _component_install_stream(component: str) -> AsyncGenerator[str, None]
         yield "data: __ERROR__\n\n"
 
 
-async def _install_stream(agent: str) -> AsyncGenerator[str, None]:
-    if agent in _COMPONENTS:
-        async for event in _component_install_stream(agent):
-            yield event
-        return
-
-    package = _INSTALLABLE.get(agent)
-    if not package:
-        supported = sorted([*_INSTALLABLE.keys(), *_COMPONENTS])
-        yield f"data: ERROR: unknown agent/component '{agent}'. Supported: {', '.join(supported)}\n\n"
-        return
-
+async def _npm_install_stream(agent: str, package: str) -> AsyncGenerator[str, None]:
     npm = _npm_bin()
     if not npm:
         yield "data: ERROR: npm not found. Please install Node.js first.\n\n"
@@ -216,6 +222,16 @@ async def _install_stream(agent: str) -> AsyncGenerator[str, None]:
     except Exception as exc:
         yield f"data: ERROR: {exc}\n\n"
         yield "data: __ERROR__\n\n"
+
+
+async def _install_stream(agent: str) -> AsyncGenerator[str, None]:
+    if agent in _COMPONENTS:
+        async for event in _component_install_stream(agent):
+            yield event
+        return
+
+    supported = sorted(_COMPONENTS)
+    yield f"data: ERROR: unknown agent/component '{agent}'. Supported: {', '.join(supported)}\n\n"
 
 
 @router.get("/setup/install-stream")

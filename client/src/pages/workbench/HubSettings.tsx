@@ -429,7 +429,9 @@ function HealthPanel() {
 
   useEffect(() => { check(); }, [check]);
 
-  const installComponent = useCallback((component: "hermes" | "gbrain" | "all") => {
+  type InstallableComponent = "hermes" | "gbrain" | "codex" | "claude" | "all";
+
+  const installComponent = useCallback((component: InstallableComponent) => {
     if (installing) return;
     setInstalling(component);
     setInstallLog([]);
@@ -456,7 +458,7 @@ function HealthPanel() {
     };
   }, [check, installing]);
 
-  const rows: Array<{ label: string; key: keyof HealthResp | string; nested?: string; install?: "hermes" | "gbrain" }> = [
+  const rows: Array<{ label: string; key: keyof HealthResp | string; nested?: string; install?: InstallableComponent }> = [
     { label: "AI · 文本链可用",           key: "ai_chain", nested: "text" },
     { label: "AI · 全局兜底大模型",       key: "ai_chain", nested: "global_fallback" },
     { label: "AI · 视觉识别",             key: "ai_chain", nested: "vision" },
@@ -464,8 +466,8 @@ function HealthPanel() {
     { label: "Sorftime · 市场数据",       key: "sorftime" },
     { label: "GBrain · 知识库 CLI",       key: "gbrain_bin", install: "gbrain" },
     { label: "Agent · hermes",            key: "runners", nested: "hermes", install: "hermes" },
-    { label: "Agent · codex",             key: "runners", nested: "codex" },
-    { label: "Agent · claude",            key: "runners", nested: "claude" },
+    { label: "Agent · codex",             key: "runners", nested: "codex", install: "codex" },
+    { label: "Agent · claude",            key: "runners", nested: "claude", install: "claude" },
     { label: "Agent · kiro",              key: "runners", nested: "kiro" },
   ];
 
