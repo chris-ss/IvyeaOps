@@ -105,13 +105,27 @@ def _powershell_bin() -> str | None:
     return shutil.which("powershell") or shutil.which("powershell.exe") or shutil.which("pwsh")
 
 
+def _runtime_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    candidates = [
+        Path.cwd(),
+        Path(__file__).resolve().parents[3],
+    ]
+    for root in candidates:
+        if (root / "scripts" / "install-components.ps1").is_file():
+            return root
+    return Path(__file__).resolve().parents[3]
+
+
 async def _component_install_stream(component: str) -> AsyncGenerator[str, None]:
     if component not in _COMPONENTS:
         yield f"data: ERROR: unknown component '{component}'. Supported: {', '.join(sorted(_COMPONENTS))}\n\n"
         yield "data: __ERROR__\n\n"
         return
 
-    root = Path(__file__).resolve().parents[3]
+    root = _runtime_root()
     script = root / "scripts" / "install-components.ps1"
     ps = _powershell_bin()
     if sys.platform.startswith("win"):

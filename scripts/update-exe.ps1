@@ -5,7 +5,7 @@
 #   2. download the latest IvyeaOps-Windows-x64.zip
 #   3. copy new program files over the current folder
 #   4. keep user data/config: data\, logs\, server\.env
-#   5. rerun install-exe.ps1 so shortcuts are refreshed and the app restarts
+#   5. restart IvyeaOpsServer.exe
 
 param(
     [string]$DownloadUrl = "https://github.com/Hector-xue/IvyeaOps/releases/latest/download/IvyeaOps-Windows-x64.zip"
@@ -18,8 +18,8 @@ $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $RepoRoot
 
 function Write-Info($msg) { Write-Host "[IvyeaOps] $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "[IvyeaOps] 注意: $msg" -ForegroundColor Yellow }
-function Write-Fail($msg) { Write-Host "[IvyeaOps] 错误: $msg" -ForegroundColor Red; Read-Host "按回车退出"; exit 1 }
+function Write-Warn($msg) { Write-Host "[IvyeaOps] WARN: $msg" -ForegroundColor Yellow }
+function Write-Fail($msg) { Write-Host "[IvyeaOps] ERROR: $msg" -ForegroundColor Red; Read-Host "Press Enter to exit"; exit 1 }
 
 function Stop-IvyeaOps {
     $StopScript = Join-Path $RepoRoot "scripts\stop-hidden.ps1"
@@ -45,12 +45,12 @@ function Find-PackageRoot($ExtractDir) {
 }
 
 Write-Host ""
-Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
-Write-Host "  IvyeaOps Windows x64 一键更新" -ForegroundColor Green
-Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+Write-Host "=======================================================" -ForegroundColor Green
+Write-Host "  IvyeaOps Windows x64 updater" -ForegroundColor Green
+Write-Host "=======================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  会保留：data\、logs\、server\.env"
-Write-Host "  会更新：程序文件、前端页面、脚本、文档"
+Write-Host "  Keeps:   data\, logs\, server\.env"
+Write-Host "  Updates: program files, frontend, scripts, docs"
 Write-Host ""
 
 $EnvFile = Join-Path $RepoRoot "server\.env"
@@ -66,18 +66,18 @@ try {
     New-Item -ItemType Directory -Force -Path $TempRoot, $ExtractDir | Out-Null
     if (Test-Path $EnvFile) { Copy-Item $EnvFile $EnvBackup -Force }
 
-    Write-Info "停止后台服务..."
+    Write-Info "Stopping background service..."
     Stop-IvyeaOps
 
-    Write-Info "下载最新版 Windows x64 包..."
+    Write-Info "Downloading latest Windows x64 package..."
     Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipPath -UseBasicParsing
 
-    Write-Info "解压更新包..."
+    Write-Info "Extracting update package..."
     Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
     $PackageRoot = Find-PackageRoot $ExtractDir
-    if (-not $PackageRoot) { Write-Fail "更新包不完整：未找到 IvyeaOpsServer.exe。" }
+    if (-not $PackageRoot) { Write-Fail "Invalid update package: IvyeaOpsServer.exe not found." }
 
-    Write-Info "覆盖程序文件（保留数据和配置）..."
+    Write-Info "Copying program files while keeping data and config..."
     $robocopyArgs = @(
         $PackageRoot,
         $RepoRoot,
@@ -92,21 +92,20 @@ try {
     )
     & robocopy @robocopyArgs | Out-Host
     $rc = $LASTEXITCODE
-    if ($rc -gt 7) { Write-Fail "文件复制失败，robocopy exit code: $rc" }
+    if ($rc -gt 7) { Write-Fail "File copy failed, robocopy exit code: $rc" }
 
     if ((Test-Path $EnvBackup) -and -not (Test-Path $EnvFile)) {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $EnvFile) | Out-Null
         Copy-Item $EnvBackup $EnvFile -Force
     }
 
-    $InstallScript = Join-Path $RepoRoot "scripts\install-exe.ps1"
-    if (-not (Test-Path $InstallScript)) { Write-Fail "更新后未找到 scripts\install-exe.ps1。" }
+    $ServerExe = Join-Path $RepoRoot "IvyeaOpsServer.exe"
+    if (-not (Test-Path $ServerExe)) { Write-Fail "IvyeaOpsServer.exe not found after update." }
 
-    Write-Info "刷新快捷方式并重启 IvyeaOps..."
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $InstallScript
-
+    Write-Info "Starting IvyeaOps..."
+    Start-Process -FilePath $ServerExe -WorkingDirectory $RepoRoot | Out-Null
     Write-Host ""
-    Write-Info "更新完成。你的数据和配置已保留。"
+    Write-Info "Update complete. Data and config were preserved."
 } catch {
     Write-Fail $_
 } finally {

@@ -142,7 +142,7 @@ jobs:
             ```
 
             ### Windows x64 免 Python 版
-            如果不想安装 Python，可下载 `IvyeaOps-Windows-x64.zip` → 解压 → 双击「安装 IvyeaOps Windows x64.bat」。
+            如果不想安装 Python，可下载 `IvyeaOps-Windows-x64.zip` → 解压 → 双击 `IvyeaOpsServer.exe`。更新时双击「更新 IvyeaOps Windows x64.bat」，停止时双击「停止 IvyeaOps.bat」。
 
             ### 开发者
             也可 `git clone` 源码自行构建（需 Node 18+ 与 ≥2G 内存）。
@@ -202,14 +202,10 @@ jobs:
           Copy-Item -Recurse client/dist "$stage/client/dist"
           Copy-Item -Recurse client/public "$stage/client/public"
           Copy-Item -Recurse docs "$stage/docs"
-          Copy-Item scripts/start-hidden.ps1 "$stage/scripts/start-hidden.ps1"
           Copy-Item scripts/stop-hidden.ps1 "$stage/scripts/stop-hidden.ps1"
-          Copy-Item scripts/install-exe.ps1 "$stage/scripts/install-exe.ps1"
           Copy-Item scripts/install-components.ps1 "$stage/scripts/install-components.ps1"
           Copy-Item scripts/update-exe.ps1 "$stage/scripts/update-exe.ps1"
-          Copy-Item "启动 IvyeaOps (后台).vbs" "$stage/启动 IvyeaOps (后台).vbs"
           Copy-Item "停止 IvyeaOps.bat" "$stage/停止 IvyeaOps.bat"
-          Copy-Item "安装 IvyeaOps Windows x64.bat" "$stage/安装 IvyeaOps Windows x64.bat"
           Copy-Item "更新 IvyeaOps Windows x64.bat" "$stage/更新 IvyeaOps Windows x64.bat"
           if (Test-Path README.md) { Copy-Item README.md "$stage/README.md" }
           Compress-Archive -Path staging/IvyeaOps -DestinationPath "IvyeaOps-Windows-x64-$tag.zip" -Force

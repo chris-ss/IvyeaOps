@@ -138,18 +138,17 @@ bash scripts/start.sh
 
 > **推荐给普通用户：下载 `IvyeaOps-Windows-x64.zip`，无需安装 Python / Node。** 到
 > [Releases](https://github.com/Hector-xue/IvyeaOps/releases) 下载最新的
-> `IvyeaOps-Windows-x64.zip` → 解压 → 双击 **「安装 IvyeaOps Windows x64.bat」**。
-> 安装器会生成配置、把登录信息保存到桌面和 `data\IvyeaOps 登录信息.txt`、创建桌面快捷方式并自动打开浏览器；以后双击桌面 `IvyeaOps` 即可后台启动，不常驻终端窗口。
-> 如果直接双击 `IvyeaOpsServer.exe`，它也会补齐桌面快捷方式和登录信息文件。
+> `IvyeaOps-Windows-x64.zip` → 解压 → 双击 **`IvyeaOpsServer.exe`**。
+> EXE 会自动生成配置、把登录信息保存到桌面和 `data\IvyeaOps 登录信息.txt`、创建桌面快捷方式并打开浏览器；以后双击桌面 `IvyeaOps` 或 `IvyeaOpsServer.exe` 即可启动。
 
 如果你想保留 Python venv 方式，也可以下载普通 `IvyeaOps.zip`：它已含编译好的前端和 Windows Python 3.12 后端依赖 wheels，安装时优先离线装依赖，失败再回退在线 pip。
 
 解压后：
 
-1. **免 Python 包**：双击「安装 IvyeaOps Windows x64.bat」。
+1. **免 Python 包**：双击 `IvyeaOpsServer.exe`。
 2. **普通包 / 源码包**：双击「安装 IvyeaOps.bat」—— 自动检测 Python、装后端依赖、生成配置、创建桌面快捷方式。
-3. 以后**双击桌面「IvyeaOps」**—— 服务后台启动、浏览器自动打开 **http://127.0.0.1:8001**。
-4. 如需停止后台服务，双击 **「停止 IvyeaOps.bat」**。
+3. 以后**双击桌面「IvyeaOps」**—— 浏览器自动打开 **http://127.0.0.1:8001**。
+4. x64 包如需更新，双击 **「更新 IvyeaOps Windows x64.bat」**；如需停止，双击 **「停止 IvyeaOps.bat」**。
 
 > Hermes / GBrain 同样是可选组件：安装时可选，也可在首启向导或「系统配置 → 系统状态」里点「安装/修复」。
 
@@ -201,7 +200,7 @@ bash scripts/update.sh
 ```
 
 它会自动停止后台服务、下载最新版 `IvyeaOps-Windows-x64.zip`、覆盖程序文件、保留
-`data\` / `logs\` / `server\.env`，最后刷新快捷方式并重新启动。用户不需要手动备份或搬目录。
+`data\` / `logs\` / `server\.env`，最后重新启动。用户不需要手动备份或搬目录。
 
 **Windows 源码 / 普通包（git clone 安装）** —— 在仓库目录里：
 ```powershell
@@ -298,8 +297,8 @@ IvyeaOps/
 ├── scripts/
 │   ├── install.sh         Linux / macOS 一键安装
 │   ├── install.ps1        Windows 普通包一键安装
-│   ├── install-components.ps1  Windows 可选安装 / 修复 Hermes + GBrain
-│   ├── install-exe.ps1    Windows x64 免 Python 包安装
+│   ├── install-components.ps1  Windows 可选安装 / 修复 Hermes + GBrain/Codex/Claude
+│   ├── update-exe.ps1     Windows x64 免 Python 包一键更新
 │   ├── start.sh           Linux / macOS 启动
 │   └── render-deploy.sh   渲染生产部署配置
 └── docs/

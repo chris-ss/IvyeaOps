@@ -31,7 +31,7 @@ if (-not $Stopped) {
 }
 
 if ($Stopped) {
-    Write-Host "[IvyeaOps] 已停止后台服务。" -ForegroundColor Green
+    Write-Host "[IvyeaOps] Background service stopped." -ForegroundColor Green
 } else {
-    Write-Host "[IvyeaOps] 未发现正在运行的后台服务。" -ForegroundColor Yellow
+    Write-Host "[IvyeaOps] No running background service found." -ForegroundColor Yellow
 }
