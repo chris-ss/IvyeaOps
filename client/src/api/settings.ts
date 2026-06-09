@@ -89,6 +89,7 @@ export interface RunnerStatus {
 }
 
 export interface HealthResp {
+  version: RunnerStatus;
   apimart: RunnerStatus;
   sorftime: RunnerStatus;
   imgflow: RunnerStatus;

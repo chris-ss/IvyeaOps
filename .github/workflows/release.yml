@@ -100,6 +100,7 @@ jobs:
       - name: Package prebuilt bundle
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
+          printf '%s\n' "$TAG" > VERSION
           STAGE="staging/IvyeaOps"
           mkdir -p "$STAGE"
           # 复制整棵仓库（含刚构建出的 client/dist），排除开发/运行期产物。
@@ -198,6 +199,7 @@ jobs:
           $tag = "${{ steps.tag.outputs.tag }}"
           $stage = "staging/IvyeaOps"
           New-Item -ItemType Directory -Force -Path $stage, "$stage/server", "$stage/client", "$stage/scripts", "$stage/docs" | Out-Null
+          Set-Content -Path "$stage/VERSION" -Value $tag -Encoding ascii
           Copy-Item dist/IvyeaOpsServer.exe "$stage/IvyeaOpsServer.exe"
           Copy-Item -Recurse client/dist "$stage/client/dist"
           Copy-Item -Recurse client/public "$stage/client/public"

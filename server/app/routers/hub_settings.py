@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.core import hub_settings as _hs
 from app.core.security import require_user
+from app.core.version import app_version
 
 router = APIRouter()
 
@@ -161,6 +162,7 @@ async def settings_health(_u: str = Depends(require_user)):
     }
 
     return {
+        "version": {"ok": True, "detail": app_version()},
         "ai_chain":  ai_chain,
         "apimart":   _check_key("apimart_key", "API Key 已设置"),
         "sorftime":  _check_key("sorftime_key", "API Key 已设置"),
