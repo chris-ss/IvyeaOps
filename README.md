@@ -139,7 +139,7 @@ bash scripts/start.sh
 > **推荐给普通用户：下载 `IvyeaOps-Windows-x64.zip`，无需安装 Python / Node。** 到
 > [Releases](https://github.com/Hector-xue/IvyeaOps/releases) 下载最新的
 > `IvyeaOps-Windows-x64.zip` → 解压 → 双击 **`IvyeaOpsServer.exe`**。
-> EXE 会自动生成配置、把登录信息保存到桌面和 `data\IvyeaOps 登录信息.txt`、创建桌面快捷方式并打开浏览器；以后双击桌面 `IvyeaOps` 或 `IvyeaOpsServer.exe` 即可启动。
+> EXE 会自动生成配置、把登录信息保存到桌面和 `data\IvyeaOps 登录信息.txt`、创建桌面快捷方式、打开控制窗口并启动浏览器；以后双击桌面 `IvyeaOps` 或 `IvyeaOpsServer.exe` 即可启动，关闭控制窗口即停止服务。
 
 如果你想保留 Python venv 方式，也可以下载普通 `IvyeaOps.zip`：它已含编译好的前端和 Windows Python 3.12 后端依赖 wheels，安装时优先离线装依赖，失败再回退在线 pip。
 
@@ -148,7 +148,7 @@ bash scripts/start.sh
 1. **免 Python 包**：双击 `IvyeaOpsServer.exe`。
 2. **普通包 / 源码包**：双击「安装 IvyeaOps.bat」—— 自动检测 Python、装后端依赖、生成配置、创建桌面快捷方式。
 3. 以后**双击桌面「IvyeaOps」**—— 浏览器自动打开 **http://127.0.0.1:8001**。
-4. x64 包会自动检测新版本，侧边栏左下角版本号旁出现红点时可点击 **更新**；也可双击 **「更新 IvyeaOps Windows x64.bat」**。如需停止，双击 **「停止 IvyeaOps.bat」**。
+4. x64 包会自动检测新版本，侧边栏左下角版本号旁出现红点时可点击 **更新**；也可双击 **「更新 IvyeaOps Windows x64.bat」**。如需停止，直接关闭控制窗口；**「停止 IvyeaOps.bat」** 仍可作为备用入口。
 
 > Hermes / GBrain / Ollama 同样是可选组件：安装时可选，也可在首启向导或「系统配置 → 系统状态」里点「安装/修复」。
 

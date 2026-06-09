@@ -120,6 +120,14 @@ def _already_running(host: str, port: int) -> bool:
         return False
 
 
+def _control_window_enabled() -> bool:
+    return (
+        getattr(sys, "frozen", False)
+        and sys.platform.startswith("win")
+        and os.getenv("IVYEA_OPS_CONTROL_WINDOW", "1").lower() not in {"0", "false", "no"}
+    )
+
+
 def _bootstrap_frozen_env() -> None:
     if not getattr(sys, "frozen", False):
         return
@@ -171,6 +179,7 @@ def _bootstrap_frozen_env() -> None:
 _bootstrap_frozen_env()
 
 from app.core.config import settings
+from app.core.version import app_version
 from app.main import app
 
 
@@ -189,10 +198,143 @@ def _open_browser_when_ready() -> None:
     webbrowser.open(url)
 
 
+def _run_with_control_window() -> None:
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+    except Exception:
+        uvicorn.run(app, host=settings.host, port=settings.port)
+        return
+
+    browser_host = "127.0.0.1" if settings.host in {"0.0.0.0", "::"} else settings.host
+    url = f"http://{browser_host}:{settings.port}"
+    config = uvicorn.Config(app, host=settings.host, port=settings.port)
+    server = uvicorn.Server(config)
+    server_thread = threading.Thread(target=server.run, name="ivyeaops-server", daemon=True)
+
+    root = tk.Tk()
+    root.title("IvyeaOps")
+    root.geometry("420x220")
+    root.resizable(False, False)
+    try:
+        root.iconbitmap(str(_runtime_root() / "client" / "public" / "favicon.ico"))
+    except Exception:
+        pass
+
+    bg = "#0f172a"
+    panel = "#111827"
+    fg = "#e5e7eb"
+    muted = "#94a3b8"
+    green = "#22c55e"
+    root.configure(bg=bg)
+
+    frame = tk.Frame(root, bg=panel, padx=22, pady=18)
+    frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+    title = tk.Label(frame, text="IvyeaOps 正在运行", bg=panel, fg=fg, font=("Microsoft YaHei UI", 15, "bold"))
+    title.pack(anchor="w")
+
+    status_var = tk.StringVar(value="正在启动服务...")
+    status = tk.Label(frame, textvariable=status_var, bg=panel, fg=muted, font=("Microsoft YaHei UI", 10), pady=8)
+    status.pack(anchor="w")
+
+    detail = tk.Label(
+        frame,
+        text=f"地址: {url}\n版本: {app_version()}\n关闭此窗口会停止 IvyeaOps 后台服务。",
+        bg=panel,
+        fg=muted,
+        justify="left",
+        font=("Microsoft YaHei UI", 9),
+    )
+    detail.pack(anchor="w", pady=(0, 12))
+
+    buttons = tk.Frame(frame, bg=panel)
+    buttons.pack(fill="x", side="bottom")
+
+    stopping = False
+
+    def open_browser() -> None:
+        webbrowser.open(url)
+
+    def stop_server() -> None:
+        nonlocal stopping
+        if stopping:
+            return
+        stopping = True
+        status_var.set("正在停止服务...")
+        server.should_exit = True
+
+        def finish() -> None:
+            server_thread.join(timeout=8)
+            root.after(0, root.destroy)
+
+        threading.Thread(target=finish, daemon=True).start()
+
+    def on_close() -> None:
+        stop_server()
+
+    open_btn = tk.Button(
+        buttons,
+        text="打开浏览器",
+        command=open_browser,
+        bg=green,
+        fg="#052e16",
+        activebackground="#4ade80",
+        activeforeground="#052e16",
+        relief="flat",
+        padx=16,
+        pady=7,
+        font=("Microsoft YaHei UI", 9, "bold"),
+    )
+    open_btn.pack(side="left")
+
+    stop_btn = tk.Button(
+        buttons,
+        text="停止并退出",
+        command=stop_server,
+        bg="#1f2937",
+        fg=fg,
+        activebackground="#374151",
+        activeforeground=fg,
+        relief="flat",
+        padx=16,
+        pady=7,
+        font=("Microsoft YaHei UI", 9),
+    )
+    stop_btn.pack(side="left", padx=(10, 0))
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    server_thread.start()
+    threading.Thread(target=_open_browser_when_ready, daemon=True).start()
+
+    def poll() -> None:
+        if stopping:
+            return
+        if server_thread.is_alive():
+            if _already_running(settings.host, settings.port):
+                status_var.set("服务已启动，可在浏览器中使用。")
+            else:
+                status_var.set("正在启动服务...")
+            root.after(1000, poll)
+            return
+        status_var.set("服务已停止。")
+        messagebox.showwarning("IvyeaOps", "IvyeaOps 服务已停止。如需排错，请查看 logs\\ivyeaops.err.log。")
+        root.destroy()
+
+    root.after(1000, poll)
+    root.mainloop()
+    if server_thread.is_alive() and not server.should_exit:
+        server.should_exit = True
+        server_thread.join(timeout=8)
+
+
 if __name__ == "__main__":
     if getattr(sys, "frozen", False) and _already_running(settings.host, settings.port):
         browser_host = "127.0.0.1" if settings.host in {"0.0.0.0", "::"} else settings.host
         webbrowser.open(f"http://{browser_host}:{settings.port}")
+        sys.exit(0)
+    if _control_window_enabled():
+        _run_with_control_window()
         sys.exit(0)
     if getattr(sys, "frozen", False) and os.getenv("IVYEA_OPS_SERVER_OPEN_BROWSER", "1") != "0":
         threading.Thread(target=_open_browser_when_ready, daemon=True).start()

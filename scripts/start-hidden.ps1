@@ -60,7 +60,9 @@ if (Test-Path $PidFile) {
 # Start hidden: no console window stays in the taskbar. Logs are written to logs\.
 if (Test-Path $ServerExe) {
     $oldOpenBrowser = $env:IVYEA_OPS_SERVER_OPEN_BROWSER
+    $oldControlWindow = $env:IVYEA_OPS_CONTROL_WINDOW
     $env:IVYEA_OPS_SERVER_OPEN_BROWSER = "0"
+    $env:IVYEA_OPS_CONTROL_WINDOW = "0"
     try {
         $proc = Start-Process `
             -FilePath $ServerExe `
@@ -74,6 +76,11 @@ if (Test-Path $ServerExe) {
             Remove-Item Env:\IVYEA_OPS_SERVER_OPEN_BROWSER -ErrorAction SilentlyContinue
         } else {
             $env:IVYEA_OPS_SERVER_OPEN_BROWSER = $oldOpenBrowser
+        }
+        if ($null -eq $oldControlWindow) {
+            Remove-Item Env:\IVYEA_OPS_CONTROL_WINDOW -ErrorAction SilentlyContinue
+        } else {
+            $env:IVYEA_OPS_CONTROL_WINDOW = $oldControlWindow
         }
     }
 } else {
