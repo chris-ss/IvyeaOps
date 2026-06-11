@@ -762,7 +762,7 @@ export default function Brain() {
             </div>
             {uploadMode === "paste" ? (
               <div style={{ display: "grid", gap: 10 }}>
-                <MiniAlert kind="info">直接粘贴正文即可。后端会自动识别标题、目录、标签和摘要，目录不存在会在 /root/brain 下安全新建；前端不传目录，避免路径误写。</MiniAlert>
+                <MiniAlert kind="info">直接粘贴正文即可。后端会自动识别标题、目录、标签和摘要，目录不存在会在知识库根目录下安全新建；前端不传目录，避免路径误写。</MiniAlert>
                 <textarea className="inp" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="粘贴运营笔记、售后模板、供应商信息、广告复盘等正文..." style={{ minHeight: 260, resize: "vertical", lineHeight: 1.65 }} />
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ color: "var(--t3)", fontSize: 10 }}>{pasteText.trim().length.toLocaleString()} chars</span>
@@ -822,8 +822,8 @@ export default function Brain() {
           </div>
           <div className="g2">
             <div className="card"><div className="ct">SYSTEM</div><table className="tbl"><tbody>
-              <tr><td>Brain Root</td><td>{overview?.brain_root ?? "/root/brain"}</td></tr>
-              <tr><td>GBrain</td><td>{overview?.gbrain_bin ?? "/usr/local/bin/gbrain"}</td></tr>
+              <tr><td>Brain Root</td><td>{overview?.brain_root || "（未就绪）"}</td></tr>
+              <tr><td>GBrain</td><td>{overview?.gbrain_bin || "（未就绪）"}</td></tr>
               <tr><td>Search Mode</td><td>{overview?.search_mode ?? "-"}</td></tr>
               <tr><td>Doctor</td><td>{overview?.doctor_status ?? "-"}</td></tr>
               <tr><td>Git Dirty</td><td>{overview?.git_dirty ? <span className="cell-warn">有未提交改动</span> : <span className="cell-good">干净</span>}</td></tr>
@@ -935,7 +935,7 @@ export default function Brain() {
           </tbody></table></div>
           <div className="card"><div className="ct">ACTIONS</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="tbtn" onClick={runDoctor} disabled={loading}>运行 Doctor</button>
-            <button className="tbtn" onClick={async () => { setLoading(true); try { const r = await brainImport(); setFlash(r.raw || "导入完成"); await loadOverview(); } catch (e: any) { setErr(e?.response?.data?.detail ?? e.message); } finally { setLoading(false); } }} disabled={loading}>重新导入 /root/brain</button>
+            <button className="tbtn" onClick={async () => { setLoading(true); try { const r = await brainImport(); setFlash(r.raw || "导入完成"); await loadOverview(); } catch (e: any) { setErr(e?.response?.data?.detail ?? e.message); } finally { setLoading(false); } }} disabled={loading}>重新导入知识库目录</button>
           </div></div>
         </div>
       )}

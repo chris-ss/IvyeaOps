@@ -164,10 +164,21 @@ function Install-GBrain {
     # the knowledge-base board error "No database URL: database_url is missing from
     # config". v0.33.2.0 keeps the local PGLite (database_path) flow.
     $GbrainRef = "github:garrytan/gbrain#1a6b543cc536cb8c379ce30518390a38e6d2ee57"
-    # Remove any existing (possibly v0.35) global gbrain + clear bun's cache first,
-    # so the pinned commit definitely replaces it rather than a stale cached copy.
-    & $bun.Source remove -g gbrain 2>$null | Out-Null
-    & $bun.Source pm cache rm 2>$null | Out-Null
+    # Clean any prior (possibly v0.35 or half-installed) global gbrain so the pinned
+    # commit installs fresh. These are best-effort: with $ErrorActionPreference='Stop'
+    # a native command writing to stderr (e.g. `bun remove` when nothing is installed:
+    # "package.json is empty {}") throws a terminating error and aborts the whole
+    # install — which is exactly why repair kept failing. Force EA=Continue + try/catch
+    # so cleanup can never abort the install.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $bun.Source remove -g gbrain *>$null } catch {}
+    try { & $bun.Source pm cache rm *>$null } catch {}
+    # Nuke a leftover corrupt package dir — an aborted earlier install can leave a
+    # gbrain folder without src/cli.ts → runtime "Module not found .../src/cli.ts".
+    $gbPkg = "$env:USERPROFILE\.bun\install\global\node_modules\gbrain"
+    if (Test-Path $gbPkg) { try { Remove-Item -Recurse -Force $gbPkg *>$null } catch {} }
+    $ErrorActionPreference = $prevEAP
     & $bun.Source install -g $GbrainRef
     if ($LASTEXITCODE -ne 0) { throw "bun install -g $GbrainRef failed." }
     Refresh-Path
