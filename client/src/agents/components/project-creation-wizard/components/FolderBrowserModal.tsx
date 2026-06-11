@@ -19,6 +19,7 @@ export default function FolderBrowserModal({
   onFolderSelected,
 }: FolderBrowserModalProps) {
   const [currentPath, setCurrentPath] = useState('~');
+  const [parentPath, setParentPath] = useState<string | null>(null);
   const [folders, setFolders] = useState<FolderSuggestion[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [showHiddenFolders, setShowHiddenFolders] = useState(false);
@@ -35,6 +36,9 @@ export default function FolderBrowserModal({
       const result = await browseFilesystemFolders(pathToLoad);
       setCurrentPath(result.path);
       setFolders(result.suggestions);
+      // Prefer the backend-computed parent (knows the real OS + Windows drives);
+      // fall back to client-side derivation for older backends.
+      setParentPath(result.parent ?? getParentPath(result.path));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load folders');
     } finally {
@@ -89,8 +93,6 @@ export default function FolderBrowserModal({
       setCreatingFolder(false);
     }
   }, [currentPath, loadFolders, newFolderName]);
-
-  const parentPath = getParentPath(currentPath);
 
   if (!isOpen) {
     return null;
@@ -191,7 +193,9 @@ export default function FolderBrowserModal({
                   className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
                   <FolderOpen className="h-5 w-5 text-gray-400" />
-                  <span className="font-medium text-gray-700 dark:text-gray-300">..</span>
+                  <span className="font-medium text-gray-700 dark:text-gray-300">
+                    {parentPath === '__drives__' ? '← 选择磁盘（其它盘）' : '← 上一级'}
+                  </span>
                 </button>
               )}
 

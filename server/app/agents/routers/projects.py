@@ -154,10 +154,11 @@ def _validate_workspace_path(requested: str) -> str:
         raise HTTPException(400, "Workspace path is required")
     absolute = repos.normalize_project_path(os.path.abspath(normalized))
     root = repos.normalize_project_path(os.path.realpath(WORKSPACES_ROOT))
-    # Containment: the workspace must live inside the configured root. This is the
-    # primary security boundary.
-    if absolute != root and not absolute.startswith(root + "/"):
-        raise HTTPException(400, f"Workspace path must be within the allowed workspace root: {WORKSPACES_ROOT}")
+    # Workspaces may live anywhere the user browses to — opening projects on other
+    # drives (D:\…) is a core need on Windows. The agents board is admin-only and
+    # runs on the user's own machine (the terminal already grants full local
+    # access), so home-containment isn't the boundary; the system-critical-dir
+    # block below still applies. (POSIX _FORBIDDEN dirs are unaffected on Windows.)
     if absolute == "/":
         raise HTTPException(400, "Cannot use system-critical directories as workspace locations")
     # Block system-critical dirs — but never the workspace root itself or its

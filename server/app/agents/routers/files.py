@@ -324,12 +324,30 @@ async def upload_images(project_id: str, images: list[UploadFile] = File(...)) -
 
 # --- top-level: browse-filesystem / create-folder ---------------------------
 
+def _windows_drives() -> list[dict]:
+    """List available Windows drive roots (C:\\, D:\\, …) as folder entries."""
+    import string
+    letters: list[str] = []
+    try:
+        letters = [d for d in os.listdrives()]  # Python 3.12+: ['C:\\', 'D:\\', …]
+    except Exception:
+        letters = []
+    if not letters:
+        letters = [f"{c}:\\" for c in string.ascii_uppercase if os.path.exists(f"{c}:\\")]
+    return [{"path": d, "name": d.rstrip("\\"), "type": "directory"} for d in letters]
+
+
 @router.get("/browse-filesystem")
 async def browse_filesystem(path: Optional[str] = Query(None)) -> dict:
+    # Directory picker for opening a project at any folder. The agents board is
+    # admin-only and runs on the user's own machine (the terminal already grants
+    # full local access), so we browse the whole filesystem — not just the home
+    # dir — which is what users need to open projects on other drives (D:\…).
+    if os.name == "nt" and path == "__drives__":
+        return {"path": "__drives__", "parent": "", "isDrives": True,
+                "suggestions": _windows_drives()}
     target = _expand_workspace_path(path) if path else WORKSPACES_ROOT
     target = os.path.abspath(target)
-    if not target.startswith(os.path.abspath(WORKSPACES_ROOT)):
-        raise HTTPException(403, "Path outside workspace root")
     if not os.path.isdir(target):
         raise HTTPException(404, "Directory not accessible")
     tree = _build_file_tree(target, max_depth=1, depth=0)
@@ -346,7 +364,12 @@ async def browse_filesystem(path: Optional[str] = Query(None)) -> dict:
         existing = [d for d in dirs if d["name"] in common]
         others = [d for d in dirs if d["name"] not in common]
         suggestions = existing + others
-    return {"path": target, "suggestions": suggestions}
+    # Parent for the "上一级" button. At a root, go to the Windows drive list
+    # (so users can switch drives) or "" on POSIX (already at /).
+    parent = os.path.dirname(target)
+    if not parent or parent == target:
+        parent = "__drives__" if os.name == "nt" else ""
+    return {"path": target, "parent": parent, "suggestions": suggestions}
 
 
 class CreateFolderBody(BaseModel):
@@ -358,8 +381,8 @@ async def create_folder(body: CreateFolderBody) -> dict:
     if not body.path:
         raise HTTPException(400, "Path is required")
     target = os.path.abspath(_expand_workspace_path(body.path))
-    if not target.startswith(os.path.abspath(WORKSPACES_ROOT)):
-        raise HTTPException(403, "Path outside workspace root")
+    # Same trust model as browse-filesystem (admin-only, local machine): allow
+    # creating the project folder anywhere the user browses to, not just home.
     parent = os.path.dirname(target)
     if not os.path.exists(parent):
         raise HTTPException(404, "Parent directory does not exist")

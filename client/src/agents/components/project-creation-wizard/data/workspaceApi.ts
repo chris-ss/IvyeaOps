@@ -86,6 +86,9 @@ export const browseFilesystemFolders = async (pathToBrowse: string) => {
   return {
     path: data.path || pathToBrowse,
     suggestions: (data.suggestions || []) as FolderSuggestion[],
+    // Backend computes the parent per real OS (incl. Windows drive list at a
+    // drive root). undefined for older backends → modal falls back to client-side.
+    parent: (data as { parent?: string }).parent,
   };
 };
 
