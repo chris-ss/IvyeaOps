@@ -391,7 +391,7 @@ export default function Brain() {
       } else if (evt.type === "token") {
         setMessages((prev) => prev.map((m) => (m.id === tmpAsst ? { ...m, content: m.content + evt.text } : m)));
       } else if (evt.type === "done") {
-        setMessages((prev) => prev.map((m) => (m.id === tmpAsst ? evt.assistant_message : m)));
+        setMessages((prev) => prev.map((m) => (m.id === tmpAsst ? { ...evt.assistant_message, _engine: evt.engine, _citCount: evt.citations_count } : m)));
       } else if (evt.type === "error") {
         throw new Error(evt.detail);
       }
@@ -578,6 +578,15 @@ export default function Brain() {
       </div>
 
       {err && <div style={{ marginBottom: 10 }}><MiniAlert kind="bad">{err}</MiniAlert></div>}
+      {overview?.ready && overview.ready.version_compatible === false && (
+        <div style={{ marginBottom: 10 }}><MiniAlert kind="bad">{overview.ready.hint || "GBrain 版本不兼容，知识库未就绪。"}请到「系统配置 → 系统状态」对 GBrain 执行「安装/修复」（会清掉旧版本并装回兼容版）。</MiniAlert></div>
+      )}
+      {overview?.ready && overview.ready.db_ready && overview.ready.actions?.length > 0 && (
+        <div style={{ marginBottom: 10 }}><MiniAlert kind="ok">已自动配置：{overview.ready.actions.join("；")}。</MiniAlert></div>
+      )}
+      {overview?.ready && overview.ready.db_ready && !overview.ready.embed_ready && overview.ready.hint && (
+        <div style={{ marginBottom: 10 }}><MiniAlert kind="info">{overview.ready.hint}</MiniAlert></div>
+      )}
       {flash && <div style={{ marginBottom: 10 }}><MiniAlert kind="info"><pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--font)" }}>{flash}</pre></MiniAlert></div>}
       {noEmbed && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">未配置 Embedding：当前以关键词检索为主（功能正常）。如需语义检索，<a href="/hub-settings" style={{ color: "var(--acc)" }}>前往系统配置 → 智能体 → 知识库语义检索 →</a> 选择服务商（Ollama 本地免费）。</MiniAlert></div>}
       {chatStatus && !chatStatus.configured && tab === "chat" && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">Hermes 对话不可用：没有找到 hermes CLI。上传、搜索、页面编辑仍可用。</MiniAlert></div>}
@@ -706,6 +715,15 @@ export default function Brain() {
                             {c.slug || c.snippet?.slice(0, 24) || "片段"}
                           </button>
                         ))}
+                      </div>
+                    )}
+                    {m.role === "assistant" && (m as any)._engine && (
+                      <div style={{ marginTop: 5, fontSize: 10, color: "var(--t3)", display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                        <span style={{ border: "1px solid var(--b)", borderRadius: 4, padding: "0 5px" }}>
+                          {(m as any)._engine === "hermes" ? "Hermes 本机模型" : "兜底大模型"}
+                        </span>
+                        <span>·</span>
+                        <span>{(m as any)._citCount > 0 ? `检索命中知识 ${(m as any)._citCount} 条` : "未命中知识库（凭模型常识作答）"}</span>
                       </div>
                     )}
                     {m.role === "assistant" && !m.id.startsWith("local-") && (

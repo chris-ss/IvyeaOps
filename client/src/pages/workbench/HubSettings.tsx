@@ -206,10 +206,10 @@ function SecretInput({ value, onChange, placeholder }: { value: string; onChange
 
 // ── LLM model block ───────────────────────────────────────────────────────────
 
-type ProviderDef = { id: string; label: string; defaultModel: string; envVar: string; hint?: string };
+type ProviderDef = { id: string; label: string; defaultModel: string; envVar: string; hint?: string; examples?: string };
 
 const PROVIDERS: ProviderDef[] = [
-  { id: "deepseek",   label: "DeepSeek",   defaultModel: "deepseek-chat",                      envVar: "DEEPSEEK_API_KEY",            hint: "国内可直连，性价比高" },
+  { id: "deepseek",   label: "DeepSeek",   defaultModel: "deepseek-chat",                      envVar: "DEEPSEEK_API_KEY",            hint: "国内可直连，性价比高", examples: "deepseek-chat / deepseek-reasoner" },
   { id: "xiaomi",     label: "MiMo",        defaultModel: "mimo-v2.5-pro",                      envVar: "XIAOMI_API_KEY",              hint: "小米大模型，国内可用" },
   { id: "anthropic",  label: "Anthropic",  defaultModel: "claude-sonnet-4-6",                  envVar: "ANTHROPIC_API_KEY",           hint: "Claude 系列" },
   { id: "openai",     label: "OpenAI",     defaultModel: "gpt-4o",                             envVar: "OPENAI_API_KEY" },
@@ -382,7 +382,7 @@ function LLMModelBlock({
 
       {provider && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10, alignItems: "end" }}>
-          <Field label="模型名称">
+          <Field label="模型名称" hint={info?.examples ? `可用：${info.examples}` : (info?.defaultModel ? `推荐：${info.defaultModel}` : undefined)}>
             <TxtInput
               value={model}
               onChange={v => set(modelKey, v as HubSettings[typeof modelKey])}

@@ -236,6 +236,11 @@ if [ "$ANS" = "y" ] || [ "$ANS" = "Y" ]; then
   # missing from config". v0.33.2.0 keeps the local PGLite (database_path) flow.
   GBRAIN_REF="github:garrytan/gbrain#1a6b543cc536cb8c379ce30518390a38e6d2ee57"
   if [ -n "$BUN" ] && [ -x "$BUN" ]; then
+    # Clean reinstall: drop any existing (possibly v0.35) global gbrain + clear
+    # bun's cache first, so the pinned commit definitely replaces a stale copy
+    # rather than the old "No database URL" version sticking around.
+    "$BUN" remove -g gbrain >/dev/null 2>&1 || true
+    "$BUN" pm cache rm >/dev/null 2>&1 || true
     "$BUN" install -g "$GBRAIN_REF" || warn "GBrain 安装失败"
     GBRAIN="$HOME/.bun/bin/gbrain"
     if [ -x "$GBRAIN" ]; then

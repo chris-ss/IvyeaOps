@@ -635,6 +635,13 @@ export type BrainOverview = {
   git_dirty: boolean;
   git_status: string;
   stats: BrainStats;
+  ready?: {
+    db_ready: boolean;
+    embed_ready: boolean;
+    version_compatible: boolean;
+    actions: string[];
+    hint: string;
+  };
 };
 
 export type BrainSearchItem = {
@@ -858,7 +865,7 @@ export async function brainChatSend(sessionId: string, content: string) {
 export type BrainChatStreamEvent =
   | { type: "start"; user_message: BrainChatMessage | null; citations: BrainSearchItem[]; regenerated: boolean }
   | { type: "token"; text: string }
-  | { type: "done"; assistant_message: BrainChatMessage; truncated?: boolean }
+  | { type: "done"; assistant_message: BrainChatMessage; truncated?: boolean; engine?: string; citations_count?: number }
   | { type: "error"; detail: string };
 
 /** Stream a hermes answer over SSE. Calls onEvent for each event; resolves when the stream ends. */

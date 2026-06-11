@@ -72,7 +72,21 @@ def _handle(fn, *args, **kwargs):
 
 @router.get("/overview")
 def overview() -> dict[str, Any]:
-    return _handle(gb.overview)
+    # Self-heal first: auto-init the DB + auto-wire Ollama embedding so the board
+    # works without manual setup. If the DB still can't come up (e.g. incompatible
+    # gbrain version), return the readiness info — with an actionable hint — instead
+    # of letting gb.overview() raise the raw "No database URL" error.
+    try:
+        ready = gb.ensure_ready()
+    except Exception as e:  # noqa: BLE001 — never let self-heal break the board
+        ready = {"db_ready": False, "version_compatible": True, "actions": [], "hint": str(e)}
+    if not ready.get("db_ready"):
+        return {"ready": ready, "embed_configured": False, "stats": {},
+                "brain_root": "", "gbrain_bin": "", "doctor_status": "not_ready",
+                "search_mode": "unknown", "git_dirty": False, "git_status": ""}
+    ov = _handle(gb.overview)
+    ov["ready"] = ready
+    return ov
 
 
 @router.get("/stats")
@@ -314,6 +328,7 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
 
         parts: list[str] = []
         timed_out = False
+        engine = ""  # which engine actually produced the answer: hermes | global
 
         # Prefer Hermes (token-by-token) when its agent venv is present.
         if bc.hermes_available():
@@ -369,6 +384,9 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
                     except Exception:
                         pass
 
+        if "".join(parts).strip():
+            engine = "hermes"
+
         # Fall back to the unified global text chain (DeepSeek → Apimart → 全局兜底
         # 大模型) when Hermes is absent or produced nothing — so the knowledge-base
         # chat works without any local agent CLI, and an empty Hermes reply still
@@ -379,6 +397,8 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
                     parts.append(chunk)
                     yield _sse({"type": "token", "text": chunk})
                 timed_out = False
+                if "".join(parts).strip():
+                    engine = "global"
             except Exception as e:  # noqa: BLE001
                 if not "".join(parts).strip():
                     yield _sse({"type": "error", "detail": f"对话失败（Hermes 不可用，全局兜底也失败）：{e}"})
@@ -393,7 +413,13 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
         except (gb.GBrainError, bc.BrainChatError) as e:
             yield _sse({"type": "error", "detail": str(e)})
             return
-        yield _sse({"type": "done", "assistant_message": assistant, "truncated": timed_out})
+        yield _sse({
+            "type": "done",
+            "assistant_message": assistant,
+            "truncated": timed_out,
+            "engine": engine,
+            "citations_count": len(turn["citations"]),
+        })
 
     return StreamingResponse(
         gen(),

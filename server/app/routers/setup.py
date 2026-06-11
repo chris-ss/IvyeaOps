@@ -257,6 +257,21 @@ def start_windows_update(_u: str = Depends(require_user)):
     return {"ok": True, "detail": "更新窗口已启动。"}
 
 
+# Pin GBrain to a known-good commit. Upstream HEAD (v0.35+) changed the config
+# schema to require database_url and broke `init --pglite`, so an *unpinned*
+# install (what this used to do) left the 知识库 board erroring "No database URL".
+# Clean-reinstall (remove + cache rm) so an already-installed v0.35 is replaced.
+_GBRAIN_REF = "github:garrytan/gbrain#1a6b543cc536cb8c379ce30518390a38e6d2ee57"
+_GBRAIN_INSTALL_SH = (
+    'command -v bun >/dev/null || curl -fsSL https://bun.sh/install | bash; '
+    'export PATH="$HOME/.bun/bin:$PATH"; '
+    'bun remove -g gbrain >/dev/null 2>&1 || true; '
+    'bun pm cache rm >/dev/null 2>&1 || true; '
+    f'bun install -g {_GBRAIN_REF}; '
+    'mkdir -p "$HOME/brain"; cd "$HOME/brain" && (gbrain init --pglite || true)'
+)
+
+
 async def _component_install_stream(component: str) -> AsyncGenerator[str, None]:
     if component not in _COMPONENTS:
         yield f"data: ERROR: unknown component '{component}'. Supported: {', '.join(sorted(_COMPONENTS))}\n\n"
@@ -279,7 +294,7 @@ async def _component_install_stream(component: str) -> AsyncGenerator[str, None]
     elif component == "hermes":
         cmd = ["bash", "-lc", "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"]
     elif component == "gbrain":
-        cmd = ["bash", "-lc", "command -v bun >/dev/null || curl -fsSL https://bun.sh/install | bash; export PATH=\"$HOME/.bun/bin:$PATH\"; bun install -g github:garrytan/gbrain; mkdir -p \"$HOME/brain\"; cd \"$HOME/brain\" && (gbrain init --pglite || true)"]
+        cmd = ["bash", "-lc", _GBRAIN_INSTALL_SH]
     elif component == "ollama":
         cmd = ["bash", "-lc", "command -v ollama >/dev/null || curl -fsSL https://ollama.com/install.sh | sh; ollama pull nomic-embed-text"]
     elif component in _INSTALLABLE:
@@ -287,7 +302,7 @@ async def _component_install_stream(component: str) -> AsyncGenerator[str, None]
             yield event
         return
     else:
-        cmd = ["bash", "-lc", "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash; command -v bun >/dev/null || curl -fsSL https://bun.sh/install | bash; export PATH=\"$HOME/.bun/bin:$PATH\"; bun install -g github:garrytan/gbrain; mkdir -p \"$HOME/brain\"; cd \"$HOME/brain\" && (gbrain init --pglite || true)"]
+        cmd = ["bash", "-lc", "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash; " + _GBRAIN_INSTALL_SH]
 
     yield f"data: > {' '.join(cmd)}\n\n"
     env = {**os.environ}

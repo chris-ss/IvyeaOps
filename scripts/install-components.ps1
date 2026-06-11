@@ -158,12 +158,16 @@ function Install-GBrain {
     }
     if (-not $bun) { throw "bun not found. Cannot install GBrain." }
 
-    Write-Info "Installing/updating GBrain..."
+    Write-Info "Installing/updating GBrain (clean reinstall to the pinned version)..."
     # Pin to a known-good commit. Upstream HEAD (v0.35+) changed the config schema
     # to require database_url and broke `init --pglite`, so an unpinned install made
     # the knowledge-base board error "No database URL: database_url is missing from
     # config". v0.33.2.0 keeps the local PGLite (database_path) flow.
     $GbrainRef = "github:garrytan/gbrain#1a6b543cc536cb8c379ce30518390a38e6d2ee57"
+    # Remove any existing (possibly v0.35) global gbrain + clear bun's cache first,
+    # so the pinned commit definitely replaces it rather than a stale cached copy.
+    & $bun.Source remove -g gbrain 2>$null | Out-Null
+    & $bun.Source pm cache rm 2>$null | Out-Null
     & $bun.Source install -g $GbrainRef
     if ($LASTEXITCODE -ne 0) { throw "bun install -g $GbrainRef failed." }
     Refresh-Path

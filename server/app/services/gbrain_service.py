@@ -201,6 +201,98 @@ def _safe_rel_path(rel_path: str) -> Path:
     return target
 
 
+def _gbrain_config_path() -> Path:
+    return Path.home() / ".gbrain" / "config.json"
+
+
+def _db_configured() -> bool:
+    """True when gbrain's config points at a usable database (pglite path or url)."""
+    p = _gbrain_config_path()
+    if not p.exists():
+        return False
+    try:
+        import json
+        cfg = json.loads(p.read_text())
+        return bool(cfg.get("database_path") or cfg.get("database_url"))
+    except Exception:
+        return False
+
+
+def _ollama_models(base: str = "http://127.0.0.1:11434") -> list[str]:
+    """Names of models a locally-running ollama has, or [] if it's not reachable."""
+    try:
+        import httpx
+        r = httpx.get(f"{base.rstrip('/')}/api/tags", timeout=1.5)
+        if r.status_code < 400:
+            return [str(m.get("name", "")) for m in (r.json().get("models") or [])]
+    except Exception:
+        pass
+    return []
+
+
+def ensure_ready() -> dict[str, Any]:
+    """Self-heal the knowledge base on board load, so the user doesn't have to
+    hand-configure anything:
+      1. If the local DB isn't initialised → run ``gbrain init --pglite``. If that
+         fails because the installed gbrain is an incompatible (database_url-only)
+         version, report it so the UI can offer a reinstall instead of showing the
+         raw "No database URL" error.
+      2. If a local Ollama is running with nomic-embed-text and embedding isn't
+         wired yet → configure it, enabling semantic search automatically.
+    Best-effort and idempotent; cheap once everything is already configured.
+    """
+    import json
+    actions: list[str] = []
+    result: dict[str, Any] = {"db_ready": False, "embed_ready": False,
+                              "version_compatible": True, "actions": actions, "hint": ""}
+
+    # 1. Database
+    if not _db_configured():
+        out = ""
+        try:
+            Path(_brain_root()).mkdir(parents=True, exist_ok=True)
+            proc = subprocess.run(
+                [_gbrain_bin(), "init", "--pglite"], cwd=str(_brain_root()), env=_env(),
+                text=True, capture_output=True, timeout=120, **no_window_kwargs())
+            out = (proc.stdout + proc.stderr).lower()
+        except Exception as e:  # noqa: BLE001
+            out = str(e).lower()
+        if _db_configured():
+            actions.append("已自动初始化本地知识库（PGLite）")
+        else:
+            if any(k in out for k in ("database_url", "--supabase", "--url")):
+                result["version_compatible"] = False
+                result["hint"] = ("检测到不兼容的 GBrain 版本（要求 database_url）。请在"
+                                  "「系统配置 → 系统状态」点 GBrain 的「安装/修复」重装到兼容版本。")
+            else:
+                result["hint"] = "GBrain 本地库初始化失败，可重试或重装 GBrain。"
+            return result
+    result["db_ready"] = True
+
+    # 2. Embedding via Ollama
+    embed_model = ""
+    try:
+        embed_model = str(json.loads(_gbrain_config_path().read_text()).get("embedding_model") or "")
+    except Exception:
+        pass
+    if embed_model.startswith("ollama:"):
+        result["embed_ready"] = True
+    else:
+        models = _ollama_models()
+        if models and any("nomic-embed-text" in m for m in models):
+            try:
+                from app.services.hermes_config_sync import sync_gbrain_embedding
+                sync_gbrain_embedding("ollama", "nomic-embed-text", "")
+                actions.append("检测到 Ollama，已自动启用本地语义检索（nomic-embed-text）")
+                result["embed_ready"] = True
+            except Exception:
+                pass
+        elif models:
+            result["hint"] = ("Ollama 已运行但未拉取 embedding 模型；执行 "
+                              "`ollama pull nomic-embed-text` 后即可自动启用语义检索。")
+    return result
+
+
 def overview() -> dict[str, Any]:
     stats = _parse_stats(_run_gbrain(["stats"], timeout=30).stdout)
     doctor_raw = ""
