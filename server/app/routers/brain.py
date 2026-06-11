@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.core.proc import no_window_kwargs
 from app.core.security import require_user
 from app.services import brain_chat_service as bc
 from app.services import gbrain_service as gb
@@ -242,6 +243,7 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
             env=bc._hermes_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **no_window_kwargs(),  # no black console flash on Windows
         )
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=180)
@@ -342,6 +344,7 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
                     stderr=asyncio.subprocess.DEVNULL,
                     cwd=spec["cwd"],
                     env=spec["env"],
+                    **no_window_kwargs(),  # no black console flash on Windows
                 )
             except Exception:  # noqa: BLE001 — degrade to the global chain below
                 proc = None

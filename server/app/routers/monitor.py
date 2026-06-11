@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 from typing import List, Optional
+
+_WINDOWS = sys.platform.startswith("win")
 
 import psutil
 from fastapi import APIRouter, Depends
@@ -214,6 +217,10 @@ _SERVICE_CATALOG: dict[str, tuple[str, str, str]] = {
 @router.get("/services", response_model=List[ServiceStatus])
 def services(_user: str = Depends(require_user)) -> List[ServiceStatus]:
     out: List[ServiceStatus] = []
+    # systemd is Linux-only — on Windows return empty instead of a list of
+    # bogus "error" rows, so the panel shows "无" rather than all-red.
+    if _WINDOWS:
+        return out
     for name in _WATCHED_SERVICES:
         try:
             r = subprocess.run(
@@ -246,6 +253,8 @@ def services(_user: str = Depends(require_user)) -> List[ServiceStatus]:
 def logs(_user: str = Depends(require_user), n: int = 20) -> dict:
     """Tail nginx access log (most recent N lines)."""
     n = max(1, min(200, n))
+    if _WINDOWS:
+        return {"lines": [], "note": "nginx 访问日志为 Linux 部署专用，Windows 不适用。"}
     try:
         r = subprocess.run(
             ["tail", "-n", str(n), "/var/log/nginx/access.log"],
@@ -641,7 +650,7 @@ def _scan_claude_sessions(since: float) -> list:
         session_input = session_output = session_cache_read = session_cache_write = 0
         model = None
         ts = jsonl.stat().st_mtime
-        with open(jsonl) as fh:
+        with open(jsonl, encoding="utf-8") as fh:
             for line in fh:
                 try:
                     d = _json.loads(line)

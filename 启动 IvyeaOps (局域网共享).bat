@@ -1,5 +1,8 @@
 @echo off
 title IvyeaOps (LAN Share)
+rem Force Python UTF-8 mode so reading UTF-8/中文 config & log files never hits a
+rem GBK decode error on 中文 Windows (default code page cp936).
+set PYTHONUTF8=1
 cd /d "%~dp0server"
 if not exist ".venv\Scripts\python.exe" (
   echo [ERROR] Not installed yet. Run the installer first ^(double-click the install .bat^).

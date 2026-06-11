@@ -369,7 +369,7 @@ def _read_hermes_models() -> list[str]:
     import yaml
     config_path = os.path.join(os.path.expanduser("~"), ".hermes", "config.yaml")
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
     except Exception:
         return []
@@ -397,7 +397,7 @@ def _read_claude_models() -> list[str]:
     settings_path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
     configured = ""
     try:
-        with open(settings_path) as f:
+        with open(settings_path, encoding="utf-8") as f:
             configured = (json.load(f).get("model") or "").strip()
     except Exception:
         configured = ""
@@ -419,7 +419,7 @@ def _claude_authenticated() -> bool:
     if os.path.isfile(os.path.join(home, ".claude", ".credentials.json")):
         return True
     try:
-        with open(os.path.join(home, ".claude.json")) as f:
+        with open(os.path.join(home, ".claude.json"), encoding="utf-8") as f:
             if json.load(f).get("oauthAccount"):
                 return True
     except Exception:
@@ -434,7 +434,7 @@ def _read_codex_models() -> list[str]:
     home = os.path.expanduser("~")
     default = ""
     try:
-        with open(os.path.join(home, ".codex", "config.toml")) as f:
+        with open(os.path.join(home, ".codex", "config.toml"), encoding="utf-8") as f:
             for line in f:
                 s = line.strip()
                 if "=" in s and s.split("=", 1)[0].strip() == "model":
@@ -446,7 +446,7 @@ def _read_codex_models() -> list[str]:
     if default:
         models.append(default)
     try:
-        with open(os.path.join(home, ".codex", "models_cache.json")) as f:
+        with open(os.path.join(home, ".codex", "models_cache.json"), encoding="utf-8") as f:
             for m in json.load(f).get("models", []):
                 if m.get("visibility") == "list":
                     slug = (m.get("slug") or "").strip()

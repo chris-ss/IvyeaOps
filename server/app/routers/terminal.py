@@ -704,6 +704,18 @@ async def terminal_live_ws(websocket: WebSocket, session_id: str) -> None:
         await websocket.close(code=4404)
         return
     await websocket.accept()
+    if _WINDOWS:
+        # PTY isn't available on Windows. Send a clear message and idle instead of
+        # closing — closing makes the client auto-reconnect in a tight loop (the
+        # terminal "屏闪" symptom). Drain input until the client goes away.
+        try:
+            await websocket.send_json({"type": "error",
+                                       "detail": "内置终端在 Windows 上不可用（不支持 PTY）。其余功能正常。"})
+            while True:
+                await websocket.receive_text()
+        except Exception:
+            pass
+        return
     if not live_manager.is_live(session_id):
         try:
             await live_manager.start(session_id, shell=sess["shell"], workdir=sess.get("workdir"))

@@ -138,6 +138,14 @@ def _bootstrap_frozen_env() -> None:
         sys.stdout = (logs_dir / "ivyeaops.out.log").open("a", encoding="utf-8", buffering=1)
     if sys.stderr is None:
         sys.stderr = (logs_dir / "ivyeaops.err.log").open("a", encoding="utf-8", buffering=1)
+    # When a console *is* attached (the control window), it defaults to the
+    # system code page (GBK on 中文 Windows). Printing the app's Chinese log
+    # lines then raises UnicodeEncodeError and can crash startup — force UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:
+            pass
 
     env_file = root / "server" / ".env"
     if env_file.exists():

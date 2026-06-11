@@ -270,7 +270,7 @@ def _migrate_gbrain_dims(new_dims: int) -> bool:
     if not cfg_path.exists():
         return False
     try:
-        cfg = json.loads(cfg_path.read_text())
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     except Exception:
         return False
     db_path = cfg.get("database_path")
@@ -354,14 +354,14 @@ def sync_gbrain_embedding(provider: str, model: str, api_key: str) -> None:
 
     if _GBRAIN_CONFIG.exists():
         try:
-            cfg = json.loads(_GBRAIN_CONFIG.read_text())
+            cfg = json.loads(_GBRAIN_CONFIG.read_text(encoding="utf-8"))
         except Exception:
             cfg = {}
         cfg["embedding_model"] = full_model
         if dims:
             cfg["embedding_dimensions"] = dims
         tmp = _GBRAIN_CONFIG.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(cfg, indent=2))
+        tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         tmp.replace(_GBRAIN_CONFIG)
     else:
         import logging

@@ -212,7 +212,7 @@ def _db_configured() -> bool:
         return False
     try:
         import json
-        cfg = json.loads(p.read_text())
+        cfg = json.loads(p.read_text(encoding="utf-8"))
         return bool(cfg.get("database_path") or cfg.get("database_url"))
     except Exception:
         return False
@@ -290,7 +290,7 @@ def ensure_ready() -> dict[str, Any]:
     # 2. Embedding via Ollama
     embed_model = ""
     try:
-        embed_model = str(json.loads(_gbrain_config_path().read_text()).get("embedding_model") or "")
+        embed_model = str(json.loads(_gbrain_config_path().read_text(encoding="utf-8")).get("embedding_model") or "")
     except Exception:
         pass
     if embed_model.startswith("ollama:"):
@@ -340,7 +340,7 @@ def overview() -> dict[str, Any]:
         from pathlib import Path as _P
         cfg_path = _P.home() / ".gbrain" / "config.json"
         if cfg_path.exists():
-            gcfg = _json.loads(cfg_path.read_text())
+            gcfg = _json.loads(cfg_path.read_text(encoding="utf-8"))
             embed_model = str(gcfg.get("embedding_model") or "")
             if ":" in embed_model:
                 embed_provider = embed_model.split(":", 1)[0]

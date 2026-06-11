@@ -23,6 +23,8 @@ from app.core.proc import no_window_kwargs
 import asyncio
 import shutil
 import subprocess
+import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -38,7 +40,9 @@ SERVICE_UNIT = "ivyea-ops.service"
 _DIAGNOSE_TIMEOUT_S = 900
 _DIFF_MAX_CHARS = 60_000
 _LOG_TAIL_CHARS = 8_000
-_WORKTREE_PARENT = Path("/tmp/ivyea-ops-autofix")
+# Use the OS temp dir (gettempdir) instead of a hardcoded /tmp — Windows has no
+# /tmp, which would otherwise drop the worktree on a nonexistent path.
+_WORKTREE_PARENT = Path(tempfile.gettempdir()) / "ivyea-ops-autofix"
 
 
 @dataclass
@@ -305,6 +309,13 @@ def restart(job_id: str) -> Dict[str, Any]:
     job = _require(job_id)
     if job.status not in ("applied", "failed"):
         raise RuntimeError(f"当前状态 {job.status} 无法重启")
+    # systemd is Linux-only. On Windows there's no service unit to restart, so
+    # tell the user to restart the app manually instead of failing obscurely.
+    if sys.platform.startswith("win"):
+        job.status = "applied"
+        job.updated_at = time.time()
+        return {"ok": True, "restarting": False,
+                "detail": "修复已应用。Windows 下请手动重启 IvyeaOps（关闭后重新打开）使其生效。"}
     job.status = "restarting"
     job.updated_at = time.time()
     subprocess.Popen(

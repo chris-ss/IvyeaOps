@@ -255,6 +255,17 @@ export default function MainLayout() {
     if (location.pathname === "/terminal") setTermMounted(true);
   }, [location.pathname]);
 
+  // Safety net for the Windows "页面无法滚动、刷新才好" report: modals/dropdowns
+  // lock `document.body.style.overflow = "hidden"` and restore it on unmount.
+  // If one leaks (e.g. unmounted mid-transition), every page stays scroll-locked
+  // until a hard refresh. On each route change no page-scoped overlay should
+  // still be open, so clear a stuck lock — cheap, and a no-op when nothing leaked.
+  useEffect(() => {
+    if (document.body.style.overflow === "hidden") {
+      document.body.style.overflow = "";
+    }
+  }, [location.pathname]);
+
   // 智能体会话(/agents):首次访问后常驻挂载,切板块秒回、WS/会话状态不丢。
   useEffect(() => {
     if (location.pathname === "/agents") setCcuiMounted(true);
