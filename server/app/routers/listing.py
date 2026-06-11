@@ -169,6 +169,94 @@ def imgflow_start(_u: str = Depends(require_user)):
     }
 
 
+# ─── Native Amazon scrape (no Docker) ──────────────────────────────────────────
+# The full main-image set lives in the product page's inline JSON as "hiRes"
+# entries. Fetch the page with curl — its TLS fingerprint passes Amazon's anti-bot
+# where httpx/undici is blocked, and curl ships with Windows 10/11 + every Linux.
+# This makes the full image set work WITHOUT the amazon-image-workflow Docker
+# stack; that service is now just an optional fallback for when curl is blocked.
+
+_REAL_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+_MKT_DOMAIN = {
+    "US": "amazon.com", "UK": "amazon.co.uk", "DE": "amazon.de", "JP": "amazon.co.jp",
+    "FR": "amazon.fr", "IT": "amazon.it", "ES": "amazon.es", "CA": "amazon.ca",
+    "AU": "amazon.com.au", "MX": "amazon.com.mx", "IN": "amazon.in", "NL": "amazon.nl",
+    "SE": "amazon.se", "PL": "amazon.pl", "AE": "amazon.ae", "SG": "amazon.sg",
+}
+
+
+def _amazon_domain(marketplace: str) -> str:
+    return _MKT_DOMAIN.get((marketplace or "US").upper(), "amazon.com")
+
+
+def _parse_amazon_html(html_text: str) -> dict:
+    """Extract title / bullets / full main-image set from raw Amazon product HTML.
+    Images come from the inline "hiRes" (then "large") JSON, not the DOM thumbnails
+    (which are injected by JS post-load and absent from static HTML)."""
+    import html as _html
+    images: list[str] = []
+    seen: set[str] = set()
+    for pat in (r'"hiRes"\s*:\s*"(https?://[^"\\]+)"', r'"large"\s*:\s*"(https?://[^"\\]+)"'):
+        if images:
+            break
+        for m in re.finditer(pat, html_text):
+            u = m.group(1)
+            if u not in seen:
+                seen.add(u)
+                images.append(u)
+            if len(images) >= 7:
+                break
+    if not images:
+        m = re.search(r'id="landingImage"[^>]*data-old-hires="(https?://[^"]+)"', html_text) \
+            or re.search(r'id="landingImage"[^>]*src="(https?://[^"]+)"', html_text)
+        if m:
+            images.append(m.group(1))
+
+    tm = re.search(r'id="productTitle"[^>]*>(.*?)</', html_text, re.S)
+    title = _html.unescape(re.sub(r"\s+", " ", tm.group(1)).strip()) if tm else ""
+
+    bullets: list[str] = []
+    fb = re.search(r'id="feature-bullets"(.*?)</ul>', html_text, re.S)
+    if fb:
+        for bm in re.finditer(r'class="a-list-item[^"]*"[^>]*>(.*?)</span>', fb.group(1), re.S):
+            t = _html.unescape(re.sub(r"<[^>]+>", "", bm.group(1)))
+            t = re.sub(r"\s+", " ", t).strip()
+            if t and t not in bullets:
+                bullets.append(t)
+
+    return {"title": title, "bullets": bullets[:5], "description": "", "imageUrls": images}
+
+
+async def _scrape_amazon_native(asin: str, marketplace: str) -> Optional[dict]:
+    """Fetch the Amazon product page via curl and parse the full main-image set.
+    Returns None when curl is unavailable, the page is too small (anti-bot
+    challenge), or a captcha is hit — callers then fall back to sorftime."""
+    import shutil
+    from app.core.proc import no_window_kwargs
+    curl = shutil.which("curl")
+    if not curl:
+        return None
+    url = f"https://www.{_amazon_domain(marketplace)}/dp/{asin}"
+    args = [curl, "-sS", "-L", "--max-time", "25", "--compressed", "-A", _REAL_UA, url]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            **no_window_kwargs())
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except Exception:
+        return None
+    html_text = (out or b"").decode("utf-8", "replace")
+    if len(html_text) < 50_000:
+        return None  # likely an anti-bot challenge page, not the real product page
+    if re.search(r"Type the characters you see in this image", html_text, re.I) or \
+       re.search(r"we just need to make sure you're not a robot", html_text, re.I):
+        return None
+    parsed = _parse_amazon_html(html_text)
+    return parsed if parsed.get("imageUrls") else None
+
+
 def _apimart_key() -> str:
     """Return configured Apimart key, empty when unset. Image-generation
     callers should surface a clear 'not configured' error rather than
@@ -325,10 +413,23 @@ async def scrape(project_id: str, _user: str = Depends(require_user)):
 
     data = {}
 
-    # 1) Try imgflow scrape (amazon-image-workflow on :3001). This is the only
-    #    source that returns a listing's FULL main-image set (all carousel images).
+    # 0) Native curl scrape — returns the FULL main-image set with no Docker / no
+    #    extra service. This is the primary path now; curl ships with Windows 10+/
+    #    Linux and works from the user's residential IP.
+    native_ok = False
+    try:
+        nd = await _scrape_amazon_native(asin, marketplace)
+        if nd and nd.get("imageUrls"):
+            data = nd
+            native_ok = True
+    except Exception:
+        pass
+
+    # 1) Optional: imgflow scrape (amazon-image-workflow on :3001) — only used as a
+    #    fallback now, for users who run the Docker service and where curl was
+    #    blocked by anti-bot.
     imgflow_ok = False
-    if imgflow_id:
+    if not native_ok and imgflow_id:
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(f"{_imgflow_base()}/scrape/{imgflow_id}")
@@ -378,11 +479,15 @@ async def scrape(project_id: str, _user: str = Depends(require_user)):
     if image_urls:
         data["reference_images"] = image_urls
 
-    # Tell the frontend where the data came from so it can prompt the user to
-    # enable the scrape service when only the single sorftime image is available.
-    data["scrape_source"] = "imgflow" if imgflow_ok else ("sorftime" if image_urls else "none")
-    # Full image set is only available via the imgflow scrape service.
-    data["full_images_available"] = imgflow_ok
+    # Tell the frontend where the data came from. The Docker-service hint only
+    # shows on the sorftime fallback (i.e. native curl scrape was blocked).
+    data["scrape_source"] = (
+        "native" if native_ok else
+        "imgflow" if imgflow_ok else
+        "sorftime" if image_urls else "none"
+    )
+    # The full main-image set is available from native scrape or the imgflow service.
+    data["full_images_available"] = native_ok or imgflow_ok
 
     conn = _db()
     conn.execute(

@@ -905,26 +905,19 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
         </div>
         {scrapeData.scrape_source === "sorftime" && (
           <div style={{ fontSize: 10, padding: 10, background: "rgba(245,158,11,.10)", border: "1px solid rgba(245,158,11,.35)", borderRadius: 4, lineHeight: 1.6, color: "var(--t2)" }}>
-            <strong>只采到 1 张白底主图？</strong> 完整主图组（全部 7 张）需要本地「采集服务」（amazon-image-workflow）——
-            它是一套 <strong>Docker 应用</strong>（postgres + 抓取后端），所以需要先装 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer" style={{ color: "var(--acc)" }}>Docker Desktop</a>。
-            当前已回退到 sorftime（只返回 1 张主图）。
+            <strong>这次只采到 1 张白底主图。</strong> 正常情况下系统会本机直连 Amazon 自动抓取<strong>完整主图组（最多 7 张）</strong>，
+            无需任何额外安装。这次只拿到 1 张，多半是本机直连 Amazon <strong>临时被反爬拦截</strong>了——
+            <strong>先点「重新采集ASIN数据」重试一两次</strong>，通常就能拿到完整组。
+            <div style={{ marginTop: 6, color: "var(--t3)" }}>
+              如果反复都只有 1 张（你的网络对 Amazon 拦截较严），再考虑下面的<strong>兜底方案</strong>（可选，需 Docker）：
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
               <button className="btn" disabled={imgflowStarting} onClick={handleStartImgflow} style={{ fontSize: 10, padding: "3px 10px" }}>
-                {imgflowStarting ? "启动中…" : "一键启动采集服务"}
+                {imgflowStarting ? "启动中…" : "启动 Docker 采集服务（兜底）"}
               </button>
-              <span style={{ color: "var(--t3)" }}>需先装好并启动 Docker Desktop；首次构建较慢。</span>
+              <span style={{ color: "var(--t3)" }}>需先装好并启动 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer" style={{ color: "var(--acc)" }}>Docker Desktop</a>；首次构建较慢。</span>
             </div>
             {imgflowMsg && <div style={{ marginTop: 6, color: "var(--t2)", whiteSpace: "pre-wrap" }}>{imgflowMsg}</div>}
-            <details style={{ marginTop: 6 }}>
-              <summary style={{ cursor: "pointer", color: "var(--t3)" }}>装好 Docker 的步骤 / 手动启动</summary>
-              <div style={{ marginTop: 4, color: "var(--t3)" }}>
-                1. 安装 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer" style={{ color: "var(--acc)" }}>Docker Desktop</a> 并启动它（等托盘鲸鱼图标变绿、不再转圈）。<br />
-                2. 回到这里点「一键启动采集服务」。若提示未检测到 Docker，重启一次 IvyeaOps 再点。<br />
-                或在终端手动：
-              </div>
-              <code style={{ display: "block", marginTop: 4, color: "var(--t)" }}>cd amazon-image-workflow &amp;&amp; docker compose up -d --build backend</code>
-            </details>
-            启动后重新「采集ASIN数据」即可拿到完整主图组。
           </div>
         )}
         <div style={{ fontSize: 10, padding: 10, background: "var(--bg2)", border: "1px solid var(--b)", borderRadius: 4, lineHeight: 1.6 }}>
