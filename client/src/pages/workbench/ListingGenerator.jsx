@@ -905,18 +905,24 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
         </div>
         {scrapeData.scrape_source === "sorftime" && (
           <div style={{ fontSize: 10, padding: 10, background: "rgba(245,158,11,.10)", border: "1px solid rgba(245,158,11,.35)", borderRadius: 4, lineHeight: 1.6, color: "var(--t2)" }}>
-            <strong>只采到 1 张白底主图？</strong> 完整主图组（全部 7 张）需要本地「采集服务」（amazon-image-workflow，Docker）。
-            当前未检测到它，已回退到 sorftime（只返回 1 张主图）。
+            <strong>只采到 1 张白底主图？</strong> 完整主图组（全部 7 张）需要本地「采集服务」（amazon-image-workflow）——
+            它是一套 <strong>Docker 应用</strong>（postgres + 抓取后端），所以需要先装 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer" style={{ color: "var(--acc)" }}>Docker Desktop</a>。
+            当前已回退到 sorftime（只返回 1 张主图）。
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
               <button className="btn" disabled={imgflowStarting} onClick={handleStartImgflow} style={{ fontSize: 10, padding: "3px 10px" }}>
                 {imgflowStarting ? "启动中…" : "一键启动采集服务"}
               </button>
-              <span style={{ color: "var(--t3)" }}>需已安装 Docker；首次构建较慢。</span>
+              <span style={{ color: "var(--t3)" }}>需先装好并启动 Docker Desktop；首次构建较慢。</span>
             </div>
-            {imgflowMsg && <div style={{ marginTop: 6, color: "var(--t2)" }}>{imgflowMsg}</div>}
+            {imgflowMsg && <div style={{ marginTop: 6, color: "var(--t2)", whiteSpace: "pre-wrap" }}>{imgflowMsg}</div>}
             <details style={{ marginTop: 6 }}>
-              <summary style={{ cursor: "pointer", color: "var(--t3)" }}>或手动启动</summary>
-              <code style={{ display: "block", marginTop: 4, color: "var(--t)" }}>cd amazon-image-workflow &amp;&amp; docker compose up -d --build</code>
+              <summary style={{ cursor: "pointer", color: "var(--t3)" }}>装好 Docker 的步骤 / 手动启动</summary>
+              <div style={{ marginTop: 4, color: "var(--t3)" }}>
+                1. 安装 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer" style={{ color: "var(--acc)" }}>Docker Desktop</a> 并启动它（等托盘鲸鱼图标变绿、不再转圈）。<br />
+                2. 回到这里点「一键启动采集服务」。若提示未检测到 Docker，重启一次 IvyeaOps 再点。<br />
+                或在终端手动：
+              </div>
+              <code style={{ display: "block", marginTop: 4, color: "var(--t)" }}>cd amazon-image-workflow &amp;&amp; docker compose up -d --build backend</code>
             </details>
             启动后重新「采集ASIN数据」即可拿到完整主图组。
           </div>

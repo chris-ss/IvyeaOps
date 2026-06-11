@@ -63,11 +63,49 @@ def _imgflow_dir() -> Optional[Path]:
     return None
 
 
+_DOCKER_DL = "https://www.docker.com/products/docker-desktop/"
+
+
+def _docker_bin() -> Optional[str]:
+    """Find the docker CLI. shutil.which covers the normal case; we also probe
+    Docker Desktop's standard install path so a Docker that was installed *after*
+    IvyeaOps started (PATH not refreshed in our process) is still found without
+    forcing a restart."""
+    import shutil
+    found = shutil.which("docker")
+    if found:
+        return found
+    for p in (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe",
+        Path(os.environ.get("ProgramW6432", r"C:\Program Files")) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe",
+    ):
+        try:
+            if p.is_file():
+                return str(p)
+        except Exception:
+            continue
+    return None
+
+
+def _docker_running(docker: str) -> bool:
+    """True when the Docker daemon is up (`docker info` succeeds). Docker Desktop
+    can be installed but not started — compose would then fail with a daemon
+    error, so we check first to give a clear 'start Docker Desktop' message."""
+    import subprocess
+    from app.core.proc import no_window_kwargs
+    try:
+        r = subprocess.run([docker, "info"], capture_output=True, text=True,
+                           timeout=12, **no_window_kwargs())
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 @router.get("/imgflow/status")
 async def imgflow_status(_u: str = Depends(require_user)):
-    """Report whether the 采集服务 is reachable, its dir is found, and Docker exists
-    — drives the 'start collection service' button in the UI."""
-    import shutil
+    """Report whether the 采集服务 is reachable, its dir is found, and Docker is
+    installed + running — drives the 'start collection service' button in the UI."""
     d = _imgflow_dir()
     reachable = False
     try:
@@ -76,19 +114,22 @@ async def imgflow_status(_u: str = Depends(require_user)):
             reachable = r.status_code < 500
     except Exception:
         reachable = False
+    docker = _docker_bin()
     return {
         "reachable": reachable,
         "dir": str(d) if d else "",
-        "docker_available": bool(shutil.which("docker")),
+        "docker_installed": bool(docker),
+        "docker_running": bool(docker) and _docker_running(docker),
     }
 
 
 @router.post("/imgflow/start")
 def imgflow_start(_u: str = Depends(require_user)):
-    """Best-effort 'one-click' start of the local Docker 采集服务:
-    runs `docker compose up -d --build` in the workflow dir, detached, logging to
-    data/imgflow-start.log (the --build can take minutes, so we never block)."""
-    import shutil
+    """One-click start of the local Docker 采集服务. Only brings up the `backend`
+    service (+ its postgres dependency) — the listing board talks to :3001 and
+    doesn't need the workflow's own Next.js frontend, so we skip that build.
+    Runs detached, logging to data/imgflow-start.log (the --build can take
+    minutes, so we never block)."""
     import subprocess
     from app.core.proc import no_window_kwargs
 
@@ -96,9 +137,14 @@ def imgflow_start(_u: str = Depends(require_user)):
     if not d:
         raise HTTPException(400, "未找到 amazon-image-workflow 目录。请把该项目放在 IvyeaOps "
                                  "同级目录，或在「系统配置」设置 imgflow_dir 指向它，再试。")
-    docker = shutil.which("docker")
+    docker = _docker_bin()
     if not docker:
-        raise HTTPException(400, "未检测到 Docker。请先安装并启动 Docker Desktop，再点此按钮。")
+        raise HTTPException(400, f"未检测到 Docker。这个「完整主图组」采集服务是一套 Docker 应用，"
+                                 f"请先安装 Docker Desktop（{_DOCKER_DL}）。装完启动它（等托盘鲸鱼图标变绿），"
+                                 f"若仍提示未检测到，重启一次 IvyeaOps 让其识别 Docker，再点此按钮。")
+    if not _docker_running(docker):
+        raise HTTPException(400, "检测到 Docker 已安装，但 Docker 引擎未运行。请先启动 Docker Desktop，"
+                                 "等托盘鲸鱼图标变绿（不再转圈）后再点此按钮。")
 
     log_path = settings.data_dir / "imgflow-start.log"
     try:
@@ -108,7 +154,9 @@ def imgflow_start(_u: str = Depends(require_user)):
             kw["creationflags"] = kw.get("creationflags", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
         else:
             kw["start_new_session"] = True
-        subprocess.Popen([docker, "compose", "up", "-d", "--build"],
+        # `backend` pulls in its depends_on (postgres) automatically; skipping the
+        # frontend service makes the first build much faster.
+        subprocess.Popen([docker, "compose", "up", "-d", "--build", "backend"],
                          cwd=str(d), stdout=logf, stderr=subprocess.STDOUT, **kw)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"启动采集服务失败：{exc}") from exc
@@ -116,8 +164,8 @@ def imgflow_start(_u: str = Depends(require_user)):
         "ok": True,
         "dir": str(d),
         "log": str(log_path),
-        "detail": "采集服务正在后台启动（docker compose up -d --build），首次构建可能需要几分钟。"
-                  "完成后重新「采集ASIN数据」即可拿到完整主图组。",
+        "detail": "采集服务正在后台启动（docker compose up -d --build backend），首次构建可能需要几分钟"
+                  "（拉取 postgres 镜像 + 构建后端）。完成后重新「采集ASIN数据」即可拿到完整主图组。",
     }
 
 
