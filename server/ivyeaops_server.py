@@ -253,21 +253,33 @@ def _run_with_control_window() -> None:
         pass
     root.configure(bg=card)
 
-    frame = tk.Frame(root, bg=card, padx=26, pady=20)
-    frame.pack(fill="both", expand=True)
-
     stopping = False
 
     def open_browser() -> None:
         webbrowser.open(url)
+
+    # ── Coloured accent header band (brand + status pill) ───────────────────
+    band = tk.Frame(root, bg=green, height=62)
+    band.pack(fill="x")
+    band.pack_propagate(False)
+    band_in = tk.Frame(band, bg=green)
+    band_in.pack(fill="both", expand=True, padx=24)
+    tk.Label(band_in, text="✦  IvyeaOps", bg=green, fg="#ffffff",
+             font=(ui, 16, "bold")).pack(side="left")
+    pill = tk.Label(band_in, text="● 启动中", bg="#ffffff", fg=green,
+                    font=(ui, 9, "bold"), padx=11, pady=3)
+    pill.pack(side="right")
+
+    def set_status(full_text: str, pill_text: str, pill_fg: str) -> None:
+        status_var.set(full_text)
+        pill.configure(text=f"● {pill_text}", fg=pill_fg, bg="#ffffff")
 
     def stop_server() -> None:
         nonlocal stopping
         if stopping:
             return
         stopping = True
-        status_var.set("正在停止服务…")
-        dot.configure(fg=faint)
+        set_status("正在停止服务…", "停止中", faint)
         server.should_exit = True
 
         def finish() -> None:
@@ -276,53 +288,38 @@ def _run_with_control_window() -> None:
 
         threading.Thread(target=finish, daemon=True).start()
 
-    # Header: brand + status dot (native title bar provides the window controls).
-    header = tk.Frame(frame, bg=card)
-    header.pack(fill="x")
-    brand = tk.Label(header, text="IvyeaOps", bg=card, fg=fg, font=(ui, 15, "bold"))
-    brand.pack(side="left")
-    dot = tk.Label(header, text="●", bg=card, fg=amber, font=(ui, 11))
-    dot.pack(side="right")
-
-    _drag = {"x": 0, "y": 0}
-
-    def _drag_start(e):
-        _drag["x"], _drag["y"] = e.x, e.y
-
-    def _drag_move(e):
-        root.geometry(f"+{root.winfo_x() + e.x - _drag['x']}+{root.winfo_y() + e.y - _drag['y']}")
-
-    for w in (header, brand):
-        w.bind("<Button-1>", _drag_start)
-        w.bind("<B1-Motion>", _drag_move)
+    # ── Body card ───────────────────────────────────────────────────────────
+    body = tk.Frame(root, bg=card, padx=24, pady=18)
+    body.pack(fill="both", expand=True)
 
     status_var = tk.StringVar(value="正在启动服务…")
-    tk.Label(frame, textvariable=status_var, bg=card, fg=muted, anchor="w",
-             font=(ui, 10)).pack(fill="x", pady=(8, 8))
+    tk.Label(body, textvariable=status_var, bg=card, fg=fg, anchor="w",
+             font=(ui, 11)).pack(fill="x", pady=(2, 12))
 
-    tk.Frame(frame, bg=border, height=1).pack(fill="x", pady=(0, 10))
+    info = tk.Frame(body, bg=sub, padx=14, pady=12)
+    info.pack(fill="x")
 
-    def _row(label: str) -> tk.Frame:
-        r = tk.Frame(frame, bg=card)
-        r.pack(fill="x", pady=1)
-        tk.Label(r, text=label, bg=card, fg=faint, width=5, anchor="w",
+    def _row(parent, label: str) -> tk.Frame:
+        r = tk.Frame(parent, bg=sub)
+        r.pack(fill="x", pady=2)
+        tk.Label(r, text=label, bg=sub, fg=faint, width=5, anchor="w",
                  font=(mono, 9)).pack(side="left")
         return r
 
-    r1 = _row("地址")
-    link = tk.Label(r1, text=url, bg=card, fg=green, cursor="hand2",
+    r1 = _row(info, "地址")
+    link = tk.Label(r1, text=url, bg=sub, fg=green, cursor="hand2",
                     font=(mono, 10, "underline"))
     link.pack(side="left")
     link.bind("<Button-1>", lambda _e: open_browser())
     link.bind("<Enter>", lambda _e: link.configure(fg=green_hi))
     link.bind("<Leave>", lambda _e: link.configure(fg=green))
-    r2 = _row("版本")
-    tk.Label(r2, text=app_version(), bg=card, fg=muted, font=(mono, 9)).pack(side="left")
+    r2 = _row(info, "版本")
+    tk.Label(r2, text=app_version(), bg=sub, fg=muted, font=(mono, 9)).pack(side="left")
 
-    tk.Label(frame, text="关闭窗口将停止后台服务", bg=card, fg=faint,
-             font=(ui, 8)).pack(anchor="w", pady=(10, 12))
+    tk.Label(body, text="关闭窗口将停止后台服务", bg=card, fg=faint,
+             font=(ui, 8)).pack(anchor="w", pady=(12, 14))
 
-    buttons = tk.Frame(frame, bg=card)
+    buttons = tk.Frame(body, bg=card)
     buttons.pack(fill="x", side="bottom")
 
     def _styled_btn(parent, text, command, *, primary: bool) -> tk.Button:
@@ -353,15 +350,12 @@ def _run_with_control_window() -> None:
             return
         if server_thread.is_alive():
             if _already_running(settings.host, settings.port):
-                status_var.set("服务运行中，可在浏览器中使用")
-                dot.configure(fg=green)
+                set_status("服务运行中，可在浏览器中使用", "运行中", green)
             else:
-                status_var.set("正在启动服务…")
-                dot.configure(fg=amber)
+                set_status("正在启动服务…", "启动中", amber)
             root.after(1000, poll)
             return
-        status_var.set("服务已停止")
-        dot.configure(fg=red)
+        set_status("服务已停止", "已停止", red)
         messagebox.showwarning("IvyeaOps", "IvyeaOps 服务已停止。如需排错，请查看 logs\\ivyeaops.err.log。")
         root.destroy()
 

@@ -263,10 +263,70 @@ def _hermes_bin() -> str:
     return shutil.which("hermes", path=search) or "hermes"
 
 
+def _synchronize_hermes_from_files() -> int:
+    """Index hermes sessions by scanning ~/.hermes/sessions/session_*.json directly.
+    No CLI needed — `hermes sessions export` fails on Windows (CLI/node not found),
+    which is why hermes chat history vanished on refresh there. The JSON files are
+    written by hermes on every platform, so scanning them is robust."""
+    sessions_dir = Path.home() / ".hermes" / "sessions"
+    if not sessions_dir.is_dir():
+        return 0
+    # Without the CLI's --source filter we can't tell user sessions from IvyeaOps'
+    # own internal hermes calls (brain chat / analysis / PONG health checks), so
+    # bound the scan to recently-active files + a hard cap. Recent user sessions
+    # (the thing that vanished on refresh) show up; the years-long backlog doesn't.
+    cutoff = time.time() - 14 * 86400
+    recent = sorted(
+        (p for p in sessions_dir.glob("session_*.json") if p.stat().st_mtime >= cutoff),
+        key=lambda p: p.stat().st_mtime, reverse=True)[:200]
+    # Skip IvyeaOps' own engine sessions by their known system-prompt / probe text.
+    _INTERNAL = ("IvyeaOps Web 知识库", "Reply with exactly: PONG", "你是亚马逊跨境电商市场分析专家")
+    processed = 0
+    with db_conn() as conn:
+        for fp in recent:
+            try:
+                d = json.loads(fp.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            sid = d.get("session_id") or d.get("id")
+            if not isinstance(sid, str) or not sid:
+                continue
+            if int(d.get("message_count") or 0) <= 0:
+                continue
+            blob = (str(d.get("system_prompt") or "")[:400]
+                    + str((d.get("messages") or [{}])[0].get("content") or "")[:200])
+            if any(marker in blob for marker in _INTERNAL):
+                continue
+            name = (d.get("title") or "").strip()
+            if not name:
+                for m in (d.get("messages") or []):
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        c = m.get("content")
+                        if isinstance(c, list):
+                            c = " ".join(p.get("text", "") for p in c
+                                         if isinstance(p, dict) and isinstance(p.get("text"), str))
+                        if isinstance(c, str) and c.strip():
+                            name = c.strip()
+                            break
+            name = _normalize_session_name(name, "Hermes 会话")
+            created = _to_iso(d.get("session_start") or d.get("started_at"))
+            updated = _to_iso(d.get("last_updated") or d.get("last_active")) or created
+            existing = repos.get_session_by_id(conn, sid)
+            if existing and existing["isArchived"]:
+                continue
+            repos.create_session(conn, sid, "hermes", _HERMES_PROJECT, name, created, updated, str(fp))
+            processed += 1
+        row = repos.get_project_by_path(conn, _HERMES_PROJECT)
+        if row and (row["custom_project_name"] or "") != _HERMES_PROJECT_NAME:
+            repos.update_custom_project_name_by_id(conn, row["project_id"], _HERMES_PROJECT_NAME)
+    return processed
+
+
 def synchronize_hermes() -> int:
-    """Index hermes' SQLite session store (source=cli only, no cron) into the
-    sessions table under one synthetic 'Hermes 会话' project, via
-    `hermes sessions export`. Best-effort: any failure returns 0."""
+    """Index hermes sessions into the sessions table under one synthetic
+    'Hermes 会话' project. Tries `hermes sessions export` (source=cli, no cron) and
+    falls back to scanning the session JSON files directly when the CLI is
+    unavailable (e.g. Windows). Best-effort: any failure returns 0."""
     binary = _hermes_bin()
     env = os.environ.copy()
     env["PATH"] = os.pathsep.join([os.path.expanduser("~/.local/bin"),
@@ -276,11 +336,12 @@ def synchronize_hermes() -> int:
                               capture_output=True, text=True, timeout=30, env=env,
                               **no_window_kwargs())
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
-        logger.warning("hermes export failed: %s", e)
-        return 0
+        logger.warning("hermes export failed (%s); scanning session files instead", e)
+        return _synchronize_hermes_from_files()
     if proc.returncode != 0:
-        logger.warning("hermes export rc=%s: %s", proc.returncode, (proc.stderr or "")[:200])
-        return 0
+        logger.warning("hermes export rc=%s (%s); scanning session files instead",
+                       proc.returncode, (proc.stderr or "")[:120])
+        return _synchronize_hermes_from_files()
 
     sessions_dir = Path.home() / ".hermes" / "sessions"
     processed = 0
@@ -324,6 +385,10 @@ def synchronize_hermes() -> int:
         if row and (row["custom_project_name"] or "") != _HERMES_PROJECT_NAME:
             repos.update_custom_project_name_by_id(conn, row["project_id"], _HERMES_PROJECT_NAME)
     logger.info("hermes sync indexed %s sessions", processed)
+    # Export ran but found nothing (e.g. the user's session isn't tagged source=cli,
+    # or the store path differs on Windows) → supplement from the session files.
+    if processed == 0:
+        return _synchronize_hermes_from_files()
     return processed
 
 
