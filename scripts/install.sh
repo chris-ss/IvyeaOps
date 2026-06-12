@@ -242,6 +242,8 @@ if [ "$ANS" = "y" ] || [ "$ANS" = "Y" ]; then
     "$BUN" remove -g gbrain >/dev/null 2>&1 || true
     "$BUN" pm cache rm >/dev/null 2>&1 || true
     "$BUN" install -g "$GBRAIN_REF" || warn "GBrain 安装失败"
+    # Bun 1.3+ blocks postinstall scripts by default; gbrain needs its build step.
+    "$BUN" pm -g trust gbrain >/dev/null 2>&1 || "$BUN" pm -g trust --all >/dev/null 2>&1 || true
     GBRAIN="$HOME/.bun/bin/gbrain"
     if [ -x "$GBRAIN" ]; then
       mkdir -p "$HOME/brain"

@@ -220,83 +220,71 @@ def _run_with_control_window() -> None:
     server = uvicorn.Server(config)
     server_thread = threading.Thread(target=server.run, name="ivyeaops-server", daemon=True)
 
+    # ── Light, rounded, borderless "card" window ────────────────────────────
+    # Clean high-end look: no native title bar, a rounded light card (transparent
+    # corners via the Windows -transparentcolor key), custom drag + close.
+    W, H, RADIUS = 460, 268, 18
+    KEY = "#ff00ff"        # transparency key (won't appear in the UI)
+    card = "#fbfbf9"       # light card bg
+    sub = "#f1f1ee"        # subtle row / button bg
+    sub_hi = "#e8e8e4"
+    border = "#e2e2dd"
+    fg = "#1a1a1a"
+    muted = "#5b5b55"
+    faint = "#9a9a93"
+    green = "#16a34a"
+    green_hi = "#15803d"
+    amber = "#d97706"
+    red = "#dc2626"
+    ui = "Microsoft YaHei UI"
+    mono = "Consolas"
+
     root = tk.Tk()
     root.title("IvyeaOps")
-    root.geometry("440x252")
     root.resizable(False, False)
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 3}")
+
+    rounded = False
     try:
+        root.overrideredirect(True)        # borderless
+        root.attributes("-transparentcolor", KEY)
+        rounded = True
+    except Exception:
+        rounded = False
+    try:
+        root.attributes("-topmost", False)
         root.iconbitmap(str(_runtime_root() / "client" / "public" / "favicon.ico"))
     except Exception:
         pass
 
-    # Match the workbench dark theme (client/src/styles/workbench.css):
-    # near-black bg, #141414 panel, #262626 border, #4ade80 green accent.
-    bg = "#0c0c0c"
-    panel = "#141414"
-    border = "#262626"
-    fg = "#e8e8e8"
-    muted = "#a8a8a8"
-    faint = "#747474"
-    green = "#4ade80"
-    green_dim = "#22c55e"
-    amber = "#fbbf24"
-    btn_dark = "#1c1c1c"
-    btn_dark_hover = "#262626"
-    ui = "Microsoft YaHei UI"
-    mono = "Consolas"
-    root.configure(bg=bg)
+    canvas = tk.Canvas(root, width=W, height=H, highlightthickness=0, bd=0,
+                       bg=KEY if rounded else card)
+    canvas.pack(fill="both", expand=True)
 
-    frame = tk.Frame(root, bg=panel, padx=24, pady=18,
-                     highlightbackground=border, highlightthickness=1)
-    frame.pack(fill="both", expand=True, padx=14, pady=14)
+    def _round_rect(c, x1, y1, x2, y2, r, fill):
+        c.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, width=0)
+        c.create_rectangle(x1, y1 + r, x2, y2 - r, fill=fill, width=0)
+        for (ax, ay, start) in ((x1, y1, 90), (x2 - 2 * r, y1, 0),
+                                (x1, y2 - 2 * r, 180), (x2 - 2 * r, y2 - 2 * r, 270)):
+            c.create_arc(ax, ay, ax + 2 * r, ay + 2 * r, start=start, extent=90,
+                         style="pieslice", fill=fill, width=0)
 
-    # Header: ASCII-ish brand mark + status dot, workbench console vibe.
-    header = tk.Frame(frame, bg=panel)
-    header.pack(fill="x")
-    tk.Label(header, text="IVYEA OPS", bg=panel, fg=fg,
-             font=(mono, 15, "bold")).pack(side="left")
-    tk.Label(header, text="CONSOLE", bg=panel, fg=faint,
-             font=(mono, 9)).pack(side="left", padx=(8, 0), pady=(5, 0))
-    dot_var = tk.StringVar(value="●")
-    dot = tk.Label(header, textvariable=dot_var, bg=panel, fg=amber, font=(ui, 11))
-    dot.pack(side="right")
+    # 1px border ring (slightly larger card behind the fill), then the card.
+    if rounded:
+        _round_rect(canvas, 0, 0, W, H, RADIUS, fill=border)
+        _round_rect(canvas, 1, 1, W - 1, H - 1, RADIUS - 1, fill=card)
+    else:
+        canvas.configure(bg=card)
 
-    status_var = tk.StringVar(value="正在启动服务…")
-    tk.Label(frame, textvariable=status_var, bg=panel, fg=muted,
-             font=(ui, 10), pady=6).pack(anchor="w")
-
-    # Divider
-    tk.Frame(frame, bg=border, height=1).pack(fill="x", pady=(2, 10))
-
-    # Info rows: monospace, address clickable.
-    info = tk.Frame(frame, bg=panel)
-    info.pack(fill="x")
-
-    def _row(label: str) -> tk.Frame:
-        r = tk.Frame(info, bg=panel)
-        r.pack(fill="x", pady=1)
-        tk.Label(r, text=label, bg=panel, fg=faint, width=6, anchor="w",
-                 font=(mono, 9)).pack(side="left")
-        return r
-
-    r1 = _row("地址")
-    link = tk.Label(r1, text=url, bg=panel, fg=green, cursor="hand2",
-                    font=(mono, 9, "underline"))
-    link.pack(side="left")
-    r2 = _row("版本")
-    tk.Label(r2, text=app_version(), bg=panel, fg=muted, font=(mono, 9)).pack(side="left")
-    tk.Label(frame, text="关闭此窗口将停止 IvyeaOps 后台服务", bg=panel, fg=faint,
-             font=(ui, 8)).pack(anchor="w", pady=(8, 10))
-
-    buttons = tk.Frame(frame, bg=panel)
-    buttons.pack(fill="x", side="bottom")
+    # Content lives in a frame floated over the rounded card.
+    frame = tk.Frame(canvas, bg=card)
+    canvas.create_window(W // 2, H // 2, window=frame, width=W - 44, height=H - 40)
 
     stopping = False
 
     def open_browser() -> None:
         webbrowser.open(url)
-
-    link.bind("<Button-1>", lambda _e: open_browser())
 
     def stop_server() -> None:
         nonlocal stopping
@@ -313,29 +301,82 @@ def _run_with_control_window() -> None:
 
         threading.Thread(target=finish, daemon=True).start()
 
-    def on_close() -> None:
-        stop_server()
+    # Title bar: brand + status dot + custom close. Draggable to move the window.
+    header = tk.Frame(frame, bg=card)
+    header.pack(fill="x")
+    brand = tk.Label(header, text="IvyeaOps", bg=card, fg=fg, font=(ui, 14, "bold"))
+    brand.pack(side="left")
+    close_btn = tk.Label(header, text="✕", bg=card, fg=faint, cursor="hand2",
+                         font=(ui, 11))
+    close_btn.pack(side="right", padx=(6, 0))
+    close_btn.bind("<Button-1>", lambda _e: stop_server())
+    close_btn.bind("<Enter>", lambda _e: close_btn.configure(fg=red))
+    close_btn.bind("<Leave>", lambda _e: close_btn.configure(fg=faint))
+    dot = tk.Label(header, text="●", bg=card, fg=amber, font=(ui, 11))
+    dot.pack(side="right")
+
+    # Drag the window by the header / brand (borderless has no native title bar).
+    _drag = {"x": 0, "y": 0}
+
+    def _drag_start(e):
+        _drag["x"], _drag["y"] = e.x, e.y
+
+    def _drag_move(e):
+        root.geometry(f"+{root.winfo_x() + e.x - _drag['x']}+{root.winfo_y() + e.y - _drag['y']}")
+
+    for w in (header, brand):
+        w.bind("<Button-1>", _drag_start)
+        w.bind("<B1-Motion>", _drag_move)
+
+    status_var = tk.StringVar(value="正在启动服务…")
+    tk.Label(frame, textvariable=status_var, bg=card, fg=muted, anchor="w",
+             font=(ui, 10)).pack(fill="x", pady=(8, 8))
+
+    tk.Frame(frame, bg=border, height=1).pack(fill="x", pady=(0, 10))
+
+    def _row(label: str) -> tk.Frame:
+        r = tk.Frame(frame, bg=card)
+        r.pack(fill="x", pady=1)
+        tk.Label(r, text=label, bg=card, fg=faint, width=5, anchor="w",
+                 font=(mono, 9)).pack(side="left")
+        return r
+
+    r1 = _row("地址")
+    link = tk.Label(r1, text=url, bg=card, fg=green, cursor="hand2",
+                    font=(mono, 10, "underline"))
+    link.pack(side="left")
+    link.bind("<Button-1>", lambda _e: open_browser())
+    link.bind("<Enter>", lambda _e: link.configure(fg=green_hi))
+    link.bind("<Leave>", lambda _e: link.configure(fg=green))
+    r2 = _row("版本")
+    tk.Label(r2, text=app_version(), bg=card, fg=muted, font=(mono, 9)).pack(side="left")
+
+    tk.Label(frame, text="关闭窗口将停止后台服务", bg=card, fg=faint,
+             font=(ui, 8)).pack(anchor="w", pady=(10, 12))
+
+    buttons = tk.Frame(frame, bg=card)
+    buttons.pack(fill="x", side="bottom")
 
     def _styled_btn(parent, text, command, *, primary: bool) -> tk.Button:
         b = tk.Button(
             parent, text=text, command=command, relief="flat", bd=0,
             cursor="hand2", padx=18, pady=7,
-            bg=green_dim if primary else btn_dark,
-            fg="#04150a" if primary else fg,
-            activebackground=green if primary else btn_dark_hover,
-            activeforeground="#04150a" if primary else fg,
+            bg=green if primary else sub,
+            fg="#ffffff" if primary else fg,
+            activebackground=green_hi if primary else sub_hi,
+            activeforeground="#ffffff" if primary else fg,
             font=(ui, 9, "bold") if primary else (ui, 9),
         )
-        hover_in = green if primary else btn_dark_hover
-        hover_out = green_dim if primary else btn_dark
-        b.bind("<Enter>", lambda _e: b.configure(bg=hover_in))
-        b.bind("<Leave>", lambda _e: b.configure(bg=hover_out))
+        hin = green_hi if primary else sub_hi
+        hout = green if primary else sub
+        b.bind("<Enter>", lambda _e: b.configure(bg=hin))
+        b.bind("<Leave>", lambda _e: b.configure(bg=hout))
         return b
 
     _styled_btn(buttons, "打开控制台", open_browser, primary=True).pack(side="left")
     _styled_btn(buttons, "停止并退出", stop_server, primary=False).pack(side="left", padx=(10, 0))
 
-    root.protocol("WM_DELETE_WINDOW", on_close)
+    root.protocol("WM_DELETE_WINDOW", stop_server)
     server_thread.start()
     threading.Thread(target=_open_browser_when_ready, daemon=True).start()
 
@@ -344,15 +385,15 @@ def _run_with_control_window() -> None:
             return
         if server_thread.is_alive():
             if _already_running(settings.host, settings.port):
-                status_var.set("服务运行中，可在浏览器中使用。")
+                status_var.set("服务运行中，可在浏览器中使用")
                 dot.configure(fg=green)
             else:
                 status_var.set("正在启动服务…")
                 dot.configure(fg=amber)
             root.after(1000, poll)
             return
-        status_var.set("服务已停止。")
-        dot.configure(fg="#f87171")
+        status_var.set("服务已停止")
+        dot.configure(fg=red)
         messagebox.showwarning("IvyeaOps", "IvyeaOps 服务已停止。如需排错，请查看 logs\\ivyeaops.err.log。")
         root.destroy()
 

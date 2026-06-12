@@ -181,6 +181,15 @@ function Install-GBrain {
     $ErrorActionPreference = $prevEAP
     & $bun.Source install -g $GbrainRef
     if ($LASTEXITCODE -ne 0) { throw "bun install -g $GbrainRef failed." }
+    # Bun 1.3+ blocks package postinstall/build scripts by default ("Blocked 1
+    # postinstall"). gbrain needs its build step to produce a working binary —
+    # without it, gbrain.exe runs and immediately errors "The system cannot find
+    # the path specified". Trust gbrain so the blocked script runs. Best-effort.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $bun.Source pm -g trust gbrain *>$null } catch {}
+    try { & $bun.Source pm -g trust --all *>$null } catch {}
+    $ErrorActionPreference = $prevEAP
     Refresh-Path
 
     $gbrain = Get-Command gbrain -ErrorAction SilentlyContinue

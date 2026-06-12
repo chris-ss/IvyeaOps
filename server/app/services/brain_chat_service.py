@@ -898,7 +898,21 @@ def send_message(session_id: str, content: str) -> dict[str, Any]:
 
 # ── Streaming chat (SSE) ────────────────────────────────────────────────────
 _BRAIN_STREAM_WRAPPER = str(Path(__file__).parent / "brain_stream_wrapper.py")
-_HERMES_VENV_PYTHON = str(Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "python")
+
+
+def _hermes_venv_python() -> str:
+    """Path to the Hermes agent venv's python — POSIX uses venv/bin/python,
+    Windows uses venv/Scripts/python.exe. Returns whichever exists (POSIX layout
+    as the fallback string when neither does, so callers still get a path)."""
+    base = Path.home() / ".hermes" / "hermes-agent" / "venv"
+    win = base / "Scripts" / "python.exe"
+    posix = base / "bin" / "python"
+    if win.exists():
+        return str(win)
+    return str(posix)
+
+
+_HERMES_VENV_PYTHON = _hermes_venv_python()
 
 
 def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
@@ -975,7 +989,7 @@ def delete_message(message_id: str) -> dict[str, Any]:
 def stream_spec(prompt: str) -> dict[str, Any]:
     """Subprocess spec for the no-tools streaming wrapper (used by the SSE route)."""
     return {
-        "argv": [_HERMES_VENV_PYTHON, _BRAIN_STREAM_WRAPPER],
+        "argv": [_hermes_venv_python(), _BRAIN_STREAM_WRAPPER],
         "stdin": prompt.encode("utf-8"),
         "env": _hermes_env(),
         "cwd": str(gb.BRAIN_ROOT),
@@ -984,9 +998,10 @@ def stream_spec(prompt: str) -> dict[str, Any]:
 
 def hermes_available() -> bool:
     """True when the no-tools streaming wrapper can actually run — i.e. the Hermes
-    agent venv is present. When False, the SSE route answers via the unified
+    agent venv is present (resolved per-OS, so it's not stale if Hermes is
+    installed after startup). When False, the SSE route answers via the unified
     global text chain instead, so the knowledge-base chat works without Hermes."""
-    return Path(_HERMES_VENV_PYTHON).exists()
+    return Path(_hermes_venv_python()).exists()
 
 
 async def stream_global_answer(prompt: str) -> AsyncIterator[str]:

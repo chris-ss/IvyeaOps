@@ -65,6 +65,29 @@
 .sks-input:focus { outline: none; border-color: var(--acc); }
 
 .sks-list { border: 1px solid var(--b); border-radius: var(--r); background: var(--bg1); overflow: hidden; }
+/* Category-blocked layout: the list becomes a transparent scroll container; each
+   category is a bordered card with a collapsible header, rows drop the cat column. */
+.sks-list--grouped { border: 0; background: transparent; overflow: visible; display: grid; gap: 10px; }
+.sks-list--grouped .sks-list-row { grid-template-columns: 1fr 100px; }
+
+.sks-cat-group {
+  border: 1px solid var(--b); border-radius: var(--r); background: var(--bg1); overflow: hidden;
+}
+.sks-cat-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 12px; background: var(--bg2); border: 0; border-bottom: 1px solid var(--b);
+  color: var(--t2); font-family: var(--font); font-size: 11px; font-weight: 600;
+  letter-spacing: .03em; cursor: pointer; text-align: left; transition: background .1s;
+}
+.sks-cat-head:hover { background: var(--bg3); }
+.sks-cat-caret { color: var(--acc); font-size: 10px; transition: transform .12s; }
+.sks-cat-caret.collapsed { transform: rotate(-90deg); }
+.sks-cat-name { color: var(--t); }
+.sks-cat-count {
+  margin-left: auto; color: var(--t3); font-size: 10px; font-weight: 400;
+  background: var(--bg1); border: 1px solid var(--b); border-radius: 999px; padding: 0 8px;
+}
+
 .sks-list-row {
   display: grid; grid-template-columns: 1fr 120px 100px; gap: 10px;
   padding: 9px 12px; border-bottom: 1px solid var(--b); align-items: center;

@@ -65,6 +65,32 @@ export default function SkillBrowse() {
     return Array.from(seen).sort();
   }, [skills]);
 
+  // Group skills by category for the blocked layout. Skills with no category fall
+  // under "未分类", which sorts last; everything else is alphabetical.
+  const grouped = useMemo(() => {
+    const map = new Map<string, SkillMeta[]>();
+    for (const s of skills) {
+      const key = s.category || "未分类";
+      const arr = map.get(key);
+      if (arr) arr.push(s);
+      else map.set(key, [s]);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      if (a === "未分类") return 1;
+      if (b === "未分类") return -1;
+      return a.localeCompare(b);
+    });
+  }, [skills]);
+
+  // Collapsed categories (persisted nowhere — session-local is fine).
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCat = (cat: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(cat) ? next.delete(cat) : next.add(cat);
+      return next;
+    });
+
   const pickSkill = (name: string) => {
     const next = new URLSearchParams(params);
     next.set("name", name);
@@ -112,32 +138,48 @@ export default function SkillBrowse() {
 
       {/* Two-column layout: list + detail */}
       <div className={"sks-browse-split" + (selected ? " has-sel" : "")}>
-        <div className="sks-list">
+        <div className="sks-list sks-list--grouped">
           {!loading && skills.length === 0 ? (
             <div className="sks-empty">没有符合条件的 skill</div>
           ) : (
-            skills.map((s) => (
-              <div
-                key={s.name}
-                className={"sks-list-row" + (s.name === selected ? " active" : "")}
-                onClick={() => pickSkill(s.name)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && pickSkill(s.name)}
-              >
-                <div>
-                  <div className="title">
-                    {s.name}
-                    {s.pinned && <span className="sks-badge">PINNED</span>}
-                  </div>
-                  {(s.description_zh || s.description) && (
-                    <div className="desc">{s.description_zh || s.description}</div>
-                  )}
-                </div>
-                <div className="cat">{s.category || "-"}</div>
-                <div className="date">{fmtDate(s.updated_at)}</div>
-              </div>
-            ))
+            grouped.map(([cat, items]) => {
+              const isCollapsed = collapsed.has(cat);
+              return (
+                <section key={cat} className="sks-cat-group">
+                  <button
+                    type="button"
+                    className="sks-cat-head"
+                    onClick={() => toggleCat(cat)}
+                    aria-expanded={!isCollapsed}
+                  >
+                    <span className={"sks-cat-caret" + (isCollapsed ? " collapsed" : "")}>▾</span>
+                    <span className="sks-cat-name">{cat}</span>
+                    <span className="sks-cat-count">{items.length}</span>
+                  </button>
+                  {!isCollapsed && items.map((s) => (
+                    <div
+                      key={s.name}
+                      className={"sks-list-row" + (s.name === selected ? " active" : "")}
+                      onClick={() => pickSkill(s.name)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && pickSkill(s.name)}
+                    >
+                      <div>
+                        <div className="title">
+                          {s.name}
+                          {s.pinned && <span className="sks-badge">PINNED</span>}
+                        </div>
+                        {(s.description_zh || s.description) && (
+                          <div className="desc">{s.description_zh || s.description}</div>
+                        )}
+                      </div>
+                      <div className="date">{fmtDate(s.updated_at)}</div>
+                    </div>
+                  ))}
+                </section>
+              );
+            })
           )}
         </div>
 

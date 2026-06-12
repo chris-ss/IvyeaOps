@@ -374,6 +374,9 @@ _GBRAIN_INSTALL_SH = (
     'bun remove -g gbrain >/dev/null 2>&1 || true; '
     'bun pm cache rm >/dev/null 2>&1 || true; '
     f'bun install -g {_GBRAIN_REF}; '
+    # Bun 1.3+ blocks postinstall scripts by default; gbrain needs its build step
+    # or its binary errors at runtime. Trust it (best-effort).
+    'bun pm -g trust gbrain >/dev/null 2>&1 || bun pm -g trust --all >/dev/null 2>&1 || true; '
     'mkdir -p "$HOME/brain"; cd "$HOME/brain" && (gbrain init --pglite || true)'
 )
 
