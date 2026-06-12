@@ -9,7 +9,10 @@ type UseFileTreeDataResult = {
   refreshFiles: () => void;
 };
 
-export function useFileTreeData(selectedProject: Project | null): UseFileTreeDataResult {
+export function useFileTreeData(
+  selectedProject: Project | null,
+  rootOverride?: string | null,
+): UseFileTreeDataResult {
   const [files, setFiles] = useState<FileTreeNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -44,7 +47,10 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
         setLoading(true);
       }
       try {
-        const response = await api.getFiles(projectId, { signal: abortControllerRef.current!.signal });
+        const response = await api.getFiles(projectId, {
+          signal: abortControllerRef.current!.signal,
+          ...(rootOverride ? { root: rootOverride } : {}),
+        });
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -81,7 +87,7 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
       isActive = false;
       abortControllerRef.current?.abort();
     };
-  }, [selectedProject?.projectId, refreshKey]);
+  }, [selectedProject?.projectId, refreshKey, rootOverride]);
 
   return {
     files,

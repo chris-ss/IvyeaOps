@@ -25,6 +25,19 @@ type FileTreeProps = {
   onFileOpen?: (filePath: string) => void;
 };
 
+// Parent directory of an absolute path, cross-platform. Returns null at a root
+// ("/" on POSIX, "C:\" on Windows) so the "上一级" button hides there.
+function parentDir(p: string | null | undefined): string | null {
+  if (!p) return null;
+  const norm = p.replace(/[\\/]+$/, '');
+  const idx = Math.max(norm.lastIndexOf('/'), norm.lastIndexOf('\\'));
+  if (idx < 0) return null;
+  if (idx === 0) return '/';
+  const parent = norm.slice(0, idx);
+  if (/^[A-Za-z]:$/.test(parent)) return `${parent}\\`;
+  return parent;
+}
+
 export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps) {
   const { t } = useTranslation();
   const [selectedImage, setSelectedImage] = useState<FileTreeImageSelection | null>(null);
@@ -32,6 +45,12 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
   const newItemInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  // Directory the panel is currently rooted at. null = the project's own path.
+  // Lets the user navigate above/outside the project root ("上一级").
+  const [currentRoot, setCurrentRoot] = useState<string | null>(null);
+  useEffect(() => { setCurrentRoot(null); }, [selectedProject?.projectId]);
+  const effectiveRoot = currentRoot ?? selectedProject?.path ?? null;
 
   // Show toast notification
   const showToast = useCallback((message: string, type: 'success' | 'error') => {
@@ -46,7 +65,7 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
     }
   }, [toast]);
 
-  const { files, loading, refreshFiles } = useFileTreeData(selectedProject);
+  const { files, loading, refreshFiles } = useFileTreeData(selectedProject, currentRoot);
   const { viewMode, changeViewMode } = useFileTreeViewMode();
   const { expandedDirs, toggleDirectory, expandDirectories, collapseAll } = useExpandedDirectories();
   const { searchQuery, setSearchQuery, filteredFiles } = useFileTreeSearch({
@@ -182,6 +201,33 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
         loading={loading}
         operationLoading={operations.operationLoading}
       />
+
+      {/* Directory navigation: 上一级 / 回项目根 + current path. Lets the user
+          browse above and outside the project root. */}
+      {selectedProject && (
+        <div className="flex items-center gap-1 border-b border-border px-3 py-1.5 text-xs">
+          <button
+            onClick={() => setCurrentRoot(parentDir(effectiveRoot))}
+            disabled={!parentDir(effectiveRoot)}
+            className="flex items-center gap-1 rounded px-2 py-1 text-foreground hover:bg-accent disabled:opacity-40"
+            title="上一级目录"
+          >
+            ↑ 上一级
+          </button>
+          {currentRoot && (
+            <button
+              onClick={() => setCurrentRoot(null)}
+              className="flex items-center gap-1 rounded px-2 py-1 text-foreground hover:bg-accent"
+              title="回到项目根目录"
+            >
+              ⌂ 项目根
+            </button>
+          )}
+          <code className="ml-1 flex-1 truncate text-muted-foreground" title={effectiveRoot ?? ''}>
+            {effectiveRoot}
+          </code>
+        </div>
+      )}
 
       {viewMode === 'detailed' && filteredFiles.length > 0 && <FileTreeDetailedColumns />}
 

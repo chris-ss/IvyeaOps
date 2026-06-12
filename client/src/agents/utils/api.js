@@ -148,8 +148,13 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ filePath, content }),
     }),
-  getFiles: (projectId, options = {}) =>
-    authenticatedFetch(`/api/projects/${projectId}/files`, options),
+  getFiles: (projectId, options = {}) => {
+    // options.root (optional) re-roots the tree at any directory for "上一级"
+    // navigation; the rest of options are passed through to fetch (e.g. signal).
+    const { root, ...fetchOpts } = options;
+    const qs = root ? `?root=${encodeURIComponent(root)}` : '';
+    return authenticatedFetch(`/api/projects/${projectId}/files${qs}`, fetchOpts);
+  },
 
   // File operations
   createFile: (projectId, { path, type, name }) =>

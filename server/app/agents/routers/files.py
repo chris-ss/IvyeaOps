@@ -53,14 +53,15 @@ def _project_root(project_id: str) -> str:
 
 
 def _resolve_in_project(project_root: str, target: str) -> str:
-    """Resolve a (relative or absolute) path and ensure it stays under the
-    project root. Lexical resolution matches Node's path.resolve."""
-    resolved = os.path.abspath(target) if os.path.isabs(target) \
-        else os.path.abspath(os.path.join(project_root, target))
-    normalized_root = os.path.abspath(project_root) + os.sep
-    if not resolved.startswith(normalized_root):
-        raise HTTPException(403, "Path must be under project root")
-    return resolved
+    """Resolve a (relative or absolute) path. Relative paths resolve under the
+    project root; absolute paths are allowed anywhere so the file panel can browse
+    and open files outside the project (e.g. via the "上一级" navigation). The
+    agents board is admin-only and runs on the user's own machine — the built-in
+    terminal already grants full local filesystem access, so this is no wider a
+    boundary than what's already exposed."""
+    if os.path.isabs(target):
+        return os.path.abspath(target)
+    return os.path.abspath(os.path.join(project_root, target))
 
 
 def _validate_filename(name: str) -> None:
@@ -175,11 +176,14 @@ async def save_file(project_id: str, body: SaveFileBody) -> dict:
 
 
 @router.get("/projects/{project_id}/files")
-async def file_tree(project_id: str) -> list:
-    root = _project_root(project_id)
-    if not os.path.exists(root):
-        raise HTTPException(404, f"Project path not found: {root}")
-    return _build_file_tree(root, max_depth=4, depth=0)
+async def file_tree(project_id: str, root: Optional[str] = Query(None)) -> list:
+    # `root` overrides the project root so the panel can navigate up / into any
+    # directory (admin-only local board — see _resolve_in_project). Defaults to
+    # the project's own path.
+    base = os.path.abspath(_expand_workspace_path(root)) if root else _project_root(project_id)
+    if not os.path.isdir(base):
+        raise HTTPException(404, f"Directory not found: {base}")
+    return _build_file_tree(base, max_depth=4, depth=0)
 
 
 # --- create / rename / delete -----------------------------------------------
