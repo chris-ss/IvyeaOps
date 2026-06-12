@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import sys
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -186,6 +188,9 @@ class LiveTerminal:
     pending_output_text: str = field(default="")
     last_snapshot_hash: str = field(default="")
     last_snapshot_at: float = field(default=0.0)
+    # Windows ConPTY process (pywinpty PtyProcess). None on POSIX, where fd_master
+    # is the real PTY master fd. When set, all fd-based ops branch to winpty.
+    winpty: Any = field(default=None)
 
     def __post_init__(self) -> None:
         self.pyte_stream = pyte.ByteStream(self.pyte_screen)
@@ -246,8 +251,8 @@ class TerminalLiveManager:
         self._snapshot_task: asyncio.Task | None = None
 
     def start_background_tasks(self) -> None:
-        if _WINDOWS:
-            return  # PTY not supported on Windows
+        # Reaper + snapshot loops are pure asyncio/pyte (no PTY syscalls), so they
+        # run on Windows too now that ConPTY terminals exist.
         if self._idle_sweep_task is None or self._idle_sweep_task.done():
             self._idle_sweep_task = asyncio.create_task(self._idle_reaper(), name="terminal-live-reaper")
         if self._snapshot_task is None or self._snapshot_task.done():
@@ -332,7 +337,7 @@ class TerminalLiveManager:
 
     async def _spawn(self, session_id: str, *, shell: str, workdir: str | None) -> LiveTerminal:
         if _WINDOWS:
-            raise RuntimeError("Live terminal PTY sessions are not supported on Windows.")
+            return await self._spawn_windows(session_id, shell=shell, workdir=workdir)
         master, slave = pty.openpty()
         env = os.environ.copy()
         env["TERM"] = env.get("TERM", "xterm-256color")
@@ -367,6 +372,97 @@ class TerminalLiveManager:
         except Exception:
             pass
         return term
+
+    async def _spawn_windows(self, session_id: str, *, shell: str, workdir: str | None) -> LiveTerminal:
+        """Real Windows terminal via ConPTY (pywinpty) — the same mechanism IDEs
+        use. Self-contained: never touches the POSIX fd path."""
+        try:
+            import winpty  # pywinpty; only installed on Windows
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(
+                "Windows 终端组件 (pywinpty) 未能加载。请更新 IvyeaOps 到含该组件的版本。"
+            ) from e
+        env = {str(k): str(v) for k, v in os.environ.items()}
+        env.setdefault("TERM", "xterm-256color")
+        cwd = workdir if workdir and os.path.isdir(workdir) else os.path.expanduser("~")
+        # Prefer an explicitly configured shell, else PowerShell, else cmd.exe.
+        safe_shell = (shell if shell and os.path.isabs(shell) and os.path.exists(shell) else None) \
+            or shutil.which("powershell.exe") or os.environ.get("COMSPEC") or "cmd.exe"
+        try:
+            pty_proc = winpty.PtyProcess.spawn(
+                [safe_shell], cwd=cwd, env=env, dimensions=(PYTE_ROWS, PYTE_COLS))
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"无法启动 Windows 终端进程: {e}") from e
+        term = LiveTerminal(session_id=session_id, proc=None, fd_master=-1,
+                            shell=safe_shell, workdir=cwd, winpty=pty_proc)
+        # NOTE: do not touch self._pool / self._lock here — start() holds the lock
+        # and registers the term after we return (the POSIX _spawn does the same).
+        term.reader_task = asyncio.create_task(
+            self._read_loop_win(term), name=f"terminal-readwin-{session_id[:6]}")
+        try:
+            svc.add_history(session_id, stream="system",
+                            content=f"[terminal started] shell={safe_shell} cwd={cwd}\n")
+        except Exception:
+            pass
+        return term
+
+    async def _read_loop_win(self, term: LiveTerminal) -> None:
+        """Drain a pywinpty process. ConPTY has no pollable fd, so a daemon thread
+        does the blocking reads and hands bytes to the same processing as POSIX."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+        def reader_thread() -> None:
+            while True:
+                try:
+                    data = term.winpty.read(READ_CHUNK)
+                except EOFError:
+                    data = ""
+                except Exception:  # noqa: BLE001
+                    data = ""
+                if data:
+                    chunk = data.encode("utf-8", errors="replace") if isinstance(data, str) else bytes(data)
+                    loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                    continue
+                try:
+                    alive = bool(term.winpty.isalive())
+                except Exception:  # noqa: BLE001
+                    alive = False
+                if not alive or term.closed:
+                    loop.call_soon_threadsafe(queue.put_nowait, b"")
+                    return
+                time.sleep(0.02)  # transient empty read; avoid a busy spin
+
+        threading.Thread(target=reader_thread, daemon=True,
+                         name=f"winpty-{term.session_id[:6]}").start()
+        try:
+            while not term.closed:
+                chunk = await queue.get()
+                if not chunk:
+                    break
+                term.last_io_at = time.time()
+                term.append_ring(chunk)
+                term.pending_persist.extend(chunk)
+                payload = {"type": "output", "data": chunk.decode("utf-8", errors="replace")}
+                for q in list(term.subscribers):
+                    if q.qsize() > 200:
+                        continue
+                    try:
+                        q.put_nowait(payload)
+                    except asyncio.QueueFull:
+                        pass
+                now = time.time()
+                if (now - term.last_flush) * 1000 >= PERSIST_FLUSH_MS and term.pending_persist:
+                    flushed = bytes(term.pending_persist)
+                    term.pending_persist.clear()
+                    term.last_flush = now
+                    self._persist_output(term.session_id, flushed)
+        finally:
+            if term.pending_persist:
+                self._persist_output(term.session_id, bytes(term.pending_persist))
+                term.pending_persist.clear()
+            self._persist_output(term.session_id, b"", final=True)
+            await self._on_exit(term)
 
     async def _read_loop(self, term: LiveTerminal) -> None:
         loop = asyncio.get_running_loop()
@@ -564,18 +660,29 @@ class TerminalLiveManager:
         if term.closed:
             return
         term.closed = True
-        try:
-            asyncio.get_running_loop().remove_reader(term.fd_master)
-        except Exception:
-            pass
-        try:
-            rc = await asyncio.wait_for(term.proc.wait(), timeout=5)
-        except asyncio.TimeoutError:
-            rc = None
-        try:
-            os.close(term.fd_master)
-        except OSError:
-            pass
+        if term.winpty is not None:
+            try:
+                rc = term.winpty.exitstatus
+            except Exception:  # noqa: BLE001
+                rc = None
+            try:
+                if term.winpty.isalive():
+                    term.winpty.terminate(force=True)
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            try:
+                asyncio.get_running_loop().remove_reader(term.fd_master)
+            except Exception:
+                pass
+            try:
+                rc = await asyncio.wait_for(term.proc.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                rc = None
+            try:
+                os.close(term.fd_master)
+            except OSError:
+                pass
         for q in list(term.subscribers):
             try:
                 q.put_nowait({"type": "exit", "code": rc})
@@ -605,22 +712,29 @@ class TerminalLiveManager:
         if not term:
             return
         term.closed = True
-        try:
-            asyncio.get_running_loop().remove_reader(term.fd_master)
-        except Exception:
-            pass
-        try:
-            term.proc.terminate()
+        if term.winpty is not None:
             try:
-                await asyncio.wait_for(term.proc.wait(), timeout=4)
-            except asyncio.TimeoutError:
-                term.proc.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            os.close(term.fd_master)
-        except OSError:
-            pass
+                if term.winpty.isalive():
+                    term.winpty.terminate(force=True)
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            try:
+                asyncio.get_running_loop().remove_reader(term.fd_master)
+            except Exception:
+                pass
+            try:
+                term.proc.terminate()
+                try:
+                    await asyncio.wait_for(term.proc.wait(), timeout=4)
+                except asyncio.TimeoutError:
+                    term.proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                os.close(term.fd_master)
+            except OSError:
+                pass
         for q in list(term.subscribers):
             try:
                 q.put_nowait({"type": "exit", "code": -1, "reason": reason})
@@ -658,12 +772,20 @@ class TerminalLiveManager:
         data = strip_terminal_auto_replies(data)
         if not data:
             return
-        try:
-            os.write(term.fd_master, data.encode("utf-8"))
-            term.last_io_at = time.time()
-            self._touch(session_id)
-        except BrokenPipeError as e:
-            raise RuntimeError("终端已关闭") from e
+        if term.winpty is not None:
+            try:
+                term.winpty.write(data)
+                term.last_io_at = time.time()
+                self._touch(session_id)
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError("终端已关闭") from e
+        else:
+            try:
+                os.write(term.fd_master, data.encode("utf-8"))
+                term.last_io_at = time.time()
+                self._touch(session_id)
+            except BrokenPipeError as e:
+                raise RuntimeError("终端已关闭") from e
         term.input_buffer, submitted_lines = normalize_input_chunk(term.input_buffer, data)
         for line in submitted_lines:
             term.last_submitted_input = line
@@ -673,10 +795,14 @@ class TerminalLiveManager:
                 pass
 
     async def resize(self, session_id: str, cols: int, rows: int) -> None:
-        if _WINDOWS:
-            return
         term = self._pool.get(session_id)
         if not term:
+            return
+        if term.winpty is not None:
+            try:
+                term.winpty.setwinsize(rows, cols)
+            except Exception:  # noqa: BLE001
+                pass
             return
         import fcntl
         import struct

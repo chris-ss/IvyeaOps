@@ -180,7 +180,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel pyinstaller
           python -m pip install -r server/requirements.txt
-          pyinstaller --noconfirm --clean --onefile --windowed --hidden-import tkinter --hidden-import tkinter.messagebox --icon client/public/favicon.ico --name IvyeaOpsServer --paths server server/ivyeaops_server.py
+          # Build the PyInstaller arg list. --collect-all winpty bundles pywinpty's
+          # native ConPTY DLLs so the server-terminal board works in the frozen exe.
+          # Best-effort: if winpty isn't importable, build without it (the terminal
+          # then degrades gracefully) rather than failing the whole release.
+          $piArgs = @("--noconfirm","--clean","--onefile","--windowed","--hidden-import","tkinter","--hidden-import","tkinter.messagebox")
+          try { python -c "import winpty"; $piArgs += @("--collect-all","winpty"); Write-Host "bundling pywinpty (ConPTY)" }
+          catch { Write-Host "winpty not importable; building without ConPTY bundle" }
+          $piArgs += @("--icon","client/public/favicon.ico","--name","IvyeaOpsServer","--paths","server","server/ivyeaops_server.py")
+          pyinstaller @piArgs
           if (!(Test-Path dist/IvyeaOpsServer.exe)) { throw "IvyeaOpsServer.exe missing" }
 
       - name: Resolve tag

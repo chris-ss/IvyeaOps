@@ -14,6 +14,10 @@ psd-tools==1.10.2
 Pillow>=11.0.0
 python-multipart>=0.0.9
 pyte>=0.8.2
+# Windows ConPTY backend for the server-terminal board (Unix uses the stdlib pty
+# module). Environment-marked so it's NEVER installed on Linux/macOS — the Linux
+# server + this repo's venv are completely unaffected.
+pywinpty>=2.0.10; sys_platform == "win32"
 # AES for 领星 OpenAPI signing (app/services/lingxing_openapi.py).
 cryptography>=42.0.0
 # Lets pydantic evaluate `X | None` annotations on Python 3.9 (the default on
