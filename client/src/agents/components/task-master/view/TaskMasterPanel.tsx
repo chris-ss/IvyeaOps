@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import PRDEditor from '../../prd-editor';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+
+// Lazy: PRDEditor pulls in CodeMirror; it only mounts when the user opens a PRD,
+// so keep it out of the main Agents chunk.
+const PRDEditor = lazy(() => import('../../prd-editor'));
 import { useTaskMaster } from '../context/TaskMasterContext';
 import { useProjectPrdFiles } from '../hooks/useProjectPrdFiles';
 import type { PrdFile, TaskMasterTask, TaskSelection } from '../types';
@@ -113,26 +116,28 @@ export default function TaskMasterPanel({ isVisible }: TaskMasterPanelProps) {
       />
 
       {isPrdEditorOpen && (
-        <PRDEditor
-          project={currentProject}
-          projectPath={currentProject?.fullPath || currentProject?.path}
-          onClose={() => {
-            setIsPrdEditorOpen(false);
-            setSelectedPrd(null);
-          }}
-          isNewFile={!selectedPrd?.isExisting}
-          file={{
-            name: selectedPrd?.name || 'prd.txt',
-            content: selectedPrd?.content || '',
-            isExisting: selectedPrd?.isExisting,
-          }}
-          onSave={async () => {
-            setIsPrdEditorOpen(false);
-            setSelectedPrd(null);
-            await refreshPrdData(true);
-            await refreshTasks();
-          }}
-        />
+        <Suspense fallback={null}>
+          <PRDEditor
+            project={currentProject}
+            projectPath={currentProject?.fullPath || currentProject?.path}
+            onClose={() => {
+              setIsPrdEditorOpen(false);
+              setSelectedPrd(null);
+            }}
+            isNewFile={!selectedPrd?.isExisting}
+            file={{
+              name: selectedPrd?.name || 'prd.txt',
+              content: selectedPrd?.content || '',
+              isExisting: selectedPrd?.isExisting,
+            }}
+            onSave={async () => {
+              setIsPrdEditorOpen(false);
+              setSelectedPrd(null);
+              await refreshPrdData(true);
+              await refreshTasks();
+            }}
+          />
+        </Suspense>
       )}
 
       {prdNotification && (

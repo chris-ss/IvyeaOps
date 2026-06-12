@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { ComponentProps } from 'react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+// PrismLight with a curated language set (see lib/prismLight) instead of the
+// full Prism build that bundles every language.
+import SyntaxHighlighter from '../../../../../lib/prismLight';
 import { oneDark as prismOneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { copyTextToClipboard } from '../../../../../utils/clipboard';
 

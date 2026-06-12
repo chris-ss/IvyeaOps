@@ -173,12 +173,10 @@ async def shell_ws(websocket: WebSocket) -> None:
     try:
         from app.agents.shell_pty import ShellConnection
     except Exception as e:  # noqa: BLE001
-        # The PTY backend depends on Unix-only modules (fcntl/pty/termios). On
-        # Windows the import fails; without this guard the socket errored out and
-        # the client reconnected in a tight loop — the terminal "屏闪" symptom.
-        import sys
-        msg = ("内置终端在 Windows 上不可用（不支持 PTY 多终端会话）。其余功能正常。"
-               if sys.platform == "win32" else f"终端后端不可用：{e}")
+        # shell_pty now has a ConPTY (pywinpty) backend on Windows, so this import
+        # only fails when something is genuinely broken. Without this guard the
+        # socket errored out and the client reconnected in a tight loop ("屏闪").
+        msg = f"终端后端不可用：{e}"
         try:
             await websocket.send_json({"type": "error", "message": msg})
         except Exception:

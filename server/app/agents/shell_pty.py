@@ -13,14 +13,21 @@ Protocol (matches the frontend shell client):
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import os
-import pty
 import re
+import shutil
 import struct
-import termios
+import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Optional
+
+_WINDOWS = sys.platform == "win32"
+if not _WINDOWS:
+    import fcntl
+    import pty
+    import termios
 
 _SESSIONS: dict[str, "ShellSession"] = {}
 _PTY_TIMEOUT_S = 30 * 60
@@ -120,8 +127,11 @@ def _build_command(data: dict) -> str:
 @dataclass
 class ShellSession:
     key: str
-    proc: asyncio.subprocess.Process
+    proc: Optional[asyncio.subprocess.Process]
     fd_master: int
+    # Windows ConPTY process (pywinpty PtyProcess). None on POSIX, where
+    # fd_master is the real PTY master fd. When set, all fd ops branch to winpty.
+    winpty: object = None
     ws: object = None
     buffer: list = field(default_factory=list)
     out_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -167,7 +177,86 @@ def _proc_env() -> dict:
     return env
 
 
+def _reader_thread_win(session: ShellSession, loop: asyncio.AbstractEventLoop) -> None:
+    """Blocking-read pump for ConPTY (no pollable fd on Windows). Feeds the same
+    out_queue/_drain pipeline as the POSIX add_reader path."""
+    while True:
+        try:
+            data = session.winpty.read(65536)
+        except EOFError:
+            data = ""
+        except Exception:  # noqa: BLE001
+            data = ""
+        if data:
+            chunk = data.encode("utf-8", "replace") if isinstance(data, str) else bytes(data)
+            try:
+                loop.call_soon_threadsafe(session.out_queue.put_nowait, chunk)
+            except RuntimeError:
+                return  # loop closed
+            continue
+        try:
+            alive = bool(session.winpty.isalive())
+        except Exception:  # noqa: BLE001
+            alive = False
+        if not alive:
+            try:
+                loop.call_soon_threadsafe(
+                    lambda s=session: asyncio.ensure_future(_on_exit_win(s)))
+            except RuntimeError:
+                pass
+            return
+        time.sleep(0.02)  # transient empty read; avoid a busy spin
+
+
+async def _on_exit_win(session: ShellSession) -> None:
+    """Windows counterpart of _on_exit: flush the drain, announce the exit code."""
+    try:
+        code = session.winpty.exitstatus
+    except Exception:  # noqa: BLE001
+        code = None
+    session.out_queue.put_nowait(None)
+    if session.drain_task:
+        try:
+            await session.drain_task
+        except Exception:
+            pass
+    await _safe_send(session.ws, {"type": "output",
+                                  "data": f"\r\n\x1b[33mProcess exited with code {code}\x1b[0m\r\n"})
+    _cleanup(session.key)
+
+
+async def _spawn_windows(key: str, command: str, cwd: str, cols: int, rows: int) -> ShellSession:
+    """Spawn via ConPTY (pywinpty) — the same mechanism IDE terminals use.
+    Commands run through cmd.exe /c (it understands the `a || b` fallbacks that
+    _build_command emits); an empty command opens an interactive PowerShell."""
+    try:
+        import winpty  # pywinpty; only installed/bundled on Windows
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(
+            "Windows 终端组件 (pywinpty) 未能加载，请更新 IvyeaOps 到含该组件的版本。") from e
+    env = {str(k): str(v) for k, v in os.environ.items()}
+    env.setdefault("TERM", "xterm-256color")
+    cmd = (command or "").strip()
+    if cmd and cmd != "bash":  # "bash" is the POSIX plain-shell default — meaningless here
+        argv = [os.environ.get("COMSPEC") or "cmd.exe", "/c", cmd]
+    else:
+        argv = [shutil.which("powershell.exe") or os.environ.get("COMSPEC") or "cmd.exe"]
+    try:
+        pty_proc = winpty.PtyProcess.spawn(argv, cwd=cwd, env=env, dimensions=(rows, cols))
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"无法启动 Windows 终端进程: {e}") from e
+    session = ShellSession(key=key, proc=None, fd_master=-1, winpty=pty_proc)
+    _SESSIONS[key] = session
+    loop = asyncio.get_running_loop()
+    session.drain_task = asyncio.create_task(_drain(session))
+    threading.Thread(target=_reader_thread_win, args=(session, loop),
+                     daemon=True, name=f"agents-winpty-{key[-8:]}").start()
+    return session
+
+
 async def _spawn(key: str, command: str, cwd: str, cols: int, rows: int) -> ShellSession:
+    if _WINDOWS:
+        return await _spawn_windows(key, command, cwd, cols, rows)
     master, slave = pty.openpty()
     # apply initial window size
     try:
@@ -274,6 +363,13 @@ def _cleanup(key: str) -> None:
         return
     if session.timeout_handle:
         session.timeout_handle.cancel()
+    if session.winpty is not None:
+        try:
+            if session.winpty.isalive():
+                session.winpty.terminate(force=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return
     loop = asyncio.get_event_loop()
     try:
         loop.remove_reader(session.fd_master)
@@ -287,13 +383,21 @@ def _cleanup(key: str) -> None:
 
 def _kill(key: str) -> None:
     session = _SESSIONS.get(key)
-    if session:
+    if not session:
+        return
+    if session.winpty is not None:
         try:
-            session.proc.terminate()
-        except ProcessLookupError:
+            if session.winpty.isalive():
+                session.winpty.terminate(force=True)
+        except Exception:  # noqa: BLE001
             pass
-        except Exception:
-            pass
+        return
+    try:
+        session.proc.terminate()
+    except ProcessLookupError:
+        pass
+    except Exception:
+        pass
 
 
 # --- per-connection handler -------------------------------------------------
@@ -312,20 +416,32 @@ class ShellConnection:
         elif mtype == "input":
             session = _SESSIONS.get(self.key) if self.key else None
             if session:
-                try:
-                    os.write(session.fd_master, str(data.get("data") or "").encode("utf-8"))
-                except OSError:
-                    pass
+                if session.winpty is not None:
+                    try:
+                        session.winpty.write(str(data.get("data") or ""))
+                    except Exception:  # noqa: BLE001
+                        pass
+                else:
+                    try:
+                        os.write(session.fd_master, str(data.get("data") or "").encode("utf-8"))
+                    except OSError:
+                        pass
         elif mtype == "resize":
             session = _SESSIONS.get(self.key) if self.key else None
             if session:
                 cols = int(data.get("cols") or 80)
                 rows = int(data.get("rows") or 24)
-                try:
-                    fcntl.ioctl(session.fd_master, termios.TIOCSWINSZ,
-                                struct.pack("HHHH", rows, cols, 0, 0))
-                except OSError:
-                    pass
+                if session.winpty is not None:
+                    try:
+                        session.winpty.setwinsize(rows, cols)
+                    except Exception:  # noqa: BLE001
+                        pass
+                else:
+                    try:
+                        fcntl.ioctl(session.fd_master, termios.TIOCSWINSZ,
+                                    struct.pack("HHHH", rows, cols, 0, 0))
+                    except OSError:
+                        pass
 
     async def _init(self, data: dict) -> None:
         project_path = data.get("projectPath") or os.getcwd()
@@ -369,7 +485,12 @@ class ShellConnection:
         command = _build_command(data)
         cols = int(data.get("cols") or 80)
         rows = int(data.get("rows") or 24)
-        session = await _spawn(self.key, command, resolved, cols, rows)
+        try:
+            session = await _spawn(self.key, command, resolved, cols, rows)
+        except RuntimeError as e:
+            # e.g. pywinpty missing on Windows — tell the user instead of dying silently
+            await _safe_send(self.ws, {"type": "error", "message": str(e)})
+            return
         session.ws = self.ws
 
         if is_plain:

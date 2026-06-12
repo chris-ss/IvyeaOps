@@ -3,16 +3,16 @@
  *
  * Configures i18next for internationalization support.
  * Features:
- * - Lazy-loading of translation namespaces
+ * - zh-CN + en bundled eagerly (the defaults); other languages lazy-loaded on
+ *   demand via dynamic import, so they stay out of the main Agents chunk
  * - Language detection from localStorage
  * - Fallback to English for missing translations
- * - Development mode warnings for missing keys
  */
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
-// Import translation resources
+// Eager resources: only the two languages virtually every session uses.
 import enCommon from './locales/en/common.json';
 import enSettings from './locales/en/settings.json';
 import enAuth from './locales/en/auth.json';
@@ -21,14 +21,6 @@ import enChat from './locales/en/chat.json';
 import enCodeEditor from './locales/en/codeEditor.json';
 // eslint-disable-next-line import-x/order
 import enTasks from './locales/en/tasks.json';
-
-import koCommon from './locales/ko/common.json';
-import koSettings from './locales/ko/settings.json';
-import koAuth from './locales/ko/auth.json';
-import koSidebar from './locales/ko/sidebar.json';
-import koChat from './locales/ko/chat.json';
-// eslint-disable-next-line import-x/order
-import koCodeEditor from './locales/ko/codeEditor.json';
 
 import zhCommon from './locales/zh-CN/common.json';
 import zhSettings from './locales/zh-CN/settings.json';
@@ -39,52 +31,26 @@ import zhChat from './locales/zh-CN/chat.json';
 import zhCodeEditor from './locales/zh-CN/codeEditor.json';
 import zhTasks from './locales/zh-CN/tasks.json';
 
-import jaCommon from './locales/ja/common.json';
-import jaSettings from './locales/ja/settings.json';
-import jaAuth from './locales/ja/auth.json';
-import jaSidebar from './locales/ja/sidebar.json';
-import jaChat from './locales/ja/chat.json';
-import jaCodeEditor from './locales/ja/codeEditor.json';
-// eslint-disable-next-line import-x/order
-import jaTasks from './locales/ja/tasks.json';
-
-import ruCommon from './locales/ru/common.json';
-import ruSettings from './locales/ru/settings.json';
-import ruAuth from './locales/ru/auth.json';
-import ruSidebar from './locales/ru/sidebar.json';
-import ruChat from './locales/ru/chat.json';
-import ruCodeEditor from './locales/ru/codeEditor.json';
-// eslint-disable-next-line import-x/order
-import ruTasks from './locales/ru/tasks.json';
-
-import deCommon from './locales/de/common.json';
-import deSettings from './locales/de/settings.json';
-import deAuth from './locales/de/auth.json';
-import deSidebar from './locales/de/sidebar.json';
-import deChat from './locales/de/chat.json';
-import deCodeEditor from './locales/de/codeEditor.json';
-// eslint-disable-next-line import-x/order
-import deTasks from './locales/de/tasks.json';
-
-import trCommon from './locales/tr/common.json';
-import trSettings from './locales/tr/settings.json';
-import trAuth from './locales/tr/auth.json';
-import trSidebar from './locales/tr/sidebar.json';
-import trChat from './locales/tr/chat.json';
-import trCodeEditor from './locales/tr/codeEditor.json';
-// eslint-disable-next-line import-x/order
-import trTasks from './locales/tr/tasks.json';
-import itCommon from './locales/it/common.json';
-import itSettings from './locales/it/settings.json';
-import itAuth from './locales/it/auth.json';
-import itSidebar from './locales/it/sidebar.json';
-import itChat from './locales/it/chat.json';
-import itCodeEditor from './locales/it/codeEditor.json';
-// eslint-disable-next-line import-x/order
-import itTasks from './locales/it/tasks.json';
-
 // Import supported languages configuration
 import { languages } from './languages.js';
+
+// Lazy locales: ko/ja/ru/de/tr/it load on first switch instead of shipping in the
+// main bundle (~440KB of JSON source). Vite turns each file into its own chunk.
+const LAZY_LOCALE_MODULES = import.meta.glob('./locales/{ko,ja,ru,de,tr,it}/*.json');
+
+async function loadLocale(lng) {
+  const prefix = `./locales/${lng}/`;
+  const entries = Object.entries(LAZY_LOCALE_MODULES).filter(([p]) => p.startsWith(prefix));
+  if (!entries.length) {
+    return false;
+  }
+  await Promise.all(entries.map(async ([path, loader]) => {
+    const ns = path.slice(prefix.length).replace(/\.json$/, '');
+    const mod = await loader();
+    i18n.addResourceBundle(lng, ns, mod.default || mod, true, true);
+  }));
+  return true;
+}
 
 // Get saved language preference from localStorage
 // Use 'ivyea_ops_lang' key to avoid reading stale 'userLanguage: en' from old installs
@@ -105,7 +71,7 @@ const getSavedLanguage = () => {
 i18n
   .use(initReactI18next)
   .init({
-    // Resources containing all translations
+    // Eager resources (lazy languages are added via addResourceBundle on demand)
     resources: {
       en: {
         common: enCommon,
@@ -116,14 +82,6 @@ i18n
         codeEditor: enCodeEditor,
         tasks: enTasks,
       },
-      ko: {
-        common: koCommon,
-        settings: koSettings,
-        auth: koAuth,
-        sidebar: koSidebar,
-        chat: koChat,
-        codeEditor: koCodeEditor,
-      },
       'zh-CN': {
         common: zhCommon,
         settings: zhSettings,
@@ -132,51 +90,6 @@ i18n
         chat: zhChat,
         codeEditor: zhCodeEditor,
         tasks: zhTasks,
-      },
-      ja: {
-        common: jaCommon,
-        settings: jaSettings,
-        auth: jaAuth,
-        sidebar: jaSidebar,
-        chat: jaChat,
-        codeEditor: jaCodeEditor,
-        tasks: jaTasks,
-      },
-      ru: {
-        common: ruCommon,
-        settings: ruSettings,
-        auth: ruAuth,
-        sidebar: ruSidebar,
-        chat: ruChat,
-        codeEditor: ruCodeEditor,
-        tasks: ruTasks,
-      },
-      de: {
-        common: deCommon,
-        settings: deSettings,
-        auth: deAuth,
-        sidebar: deSidebar,
-        chat: deChat,
-        codeEditor: deCodeEditor,
-        tasks: deTasks,
-      },
-      tr: {
-        common: trCommon,
-        settings: trSettings,
-        auth: trAuth,
-        sidebar: trSidebar,
-        chat: trChat,
-        codeEditor: trCodeEditor,
-        tasks: trTasks,
-      },
-      it: {
-        common: itCommon,
-        settings: itSettings,
-        auth: itAuth,
-        sidebar: itSidebar,
-        chat: itChat,
-        codeEditor: itCodeEditor,
-        tasks: itTasks,
       },
     },
 
@@ -216,13 +129,36 @@ i18n
 
   });
 
-// Save language preference when it changes
+// Ensure a lazy language's bundles are loaded, then re-announce the change so
+// react-i18next re-renders with the real strings (English fallback shows for the
+// brief load window). Guarded by hasResourceBundle, so no reload loop.
+function ensureLocale(lng) {
+  if (!lng || i18n.hasResourceBundle(lng, 'common')) {
+    return;
+  }
+  loadLocale(lng)
+    .then((loaded) => {
+      if (loaded && i18n.language === lng) {
+        return i18n.changeLanguage(lng);
+      }
+      return undefined;
+    })
+    .catch((error) => {
+      console.error(`Failed to load locale ${lng}:`, error);
+    });
+}
+
+// Save language preference when it changes; lazy-load its bundles if needed.
 i18n.on('languageChanged', (lng) => {
   try {
     localStorage.setItem(LANG_KEY, lng);
   } catch (error) {
     console.error('Failed to save language preference:', error);
   }
+  ensureLocale(lng);
 });
+
+// The saved language might be a lazy one (e.g. ja) — load it right away.
+ensureLocale(getSavedLanguage());
 
 export default i18n;

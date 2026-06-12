@@ -1,7 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import type { MouseEvent, MutableRefObject } from 'react';
 import type { CodeEditorFile } from '../types/types';
-import CodeEditor from './CodeEditor';
+
+// Lazy: CodeEditor pulls in the whole CodeMirror stack (~hundreds of KB). It only
+// mounts when a file is opened, so split it out of the main Agents chunk.
+const CodeEditor = lazy(() => import('./CodeEditor'));
+
+function EditorLoading() {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      编辑器加载中…
+    </div>
+  );
+}
 
 type EditorSidebarProps = {
   editingFile: CodeEditorFile | null;
@@ -86,15 +97,17 @@ export default function EditorSidebar({
 
   if (isMobile || poppedOut) {
     return (
-      <CodeEditor
-        file={editingFile}
-        onClose={() => {
-          setPoppedOut(false);
-          onCloseEditor();
-        }}
-        projectPath={projectPath}
-        isSidebar={false}
-      />
+      <Suspense fallback={<EditorLoading />}>
+        <CodeEditor
+          file={editingFile}
+          onClose={() => {
+            setPoppedOut(false);
+            onCloseEditor();
+          }}
+          projectPath={projectPath}
+          isSidebar={false}
+        />
+      </Suspense>
     );
   }
 
@@ -118,15 +131,17 @@ export default function EditorSidebar({
         className={`h-full overflow-hidden border-l border-gray-200 dark:border-gray-700 ${useFlexLayout ? 'min-w-0 flex-1' : `min-w-[ flex-shrink-0${MIN_EDITOR_WIDTH}px]`}`}
         style={useFlexLayout ? undefined : { width: `${effectiveWidth}px`, minWidth: `${MIN_EDITOR_WIDTH}px` }}
       >
-        <CodeEditor
-          file={editingFile}
-          onClose={onCloseEditor}
-          projectPath={projectPath}
-          isSidebar
-          isExpanded={editorExpanded}
-          onToggleExpand={onToggleEditorExpand}
-          onPopOut={() => setPoppedOut(true)}
-        />
+        <Suspense fallback={<EditorLoading />}>
+          <CodeEditor
+            file={editingFile}
+            onClose={onCloseEditor}
+            projectPath={projectPath}
+            isSidebar
+            isExpanded={editorExpanded}
+            onToggleExpand={onToggleEditorExpand}
+            onPopOut={() => setPoppedOut(true)}
+          />
+        </Suspense>
       </div>
     </div>
   );
