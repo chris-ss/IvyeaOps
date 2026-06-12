@@ -25,6 +25,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import urllib.request
 from pathlib import Path
 from typing import AsyncGenerator
@@ -255,6 +257,110 @@ def start_windows_update(_u: str = Depends(require_user)):
         raise HTTPException(500, f"启动更新失败：{exc}") from exc
 
     return {"ok": True, "detail": "更新窗口已启动。"}
+
+
+# ── In-app update with real progress (Windows x64) ───────────────────────────
+# Two-phase flow driven by an in-app modal instead of the external WinForms
+# window: (1) the backend downloads the zip itself, exposing live progress;
+# (2) "install" spawns the detached updater with the pre-downloaded zip — it
+# stops this backend, copies files, restarts. The frontend then polls
+# /api/health until the new version is up.
+
+_UPDATE_LOCK = threading.Lock()
+_UPDATE_STATE: dict = {"phase": "idle", "percent": 0, "downloaded": 0, "total": 0,
+                       "error": "", "zip_path": "", "target": ""}
+_UPDATE_ZIP_URL = ("https://github.com/Hector-xue/IvyeaOps/releases/latest/download/"
+                   "IvyeaOps-Windows-x64.zip")
+
+
+def _update_download_worker(url: str, dest: Path) -> None:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "IvyeaOps-updater"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            total = int(resp.headers.get("Content-Length") or 0)
+            _UPDATE_STATE.update(total=total)
+            done = 0
+            with open(dest, "wb") as fh:
+                while True:
+                    chunk = resp.read(256 * 1024)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    done += len(chunk)
+                    _UPDATE_STATE.update(
+                        downloaded=done,
+                        percent=round(100 * done / total, 1) if total else 0)
+        if dest.stat().st_size < 1024 * 1024:  # sanity: a real bundle is ~90MB
+            raise RuntimeError("下载文件异常偏小，可能不是有效安装包")
+        _UPDATE_STATE.update(phase="downloaded", percent=100, zip_path=str(dest))
+    except Exception as exc:  # noqa: BLE001
+        _UPDATE_STATE.update(phase="error", error=f"下载失败：{exc}")
+        try:
+            dest.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+@router.post("/setup/update/download")
+def update_download(_u: str = Depends(require_user)):
+    """Start downloading the latest Windows x64 bundle in the background."""
+    root = _runtime_root()
+    if not _windows_update_supported(root):
+        raise HTTPException(400, "应用内更新仅支持 Windows x64 免 Python 包。")
+    with _UPDATE_LOCK:
+        if _UPDATE_STATE["phase"] == "downloading":
+            return {"ok": True, "detail": "已在下载中"}
+        target = ""
+        try:
+            req = urllib.request.Request(_LATEST_RELEASE_API,
+                                         headers={"Accept": "application/vnd.github+json",
+                                                  "User-Agent": "IvyeaOps-updater"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                target = str(json.loads(resp.read().decode("utf-8", "replace")).get("tag_name") or "")
+        except Exception:  # noqa: BLE001 — tag is cosmetic; download still proceeds
+            pass
+        dest = Path(tempfile.gettempdir()) / "IvyeaOps-update.zip"
+        _UPDATE_STATE.update(phase="downloading", percent=0, downloaded=0, total=0,
+                             error="", zip_path="", target=target)
+        threading.Thread(target=_update_download_worker, args=(_UPDATE_ZIP_URL, dest),
+                         daemon=True, name="ivyea-update-download").start()
+    return {"ok": True, "target": target}
+
+
+@router.get("/setup/update/progress")
+def update_progress(_u: str = Depends(require_user)):
+    return dict(_UPDATE_STATE)
+
+
+@router.post("/setup/update/install")
+def update_install(_u: str = Depends(require_user)):
+    """Spawn the detached updater using the pre-downloaded zip. It stops this
+    backend, copies program files (keeping data/config), and restarts — the
+    frontend keeps polling /api/health until the new version answers."""
+    root = _runtime_root()
+    if not _windows_update_supported(root):
+        raise HTTPException(400, "应用内更新仅支持 Windows x64 免 Python 包。")
+    if _UPDATE_STATE["phase"] != "downloaded" or not _UPDATE_STATE["zip_path"]:
+        raise HTTPException(400, "安装包尚未下载完成。")
+    script = root / "scripts" / "update-exe.ps1"
+    if not script.is_file():
+        raise HTTPException(404, f"更新脚本不存在：{script}")
+    ps = _powershell_bin()
+    if not ps:
+        raise HTTPException(500, "PowerShell 不可用。")
+    cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+           "-File", str(script), "-ZipPath", _UPDATE_STATE["zip_path"], "-NonInteractive"]
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen(cmd, cwd=str(root), stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         close_fds=True, creationflags=creationflags)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"启动安装失败：{exc}") from exc
+    _UPDATE_STATE.update(phase="installing")
+    return {"ok": True, "detail": "正在安装，服务即将重启。"}
 
 
 # Pin GBrain to a known-good commit. Upstream HEAD (v0.35+) changed the config

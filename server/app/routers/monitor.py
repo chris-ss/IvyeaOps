@@ -78,8 +78,10 @@ class ServiceStatus(BaseModel):
 
 def _cpu() -> CpuInfo:
     try:
+        # POSIX-only: the function doesn't even exist on Windows (AttributeError),
+        # which used to 500 the whole /stats endpoint there.
         l1, l5, l15 = os.getloadavg()
-    except OSError:
+    except (OSError, AttributeError):
         l1 = l5 = l15 = 0.0
     # interval=0.2 blocks briefly to give an accurate sample (no more first-call 0%)
     return CpuInfo(

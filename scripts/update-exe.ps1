@@ -9,11 +9,19 @@
 
 param(
     [string]$DownloadUrl = "https://github.com/Hector-xue/IvyeaOps/releases/latest/download/IvyeaOps-Windows-x64.zip",
+    # Pre-downloaded bundle (the in-app updater downloads with live progress and
+    # hands the file here) — skips the Invoke-WebRequest step entirely.
+    [string]$ZipPath = "",
     [switch]$NonInteractive
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Capture the param before the script reuses $ZipPath as its temp-file variable
+# further down (otherwise the param value would be clobbered).
+$ZipPathParam = ""
+if ($ZipPath -and (Test-Path $ZipPath)) { $ZipPathParam = (Resolve-Path $ZipPath).Path }
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $RepoRoot
@@ -85,8 +93,13 @@ try {
     Write-Info "Stopping background service..."
     Stop-IvyeaOps
 
-    Write-Info "Downloading latest Windows x64 package..."
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipPath -UseBasicParsing
+    if ($ZipPathParam) {
+        Write-Info "Using pre-downloaded package: $ZipPathParam"
+        Copy-Item $ZipPathParam $ZipPath -Force
+    } else {
+        Write-Info "Downloading latest Windows x64 package..."
+        Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipPath -UseBasicParsing
+    }
 
     Write-Info "Extracting update package..."
     Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
@@ -126,5 +139,6 @@ try {
     Write-Fail $_
 } finally {
     try { Remove-Item -Recurse -Force $TempRoot -ErrorAction SilentlyContinue } catch {}
+    if ($ZipPathParam) { try { Remove-Item -Force $ZipPathParam -ErrorAction SilentlyContinue } catch {} }
     try { Stop-Transcript | Out-Null } catch {}
 }

@@ -222,39 +222,71 @@ def _run_with_control_window() -> None:
 
     root = tk.Tk()
     root.title("IvyeaOps")
-    root.geometry("420x220")
+    root.geometry("440x252")
     root.resizable(False, False)
     try:
         root.iconbitmap(str(_runtime_root() / "client" / "public" / "favicon.ico"))
     except Exception:
         pass
 
-    bg = "#0f172a"
-    panel = "#111827"
-    fg = "#e5e7eb"
-    muted = "#94a3b8"
-    green = "#22c55e"
+    # Match the workbench dark theme (client/src/styles/workbench.css):
+    # near-black bg, #141414 panel, #262626 border, #4ade80 green accent.
+    bg = "#0c0c0c"
+    panel = "#141414"
+    border = "#262626"
+    fg = "#e8e8e8"
+    muted = "#a8a8a8"
+    faint = "#747474"
+    green = "#4ade80"
+    green_dim = "#22c55e"
+    amber = "#fbbf24"
+    btn_dark = "#1c1c1c"
+    btn_dark_hover = "#262626"
+    ui = "Microsoft YaHei UI"
+    mono = "Consolas"
     root.configure(bg=bg)
 
-    frame = tk.Frame(root, bg=panel, padx=22, pady=18)
+    frame = tk.Frame(root, bg=panel, padx=24, pady=18,
+                     highlightbackground=border, highlightthickness=1)
     frame.pack(fill="both", expand=True, padx=14, pady=14)
 
-    title = tk.Label(frame, text="IvyeaOps 正在运行", bg=panel, fg=fg, font=("Microsoft YaHei UI", 15, "bold"))
-    title.pack(anchor="w")
+    # Header: ASCII-ish brand mark + status dot, workbench console vibe.
+    header = tk.Frame(frame, bg=panel)
+    header.pack(fill="x")
+    tk.Label(header, text="IVYEA OPS", bg=panel, fg=fg,
+             font=(mono, 15, "bold")).pack(side="left")
+    tk.Label(header, text="CONSOLE", bg=panel, fg=faint,
+             font=(mono, 9)).pack(side="left", padx=(8, 0), pady=(5, 0))
+    dot_var = tk.StringVar(value="●")
+    dot = tk.Label(header, textvariable=dot_var, bg=panel, fg=amber, font=(ui, 11))
+    dot.pack(side="right")
 
-    status_var = tk.StringVar(value="正在启动服务...")
-    status = tk.Label(frame, textvariable=status_var, bg=panel, fg=muted, font=("Microsoft YaHei UI", 10), pady=8)
-    status.pack(anchor="w")
+    status_var = tk.StringVar(value="正在启动服务…")
+    tk.Label(frame, textvariable=status_var, bg=panel, fg=muted,
+             font=(ui, 10), pady=6).pack(anchor="w")
 
-    detail = tk.Label(
-        frame,
-        text=f"地址: {url}\n版本: {app_version()}\n关闭此窗口会停止 IvyeaOps 后台服务。",
-        bg=panel,
-        fg=muted,
-        justify="left",
-        font=("Microsoft YaHei UI", 9),
-    )
-    detail.pack(anchor="w", pady=(0, 12))
+    # Divider
+    tk.Frame(frame, bg=border, height=1).pack(fill="x", pady=(2, 10))
+
+    # Info rows: monospace, address clickable.
+    info = tk.Frame(frame, bg=panel)
+    info.pack(fill="x")
+
+    def _row(label: str) -> tk.Frame:
+        r = tk.Frame(info, bg=panel)
+        r.pack(fill="x", pady=1)
+        tk.Label(r, text=label, bg=panel, fg=faint, width=6, anchor="w",
+                 font=(mono, 9)).pack(side="left")
+        return r
+
+    r1 = _row("地址")
+    link = tk.Label(r1, text=url, bg=panel, fg=green, cursor="hand2",
+                    font=(mono, 9, "underline"))
+    link.pack(side="left")
+    r2 = _row("版本")
+    tk.Label(r2, text=app_version(), bg=panel, fg=muted, font=(mono, 9)).pack(side="left")
+    tk.Label(frame, text="关闭此窗口将停止 IvyeaOps 后台服务", bg=panel, fg=faint,
+             font=(ui, 8)).pack(anchor="w", pady=(8, 10))
 
     buttons = tk.Frame(frame, bg=panel)
     buttons.pack(fill="x", side="bottom")
@@ -264,12 +296,15 @@ def _run_with_control_window() -> None:
     def open_browser() -> None:
         webbrowser.open(url)
 
+    link.bind("<Button-1>", lambda _e: open_browser())
+
     def stop_server() -> None:
         nonlocal stopping
         if stopping:
             return
         stopping = True
-        status_var.set("正在停止服务...")
+        status_var.set("正在停止服务…")
+        dot.configure(fg=faint)
         server.should_exit = True
 
         def finish() -> None:
@@ -281,35 +316,24 @@ def _run_with_control_window() -> None:
     def on_close() -> None:
         stop_server()
 
-    open_btn = tk.Button(
-        buttons,
-        text="打开浏览器",
-        command=open_browser,
-        bg=green,
-        fg="#052e16",
-        activebackground="#4ade80",
-        activeforeground="#052e16",
-        relief="flat",
-        padx=16,
-        pady=7,
-        font=("Microsoft YaHei UI", 9, "bold"),
-    )
-    open_btn.pack(side="left")
+    def _styled_btn(parent, text, command, *, primary: bool) -> tk.Button:
+        b = tk.Button(
+            parent, text=text, command=command, relief="flat", bd=0,
+            cursor="hand2", padx=18, pady=7,
+            bg=green_dim if primary else btn_dark,
+            fg="#04150a" if primary else fg,
+            activebackground=green if primary else btn_dark_hover,
+            activeforeground="#04150a" if primary else fg,
+            font=(ui, 9, "bold") if primary else (ui, 9),
+        )
+        hover_in = green if primary else btn_dark_hover
+        hover_out = green_dim if primary else btn_dark
+        b.bind("<Enter>", lambda _e: b.configure(bg=hover_in))
+        b.bind("<Leave>", lambda _e: b.configure(bg=hover_out))
+        return b
 
-    stop_btn = tk.Button(
-        buttons,
-        text="停止并退出",
-        command=stop_server,
-        bg="#1f2937",
-        fg=fg,
-        activebackground="#374151",
-        activeforeground=fg,
-        relief="flat",
-        padx=16,
-        pady=7,
-        font=("Microsoft YaHei UI", 9),
-    )
-    stop_btn.pack(side="left", padx=(10, 0))
+    _styled_btn(buttons, "打开控制台", open_browser, primary=True).pack(side="left")
+    _styled_btn(buttons, "停止并退出", stop_server, primary=False).pack(side="left", padx=(10, 0))
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     server_thread.start()
@@ -320,12 +344,15 @@ def _run_with_control_window() -> None:
             return
         if server_thread.is_alive():
             if _already_running(settings.host, settings.port):
-                status_var.set("服务已启动，可在浏览器中使用。")
+                status_var.set("服务运行中，可在浏览器中使用。")
+                dot.configure(fg=green)
             else:
-                status_var.set("正在启动服务...")
+                status_var.set("正在启动服务…")
+                dot.configure(fg=amber)
             root.after(1000, poll)
             return
         status_var.set("服务已停止。")
+        dot.configure(fg="#f87171")
         messagebox.showwarning("IvyeaOps", "IvyeaOps 服务已停止。如需排错，请查看 logs\\ivyeaops.err.log。")
         root.destroy()
 

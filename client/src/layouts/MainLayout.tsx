@@ -16,6 +16,7 @@ function BoardFallback() {
   return <div style={{ padding: 40, textAlign: "center", color: "var(--t3)", fontSize: 13 }}>加载中…</div>;
 }
 import ManualModal from "../components/ManualModal";
+import UpdateModal from "../components/UpdateModal";
 import Tour from "../components/Tour";
 import { TOURS, hasTour } from "../lib/tours";
 
@@ -323,15 +324,9 @@ export default function MainLayout() {
       window.open(updateInfo.release_url || "https://github.com/Hector-xue/IvyeaOps/releases/latest", "_blank");
       return;
     }
+    // In-app modal drives the whole flow: download w/ progress → install → poll
+    // health until the new version answers. No external WinForms window.
     setUpdating(true);
-    try {
-      await api.post("/setup/update");
-      alert("更新窗口已打开。更新过程中 IvyeaOps 会自动停止并重启。");
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || e?.message || "启动更新失败");
-    } finally {
-      setUpdating(false);
-    }
   };
   const [clock, setClock] = useState("");
   const [manualOpen, setManualOpen] = useState(false);
@@ -475,7 +470,7 @@ export default function MainLayout() {
               title={updateTitle}
             >
               ↻
-              <span className="sb-update-label">{updating ? "启动中" : hasUpdate ? "更新" : "检查"}</span>
+              <span className="sb-update-label">{updating ? "更新中" : hasUpdate ? "更新" : "检查"}</span>
             </button>
           )}
         </div>
@@ -585,6 +580,7 @@ export default function MainLayout() {
         </div>
       </div>
       {manualOpen && <ManualModal onClose={() => setManualOpen(false)} />}
+      {updating && <UpdateModal currentVersion={appVersion} onClose={() => setUpdating(false)} />}
       {tourOn && hasTour(location.pathname) && (
         <Tour steps={TOURS[location.pathname]} onClose={() => setTourOn(false)} />
       )}
