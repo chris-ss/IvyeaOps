@@ -350,13 +350,25 @@ def update_install(_u: str = Depends(require_user)):
         raise HTTPException(500, "PowerShell 不可用。")
     cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
            "-File", str(script), "-ZipPath", _UPDATE_STATE["zip_path"], "-NonInteractive"]
-    creationflags = 0
-    if sys.platform == "win32":
-        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    try:
+
+    def _spawn(extra_flags: int) -> None:
+        flags = 0
+        if sys.platform == "win32":
+            flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | extra_flags)
         subprocess.Popen(cmd, cwd=str(root), stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         close_fds=True, creationflags=creationflags)
+                         close_fds=True, creationflags=flags)
+
+    # CREATE_BREAKAWAY_FROM_JOB so the updater survives when this backend is
+    # stopped mid-update (the frozen exe may run inside a job object that would
+    # otherwise cascade-kill it → "downloaded but never restarts"). Some jobs
+    # disallow breakaway → CreateProcess fails; fall back to a plain detached spawn.
+    _BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+    try:
+        try:
+            _spawn(_BREAKAWAY)
+        except OSError:
+            _spawn(0)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"启动安装失败：{exc}") from exc
     _UPDATE_STATE.update(phase="installing")

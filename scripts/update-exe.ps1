@@ -93,6 +93,23 @@ try {
     Write-Info "Stopping background service..."
     Stop-IvyeaOps
 
+    # Wait for the old server to actually exit AND release IvyeaOpsServer.exe — a
+    # force-killed process keeps the .exe file locked for a moment, and robocopy
+    # then can't overwrite it (→ "no restart"). Poll port 8001 + try to open the
+    # exe for write until both are free (up to ~15s).
+    $ServerExePath = Join-Path $RepoRoot "IvyeaOpsServer.exe"
+    for ($i = 0; $i -lt 30; $i++) {
+        $portBusy = $null
+        try { $portBusy = Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue } catch {}
+        $locked = $false
+        if (Test-Path $ServerExePath) {
+            try { $fs = [System.IO.File]::Open($ServerExePath, 'Open', 'ReadWrite', 'None'); $fs.Close() }
+            catch { $locked = $true }
+        }
+        if (-not $portBusy -and -not $locked) { break }
+        Start-Sleep -Milliseconds 500
+    }
+
     if ($ZipPathParam) {
         Write-Info "Using pre-downloaded package: $ZipPathParam"
         Copy-Item $ZipPathParam $ZipPath -Force
