@@ -348,27 +348,35 @@ def update_install(_u: str = Depends(require_user)):
     ps = _powershell_bin()
     if not ps:
         raise HTTPException(500, "PowerShell 不可用。")
-    cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-           "-File", str(script), "-ZipPath", _UPDATE_STATE["zip_path"], "-NonInteractive"]
 
-    def _spawn(extra_flags: int) -> None:
-        flags = 0
-        if sys.platform == "win32":
-            flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | extra_flags)
-        subprocess.Popen(cmd, cwd=str(root), stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         close_fds=True, creationflags=flags)
-
-    # CREATE_BREAKAWAY_FROM_JOB so the updater survives when this backend is
-    # stopped mid-update (the frozen exe may run inside a job object that would
-    # otherwise cascade-kill it → "downloaded but never restarts"). Some jobs
-    # disallow breakaway → CreateProcess fails; fall back to a plain detached spawn.
-    _BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+    # Breadcrumb: record that install was triggered BEFORE spawning, so even if the
+    # updater process never starts there's evidence (the earlier "no update.log at
+    # all" meant the updater never ran — invisible/swallowed).
+    log_path = root / "logs" / "update.log"
     try:
-        try:
-            _spawn(_BREAKAWAY)
-        except OSError:
-            _spawn(0)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(f"\n[update_install] triggered; ps={ps}; script={script}; "
+                     f"zip={_UPDATE_STATE['zip_path']}\n")
+    except Exception:
+        pass
+
+    # Launch via `cmd /c start` rather than a hidden detached Popen: `start` makes
+    # the updater a brand-new independent process (survives this backend being
+    # stopped mid-update — a hidden DETACHED child could be cascade-killed by a job
+    # object), and it runs in a VISIBLE window WITHOUT -NonInteractive, so on error
+    # it pauses on screen instead of vanishing silently. The in-app modal still
+    # polls /api/health for completion.
+    inner = (f'"{ps}" -NoProfile -ExecutionPolicy Bypass -File "{script}" '
+             f'-ZipPath "{_UPDATE_STATE["zip_path"]}"')
+    try:
+        if sys.platform == "win32":
+            # `start "<title>" /min <cmd>` — cmd's start launches powershell as an
+            # independent process in its own (minimized) window, then cmd exits.
+            subprocess.Popen(f'start "IvyeaOps 更新" /min {inner}', cwd=str(root), shell=True)
+        else:
+            subprocess.Popen([ps, "-File", str(script), "-ZipPath", _UPDATE_STATE["zip_path"]],
+                             cwd=str(root))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"启动安装失败：{exc}") from exc
     _UPDATE_STATE.update(phase="installing")
