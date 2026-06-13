@@ -340,8 +340,16 @@ def update_install(_u: str = Depends(require_user)):
     root = _runtime_root()
     if not _windows_update_supported(root):
         raise HTTPException(400, "应用内更新仅支持 Windows x64 免 Python 包。")
-    if _UPDATE_STATE["phase"] != "downloaded" or not _UPDATE_STATE["zip_path"]:
-        raise HTTPException(400, "安装包尚未下载完成。")
+    # Guard against a double-install: two concurrent updaters race on
+    # IvyeaOpsServer.exe — the 2nd hits a sharing violation (robocopy exit 11) and
+    # reports a scary failure even though the 1st succeeded. Atomically flip to
+    # "installing" so a second call is a no-op.
+    with _UPDATE_LOCK:
+        if _UPDATE_STATE["phase"] == "installing":
+            return {"ok": True, "detail": "已在安装中"}
+        if _UPDATE_STATE["phase"] != "downloaded" or not _UPDATE_STATE["zip_path"]:
+            raise HTTPException(400, "安装包尚未下载完成。")
+        _UPDATE_STATE["phase"] = "installing"
     script = root / "scripts" / "update-exe.ps1"
     if not script.is_file():
         raise HTTPException(404, f"更新脚本不存在：{script}")
@@ -378,8 +386,8 @@ def update_install(_u: str = Depends(require_user)):
             subprocess.Popen([ps, "-File", str(script), "-ZipPath", _UPDATE_STATE["zip_path"]],
                              cwd=str(root))
     except Exception as exc:  # noqa: BLE001
+        _UPDATE_STATE["phase"] = "downloaded"  # let the user retry
         raise HTTPException(500, f"启动安装失败：{exc}") from exc
-    _UPDATE_STATE.update(phase="installing")
     return {"ok": True, "detail": "正在安装，服务即将重启。"}
 
 

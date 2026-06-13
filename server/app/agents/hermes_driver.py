@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -31,9 +32,45 @@ from app.agents.claude_sessions import create_normalized_message
 
 logger = logging.getLogger("agents.hermes")
 
+_WINDOWS = sys.platform == "win32"
+
 PROVIDER = "hermes"
 _active_sessions: dict[str, dict] = {}
 _HERMES_SESSIONS_DIR = Path.home() / ".hermes" / "sessions"
+
+
+def _persist_hermes_session_file(session_id: str, user_text: str, assistant_text: str) -> None:
+    """Append a turn to ~/.hermes/sessions/session_<id>.json in the format
+    read_history / the synchronizer expect. On Windows hermes does NOT write its
+    own session files (`hermes chat -q` is one-shot, no sessions dir), so without
+    this the agents transcript vanishes on refresh. Creates the file/dir as needed;
+    best-effort. (POSIX: hermes writes its own richer files — don't interfere.)"""
+    safe = "".join(c for c in str(session_id) if c.isalnum() or c in "_-")
+    if not safe:
+        return
+    try:
+        _HERMES_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+        fp = _HERMES_SESSIONS_DIR / f"session_{safe}.json"
+        data: dict = {}
+        if fp.exists():
+            try:
+                data = json.loads(fp.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        msgs = data.get("messages") if isinstance(data.get("messages"), list) else []
+        if user_text:
+            msgs.append({"role": "user", "content": user_text})
+        if assistant_text:
+            msgs.append({"role": "assistant", "content": assistant_text})
+        now = datetime.now(timezone.utc).isoformat()
+        data.update(session_id=safe, messages=msgs, message_count=len(msgs),
+                    last_updated=now)
+        data.setdefault("session_start", now)
+        tmp = fp.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(fp)
+    except Exception:
+        logger.exception("persist hermes session file failed for %s", session_id)
 _TIMEOUT_S = float(os.getenv("AGENTS_HERMES_TIMEOUT_S", "300") or "300")
 # Output that means "the provider call failed" — surface as an error, not a reply.
 _ERROR_MARKERS = ("invalid api key", "error code:", "\"code\": \"401\"", "status\":401",
@@ -220,6 +257,11 @@ async def query_hermes(command: str, options: dict, writer) -> None:
     # without waiting for the throttled (60s) full sync — and without creating a
     # duplicate phantom row under our provisional id.
     if text and not _looks_like_error(text):
+        # On Windows hermes writes no session file, so persist the transcript
+        # ourselves first — otherwise read_history finds nothing and the history
+        # vanishes on refresh (codex works because it does write rollout files).
+        if _WINDOWS:
+            _persist_hermes_session_file(final_id, command or "", text)
         try:
             from app.agents import synchronizer
             synchronizer.index_hermes_session(final_id, command if not requested else None)
