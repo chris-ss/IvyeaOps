@@ -80,6 +80,7 @@ case "${IVYEA_CN:-auto}" in
   0) _use_cn="" ;;
   *) curl -fsS -o /dev/null -m 4 https://www.google.com 2>/dev/null || _use_cn=1 ;;
 esac
+GH_PROXY=""
 if [ -n "$_use_cn" ]; then
   info "检测到国内网络 —— 启用清华 PyPI + 淘宝 npm 镜像加速（设 IVYEA_CN=0 可关闭）"
   PIP_MIRROR="-i https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -90,6 +91,16 @@ if [ -n "$_use_cn" ]; then
   # Python dependency downloads too.
   export UV_DEFAULT_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
   export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+  # GitHub itself is slow/blocked from the mainland. Route the GitHub-hosted
+  # installers (bun, hermes) + bun's `github:` GBrain install through a proxy.
+  # Override with IVYEA_GH_PROXY=<url-prefix/> or IVYEA_GH_PROXY=none to disable.
+  GH_PROXY="${IVYEA_GH_PROXY:-https://ghfast.top/}"
+  [ "$GH_PROXY" = "none" ] && GH_PROXY=""
+  if [ -n "$GH_PROXY" ] && command -v git &>/dev/null; then
+    # Make bun's `bun install -g github:…` (git-based) go through the proxy too.
+    git config --global "url.${GH_PROXY}https://github.com/.insteadOf" "https://github.com/" 2>/dev/null || true
+    info "GitHub 走加速代理：${GH_PROXY}（设 IVYEA_GH_PROXY=none 可关闭）"
+  fi
 fi
 
 # ── 2. Python dependencies (in an isolated venv) ──────────────────────────────

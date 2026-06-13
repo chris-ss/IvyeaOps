@@ -206,7 +206,10 @@ jobs:
         run: |
           $tag = "${{ steps.tag.outputs.tag }}"
           $stage = "staging/IvyeaOps"
-          New-Item -ItemType Directory -Force -Path $stage, "$stage/server", "$stage/client", "$stage/scripts", "$stage/docs" | Out-Null
+          # NOTE: do NOT pre-create $stage/docs — `Copy-Item -Recurse docs "$stage/docs"`
+          # into an existing dir nests it as docs/docs (the manual then 404s). Let
+          # Copy-Item create it so docs land at $stage/docs/*.md.
+          New-Item -ItemType Directory -Force -Path $stage, "$stage/server", "$stage/client", "$stage/scripts" | Out-Null
           Set-Content -Path "$stage/VERSION" -Value $tag -Encoding ascii
           Copy-Item dist/IvyeaOpsServer.exe "$stage/IvyeaOpsServer.exe"
           Copy-Item -Recurse client/dist "$stage/client/dist"

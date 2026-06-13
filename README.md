@@ -184,6 +184,12 @@ bash scripts/install.sh
 bash scripts/start.sh
 ```
 
+> **🇨🇳 国内网络加速**：上面第 1 步从 GitHub 下载 ~90MB 很慢，换成 GitHub 加速代理即可（其余步骤不变）：
+> ```bash
+> curl -L https://ghfast.top/https://github.com/Hector-xue/IvyeaOps/releases/latest/download/IvyeaOps.zip -o IvyeaOps.zip
+> ```
+> `install.sh` 会**自动检测国内网络**，把 pip / npm 切到清华 + 淘宝镜像，并让 GBrain 等 GitHub 安装走加速代理（可用 `IVYEA_CN=0` 关闭镜像、`IVYEA_GH_PROXY=none` 关闭 GitHub 代理、`IVYEA_GH_PROXY=<你的代理/>` 自定义）。若 `ghfast.top` 偶发不可用,可换 `https://gh-proxy.com/` 前缀。
+
 > Hermes / GBrain / Ollama 是可选增强组件：安装脚本会询问是否顺便安装；也可稍后在首启向导或「系统配置 → 系统状态」里点「安装/修复」。
 
 <details><summary>开发者：从源码构建（需 Node 18+ 与 ≥2G 内存）</summary>
