@@ -223,7 +223,9 @@ def _run_with_control_window() -> None:
     # ── Polished native window: rounded cards / badges / buttons drawn on a
     # Canvas (Tk widgets are square), inside a normal window so the taskbar entry
     # and the native title bar (min/max/close) stay. Status goes in the title.
-    W, H = 600, 384
+    # Drawing uses these design coords; S shrinks the whole thing to ~2/3 at the
+    # end via cv.scale (geometry) + pre-scaled fonts.
+    W, H, S = 600, 384, 0.66
     white = "#ffffff"
     cbord = "#e5e7eb"      # card border
     badge_bg = "#dcfce7"   # light-green icon badge
@@ -244,16 +246,23 @@ def _run_with_control_window() -> None:
     root = tk.Tk()
     root.title("IvyeaOps")
     root.resizable(False, False)
+    WS, HS = int(W * S), int(H * S)
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    root.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 3}")
+    root.geometry(f"{WS}x{HS}+{(sw - WS) // 2}+{(sh - HS) // 3}")
     try:
         root.iconbitmap(str(_runtime_root() / "client" / "public" / "favicon.ico"))
     except Exception:
         pass
     root.configure(bg=white)
 
-    cv = tk.Canvas(root, width=W, height=H, bg=white, highlightthickness=0, bd=0)
+    cv = tk.Canvas(root, width=WS, height=HS, bg=white, highlightthickness=0, bd=0)
     cv.pack(fill="both", expand=True)
+
+    def fui(n, *a):
+        return (ui, max(7, round(n * S)), *a)
+
+    def fmono(n):
+        return (mono, max(7, round(n * S)))
 
     def rr(x1, y1, x2, y2, r, fill, tags=()):
         cv.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline=fill, tags=tags)
@@ -300,13 +309,13 @@ def _run_with_control_window() -> None:
     cv.create_oval(gx - 12, gy - 12, gx + 12, gy + 12, outline=green, width=2)
     cv.create_oval(gx - 5, gy - 12, gx + 5, gy + 12, outline=green, width=1)
     cv.create_line(gx - 12, gy, gx + 12, gy, fill=green, width=1)
-    cv.create_text(104, gy, text="地址", anchor="w", fill=label_fg, font=(ui, 12))
-    cv.create_text(168, gy, text=url, anchor="w", fill=green, font=(mono, 13),
+    cv.create_text(104, gy, text="地址", anchor="w", fill=label_fg, font=fui(12))
+    cv.create_text(168, gy, text=url, anchor="w", fill=green, font=fmono(13),
                    tags=("link",))
     # copy button
     rr(468, 54, 560, 90, 9, cbord, ("copy", "copy_bg"))
     rr(469, 55, 559, 89, 8, white, ("copy", "copy_bg"))
-    cv.create_text(514, 72, text="⧉  复制", fill=val_fg, font=(ui, 11), tags=("copy",))
+    cv.create_text(514, 72, text="⧉  复制", fill=val_fg, font=fui(11), tags=("copy",))
     # divider
     cv.create_line(44, 122, W - 44, 122, fill=cbord)
     # version badge + box icon
@@ -315,23 +324,23 @@ def _run_with_control_window() -> None:
     cv.create_rectangle(bx - 11, by - 9, bx + 11, by + 9, outline=green, width=2)
     cv.create_line(bx - 11, by - 2, bx + 11, by - 2, fill=green, width=1)
     cv.create_line(bx, by - 9, bx, by - 2, fill=green, width=1)
-    cv.create_text(104, by, text="版本", anchor="w", fill=label_fg, font=(ui, 12))
-    cv.create_text(168, by, text=app_version(), anchor="w", fill=val_fg, font=(mono, 12))
+    cv.create_text(104, by, text="版本", anchor="w", fill=label_fg, font=fui(12))
+    cv.create_text(168, by, text=app_version(), anchor="w", fill=val_fg, font=fmono(12))
 
     # Warning bar
     card(24, 212, W - 24, 256, 10, amber_bg, amber_bd)
-    cv.create_text(46, 234, text="⚠", fill=amber_fg, font=(ui, 13), anchor="w")
+    cv.create_text(46, 234, text="⚠", fill=amber_fg, font=fui(13), anchor="w")
     cv.create_text(72, 234, text="关闭窗口将停止后台服务", fill=amber_fg,
-                   font=(ui, 10), anchor="w")
+                   font=fui(10), anchor="w")
 
     # Buttons
     rr(24, 280, 292, 356, 13, green, ("open", "open_bg"))
     cv.create_text(158, 318, text=">_   打开控制台", fill=white,
-                   font=(ui, 13, "bold"), tags=("open",))
+                   font=fui(13, "bold"), tags=("open",))
     rr(308, 280, W - 24, 356, 13, red_bd, ("stop", "stop_ring"))
     rr(309, 281, W - 25, 355, 12, white, ("stop", "stop_bg"))
     cv.create_text(442, 318, text="⏻   停止并退出", fill=red,
-                   font=(ui, 13, "bold"), tags=("stop",))
+                   font=fui(13, "bold"), tags=("stop",))
 
     def _hover(tag_bg, normal, hi):
         cv.tag_bind(tag_bg.replace("_bg", "").replace("_ring", ""), "<Enter>",
@@ -350,6 +359,10 @@ def _run_with_control_window() -> None:
     cv.tag_bind("link", "<Button-1>", lambda _e: open_browser())
     cv.tag_bind("link", "<Enter>", lambda _e: cv.config(cursor="hand2"))
     cv.tag_bind("link", "<Leave>", lambda _e: cv.config(cursor=""))
+
+    # Shrink the whole canvas drawing to the final size (geometry only; fonts
+    # were already created pre-scaled via fui/fmono).
+    cv.scale("all", 0, 0, S, S)
 
     root.protocol("WM_DELETE_WINDOW", stop_server)
     server_thread.start()
