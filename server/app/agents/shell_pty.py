@@ -177,6 +177,43 @@ def _proc_env() -> dict:
     return env
 
 
+def _win_proc_env() -> dict:
+    """Environment for the Windows ConPTY shell. The agents board resumes codex /
+    hermes / claude, so their CLIs must be on PATH — npm global installs to
+    %APPDATA%\\npm (codex.cmd / claude.cmd), bun to ~/.bun/bin, hermes to ~/.hermes.
+    Without this the terminal showed "'codex' 不是内部或外部命令". Also injects the
+    ~/.hermes/.env API keys so hermes authenticates."""
+    env = {str(k): str(v) for k, v in os.environ.items()}
+    env.setdefault("TERM", "xterm-256color")
+    from pathlib import Path as _P
+    home = _P(os.path.expanduser("~"))
+    extra = [
+        str(home / ".bun" / "bin"),
+        str(home / ".hermes" / "bin"),
+        str(home / ".hermes" / "node"),
+        str(home / ".hermes" / "node" / "bin"),
+    ]
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        extra.append(str(_P(appdata) / "npm"))            # npm global bin (codex/claude)
+    localapp = os.environ.get("LOCALAPPDATA")
+    if localapp:
+        extra.append(str(_P(localapp) / "Programs" / "Ollama"))
+    cur = env.get("PATH", "")
+    parts = cur.split(os.pathsep)
+    missing = [d for d in extra if d and d not in parts]
+    if missing:
+        env["PATH"] = os.pathsep.join(missing + ([cur] if cur else []))
+    try:
+        from app.services.hermes_config_sync import _read_env_file
+        for k, v in _read_env_file().items():
+            if v:
+                env.setdefault(k, v)
+    except Exception:
+        pass
+    return env
+
+
 def _reader_thread_win(session: ShellSession, loop: asyncio.AbstractEventLoop) -> None:
     """Blocking-read pump for ConPTY (no pollable fd on Windows). Feeds the same
     out_queue/_drain pipeline as the POSIX add_reader path."""
@@ -234,13 +271,17 @@ async def _spawn_windows(key: str, command: str, cwd: str, cols: int, rows: int)
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(
             "Windows 终端组件 (pywinpty) 未能加载，请更新 IvyeaOps 到含该组件的版本。") from e
-    env = {str(k): str(v) for k, v in os.environ.items()}
-    env.setdefault("TERM", "xterm-256color")
+    env = _win_proc_env()
     cmd = (command or "").strip()
+    comspec = os.environ.get("COMSPEC") or "cmd.exe"
     if cmd and cmd != "bash":  # "bash" is the POSIX plain-shell default — meaningless here
-        argv = [os.environ.get("COMSPEC") or "cmd.exe", "/c", cmd]
+        # `/k` (not /c): keep the shell interactive AFTER the command so the user
+        # can type — with /c, cmd ran the agent command then exited, leaving a dead
+        # terminal ("光标闪烁但无法输入"). The command (e.g. `codex resume … || codex`)
+        # runs first; cmd's `||` fallback still works.
+        argv = [comspec, "/k", cmd]
     else:
-        argv = [shutil.which("powershell.exe") or os.environ.get("COMSPEC") or "cmd.exe"]
+        argv = [shutil.which("powershell.exe") or comspec]
     try:
         pty_proc = winpty.PtyProcess.spawn(argv, cwd=cwd, env=env, dimensions=(rows, cols))
     except Exception as e:  # noqa: BLE001
