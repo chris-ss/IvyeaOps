@@ -685,6 +685,15 @@ def _hermes_env() -> dict[str, str]:
     env["PATH"] = os.pathsep.join(extra_paths + [env.get("PATH", "")])
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("HERMES_ACCEPT_HOOKS", "1")
+    # Inject the API keys IvyeaOps wrote to ~/.hermes/.env so the hermes CLI
+    # authenticates even if it doesn't auto-load that file (esp. on Windows).
+    try:
+        from app.services.hermes_config_sync import _read_env_file
+        for k, v in _read_env_file().items():
+            if v:
+                env.setdefault(k, v)
+    except Exception:
+        pass
     return env
 
 
@@ -986,22 +995,45 @@ def delete_message(message_id: str) -> dict[str, Any]:
     return {"deleted": (cur.rowcount or 0) > 0, "id": message_id}
 
 
+def _has_hermes_venv() -> bool:
+    return Path(_hermes_venv_python()).exists()
+
+
+def _has_hermes_cli() -> bool:
+    from app.core import integrations
+    try:
+        return bool(integrations.hermes_bin())
+    except Exception:
+        return False
+
+
 def stream_spec(prompt: str) -> dict[str, Any]:
-    """Subprocess spec for the no-tools streaming wrapper (used by the SSE route)."""
+    """Subprocess spec for a Hermes answer. Prefer the agent venv wrapper (true
+    token-by-token streaming); fall back to `hermes chat -q … -Q --yolo` — the same
+    CLI the agents board uses — when only the CLI is present (e.g. Windows, where
+    the venv layout isn't created). The trailing `session_id:` line the CLI prints
+    is stripped by _strip_hermes_output on commit."""
+    if _has_hermes_venv():
+        return {
+            "argv": [_hermes_venv_python(), _BRAIN_STREAM_WRAPPER],
+            "stdin": prompt.encode("utf-8"),
+            "env": _hermes_env(),
+            "cwd": str(gb.BRAIN_ROOT),
+        }
     return {
-        "argv": [_hermes_venv_python(), _BRAIN_STREAM_WRAPPER],
-        "stdin": prompt.encode("utf-8"),
+        "argv": [_hermes_bin(), "chat", "-q", prompt, "-Q", "--yolo"],
+        "stdin": b"",
         "env": _hermes_env(),
         "cwd": str(gb.BRAIN_ROOT),
     }
 
 
 def hermes_available() -> bool:
-    """True when the no-tools streaming wrapper can actually run — i.e. the Hermes
-    agent venv is present (resolved per-OS, so it's not stale if Hermes is
-    installed after startup). When False, the SSE route answers via the unified
-    global text chain instead, so the knowledge-base chat works without Hermes."""
-    return Path(_hermes_venv_python()).exists()
+    """True when GBrain chat can answer via Hermes — either the agent venv (token
+    streaming via brain_stream_wrapper) OR the hermes CLI (Windows, where the venv
+    layout isn't created). When False, the SSE route answers via the unified global
+    text chain instead, so the knowledge-base chat still works without Hermes."""
+    return _has_hermes_venv() or _has_hermes_cli()
 
 
 async def stream_global_answer(prompt: str) -> AsyncIterator[str]:
