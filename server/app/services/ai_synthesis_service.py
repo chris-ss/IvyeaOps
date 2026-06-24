@@ -123,17 +123,23 @@ def _text_provider_chain() -> list[str]:
                 out.append(p)
         chain = out or ["ivyea-agent", "assistant", "deepseek", "codex", "claude"]
 
+    # IvyeaAgent is the default brain everywhere: lead with it regardless of the
+    # configured order (graceful fallback to the rest if it's down). The panel
+    # bridge passes skip_agent=True to drop it and avoid agent→ops→agent nesting.
+    def _lead_with_agent(c: list[str]) -> list[str]:
+        return ["ivyea-agent"] + [p for p in c if p != "ivyea-agent"]
+
     # Non-admin (and only when a request context is set) → HTTP-only, with the
-    # global fallback model first (it is the configured, safe default).
+    # global fallback model after the agent (HTTP-safe, no local CLI/MCP/shell).
     try:
         from app.core.security import current_user
         cu = current_user.get()
         if cu is not None and cu.get("role") != "admin":
             http = [p for p in chain if p in _HTTP_ONLY_PROVIDERS]
-            return http or ["ivyea-agent", "assistant", "deepseek"]
+            return _lead_with_agent(http or ["assistant", "deepseek"])
     except Exception:
         pass
-    return chain
+    return _lead_with_agent(chain)
 
 _ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
@@ -807,7 +813,7 @@ async def _stream_apimart(prompt: str) -> AsyncGenerator[str, None]:
                     raise RuntimeError(f"apimart error: {event.get('error', event)}")
 
 
-async def generate_text(prompt: str) -> str:
+async def generate_text(prompt: str, skip_agent: bool = False) -> str:
     """Plain text-only LLM generation — NO tools, NO Sorftime MCP.
 
     For tasks that just need the model to write text (e.g. authoring a
@@ -818,7 +824,7 @@ async def generate_text(prompt: str) -> str:
     """
     failures: list[str] = []
 
-    if "ivyea-agent" in _text_provider_chain():
+    if not skip_agent and "ivyea-agent" in _text_provider_chain():
         try:
             parts: list[str] = []
             async for chunk in _stream_ivyea_agent(prompt):
@@ -1640,6 +1646,7 @@ async def synthesize(
     query: str,
     marketplace: str,
     data: Dict[str, Any],
+    skip_agent: bool = False,
 ) -> AsyncGenerator[tuple[str, str], None]:
     """Async generator yielding (provider_name, text_chunk) tuples.
 
@@ -1647,10 +1654,15 @@ async def synthesize(
     'assistant,deepseek,codex,claude'). deepseek uses true HTTP streaming so
     tokens arrive immediately; CLI runners buffer their output internally and
     are kept as fallbacks. On total failure, yields ('error', diagnostic_text).
+
+    skip_agent=True drops the ivyea-agent provider — used when the caller is
+    *itself* the IvyeaAgent (the panel bridge), to avoid agent→ops→agent nesting.
     """
     prompt = _build_prompt(mode, query, marketplace, data)
     failures: list[str] = []
     chain = _text_provider_chain()
+    if skip_agent:
+        chain = [p for p in chain if p != "ivyea-agent"]
 
     for provider in chain:
         if provider == "ivyea-agent":

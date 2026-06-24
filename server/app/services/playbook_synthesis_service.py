@@ -305,15 +305,20 @@ async def synthesize(
     price: str,
     cost: str,
     data: Dict[str, Any],
+    skip_agent: bool = False,
 ) -> AsyncGenerator[tuple[str, str], None]:
     """Fallback path: feed pre-fetched Sorftime data to the provider chain
     (ivyea-agent / deepseek / assistant / codex / claude). Yields (provider, chunk); on total
-    failure yields ('error', diagnostic)."""
+    failure yields ('error', diagnostic).
+
+    skip_agent=True drops ivyea-agent (caller is already the agent — the panel bridge)."""
     prompt = _fallback_prompt(mode, query, marketplace, price, cost, data)
     failures: list[str] = []
     # Skip hermes here: in the fallback path it either already failed (native)
     # or has no pre-fetched-data advantage over the streaming HTTP providers.
     chain = [p for p in _text_provider_chain() if p != "hermes"] or ["assistant", "codex", "claude"]
+    if skip_agent:
+        chain = [p for p in chain if p != "ivyea-agent"]
 
     for provider in chain:
         if provider == "ivyea-agent":

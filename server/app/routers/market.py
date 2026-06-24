@@ -81,24 +81,70 @@ def get_history(_user: str = Depends(require_user)) -> List[dict]:
     return [dict(r) for r in rows]
 
 
-@router.post("/history")
-def add_history(entry: HistoryEntryIn, _user: str = Depends(require_user)) -> dict:
-    entry_id = entry.id or str(int(entry.ts)) or uuid.uuid4().hex
+def save_history(*, mode: str, query: str, marketplace: str, provider: str = "",
+                 elapsed_s: float = 0.0, ts: int | None = None, report: str = "",
+                 entry_id: str = "") -> str:
+    """Persist one market report row; returns its id.
+    Shared by POST /history (frontend) and the IvyeaAgent panel bridge."""
+    ts = int(ts if ts is not None else time.time())
+    entry_id = entry_id or str(ts) or uuid.uuid4().hex
     with _history_connect() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO market_history "
             "(id,mode,query,marketplace,provider,elapsed_s,ts,report) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            (entry_id, entry.mode, entry.query, entry.marketplace,
-             entry.provider, entry.elapsed_s, entry.ts, entry.report),
+            (entry_id, mode, query, marketplace, provider, elapsed_s, ts, report),
         )
-        # Trim to max entries (keep most recent)
-        conn.execute(
+        conn.execute(   # keep most recent only
             "DELETE FROM market_history WHERE id NOT IN "
             "(SELECT id FROM market_history ORDER BY ts DESC LIMIT ?)",
             (_HISTORY_MAX,),
         )
-    return {"id": entry_id}
+    return entry_id
+
+
+@router.post("/history")
+def add_history(entry: HistoryEntryIn, _user: str = Depends(require_user)) -> dict:
+    return {"id": save_history(
+        mode=entry.mode, query=entry.query, marketplace=entry.marketplace,
+        provider=entry.provider, elapsed_s=entry.elapsed_s, ts=entry.ts,
+        report=entry.report, entry_id=entry.id)}
+
+
+async def generate_report(mode: str, query: str, marketplace: str) -> dict:
+    """Collect + synthesize + persist one market report (no SSE), then return it.
+    Used by the IvyeaAgent panel bridge so an agent-driven 市场调研 lands in the
+    panel's 历史. Synthesis skips the ivyea-agent provider to avoid agent→ops→agent
+    nesting (the caller is already IvyeaAgent)."""
+    mode = mode if mode in ("keyword", "asin") else "keyword"
+    marketplace = (marketplace or "US").strip().upper()
+
+    async def _noop(*_a) -> None:
+        return None
+
+    start = time.time()
+    if mode == "keyword":
+        data, errors = await sorftime_service.keyword_pipeline(query, marketplace, _noop)
+    else:
+        data, errors = await sorftime_service.asin_pipeline(query, marketplace, _noop)
+    parts: list[str] = []
+    provider = "unknown"
+    async for prov, chunk in ai_synthesis_service.synthesize(mode, query, marketplace, data, skip_agent=True):
+        if prov == "_attempt":
+            continue
+        if prov == "error":
+            raise RuntimeError(chunk)
+        provider = prov
+        parts.append(chunk)
+    report = "".join(parts).strip()
+    if not report:
+        raise RuntimeError("AI 合成返回空")
+    elapsed = round(time.time() - start, 1)
+    entry_id = save_history(mode=mode, query=query, marketplace=marketplace, provider=provider,
+                            elapsed_s=elapsed, ts=int(time.time()), report=report,
+                            entry_id=uuid.uuid4().hex)
+    return {"id": entry_id, "mode": mode, "query": query, "marketplace": marketplace,
+            "provider": provider, "elapsed_s": elapsed, "warnings": errors, "report": report}
 
 
 @router.delete("/history/{entry_id}")

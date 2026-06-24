@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 import time
-from typing import Optional
+import uuid
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -22,6 +24,102 @@ from app.core.security import require_user
 from app.services import sif_service
 
 router = APIRouter(dependencies=[Depends(require_user)])
+
+# ── History (analysis reports) ────────────────────────────────────────────────
+_HISTORY_MAX = 60
+_HIST_INITED: set = set()
+_DEEP_TOOLS = {"keyword": "关键词竞争分析", "competitor": "竞品反查", "traffic": "流量异动诊断"}
+
+
+def _history_db_path() -> str:
+    from app.core.security import user_data_dir
+    return str(user_data_dir() / "deep_analysis_history.sqlite3")
+
+
+def _history_connect() -> sqlite3.Connection:
+    path = _history_db_path()
+    conn = sqlite3.connect(path, isolation_level=None, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    if path not in _HIST_INITED:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS deep_history (
+                id        TEXT PRIMARY KEY,
+                tool      TEXT NOT NULL,
+                title     TEXT NOT NULL DEFAULT '',
+                query     TEXT NOT NULL,
+                country   TEXT NOT NULL DEFAULT 'US',
+                provider  TEXT NOT NULL DEFAULT '',
+                elapsed_s REAL NOT NULL DEFAULT 0,
+                ts        INTEGER NOT NULL,
+                report    TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        _HIST_INITED.add(path)
+    return conn
+
+
+def save_history(*, tool: str, title: str, query: str, country: str = "US", provider: str = "",
+                 elapsed_s: float = 0.0, ts: int | None = None, report: str = "",
+                 entry_id: str = "") -> str:
+    ts = int(ts if ts is not None else time.time())
+    entry_id = entry_id or uuid.uuid4().hex
+    with _history_connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO deep_history "
+            "(id,tool,title,query,country,provider,elapsed_s,ts,report) VALUES (?,?,?,?,?,?,?,?,?)",
+            (entry_id, tool, title, query, country, provider, elapsed_s, ts, report))
+        conn.execute("DELETE FROM deep_history WHERE id NOT IN "
+                     "(SELECT id FROM deep_history ORDER BY ts DESC LIMIT ?)", (_HISTORY_MAX,))
+    return entry_id
+
+
+@router.get("/history")
+def get_history(_user: str = Depends(require_user)) -> List[dict]:
+    with _history_connect() as conn:
+        rows = conn.execute(
+            "SELECT id,tool,title,query,country,provider,elapsed_s,ts,report "
+            "FROM deep_history ORDER BY ts DESC LIMIT ?", (_HISTORY_MAX,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.delete("/history/{entry_id}")
+def delete_history_entry(entry_id: str, _user: str = Depends(require_user)) -> dict:
+    with _history_connect() as conn:
+        conn.execute("DELETE FROM deep_history WHERE id=?", (entry_id,))
+    return {"ok": True}
+
+
+async def generate_report(tool: str, query: str, country: str = "US") -> dict:
+    """Run one structured analysis (keyword/competitor/traffic), synthesize a
+    Markdown narrative, persist it to the 分析工具 history, and return it. Used by
+    the IvyeaAgent bridge. Synthesis skips ivyea-agent (anti-recursion)."""
+    tool = (tool or "").strip().lower()
+    label = _DEEP_TOOLS.get(tool)
+    if not label:
+        raise ValueError(f"unsupported tool: {tool} (keyword/competitor/traffic)")
+    if not (query or "").strip():
+        raise ValueError("query (keyword or ASIN) is required")
+    country = (country or "US").strip().upper()
+    start = time.time()
+    if tool == "keyword":
+        data = await sif_service.keyword_competition(query, country, "")
+    elif tool == "competitor":
+        data = await sif_service.competitor_keyword_signals(query, country, "lately", "7")
+    else:
+        data = await sif_service.traffic_anomaly(query, country)
+    from app.services import ai_synthesis_service
+    prompt = (f"你是亚马逊数据分析专家。基于以下「{label}」的结构化数据，写一份简洁、有结论的中文分析报告"
+              f"（对象：{query}，站点：{country}），用 Markdown 表格 + 要点呈现，只用数据里的真实数字，"
+              f"缺失标 N/A。\n\n数据：\n{json.dumps(data, ensure_ascii=False)[:24000]}")
+    report = (await ai_synthesis_service.generate_text(prompt, skip_agent=True)).strip()
+    if not report:
+        raise RuntimeError("AI 合成返回空")
+    elapsed = round(time.time() - start, 1)
+    entry_id = save_history(tool=tool, title=label, query=query, country=country,
+                            elapsed_s=elapsed, report=report)
+    return {"id": entry_id, "tool": tool, "title": label, "query": query,
+            "country": country, "elapsed_s": elapsed, "report": report}
 
 
 # ── Request / Response models ─────────────────────────────────────────────
