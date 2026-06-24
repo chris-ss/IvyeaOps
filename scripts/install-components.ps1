@@ -1,20 +1,24 @@
 # IvyeaOps optional component installer (Windows / PowerShell 5.1+)
 #
 # Components:
-#   hermes  - official Hermes Agent installer
-#   gbrain  - Bun + GBrain CLI + ~/brain initialization
-#   ollama  - Ollama + nomic-embed-text for local GBrain embeddings
-#   codex   - Node.js + OpenAI Codex CLI
-#   claude  - Node.js + Claude Code CLI
-#   all     - hermes + gbrain
+#   all         - IvyeaAgent runtime (default)
+#   ivyea-agent - IvyeaAgent runtime (Agent + knowledge base + retrieval)
+#   legacy      - old Hermes + GBrain compatibility chain
+#   hermes      - official Hermes Agent installer
+#   gbrain      - Bun + GBrain CLI + ~/brain initialization
+#   ollama      - Ollama + nomic-embed-text for old GBrain embeddings
+#   codex       - Node.js + OpenAI Codex CLI
+#   claude      - Node.js + Claude Code CLI
 
 param(
-    [ValidateSet("all", "hermes", "gbrain", "ollama", "codex", "claude", "status")]
+    [ValidateSet("all", "ivyea-agent", "legacy", "hermes", "gbrain", "ollama", "codex", "claude", "status")]
     [string]$Component = "all"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot = Split-Path -Parent $ScriptRoot
 
 function Write-Info($msg) { Write-Host "[IvyeaOps] $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "[IvyeaOps] WARN: $msg" -ForegroundColor Yellow }
@@ -27,6 +31,7 @@ function Refresh-Path {
         "$env:USERPROFILE\.hermes\bin",
         "$env:USERPROFILE\.hermes\node\bin",
         "$env:USERPROFILE\.ivyeaops\node",
+        "$RepoRoot\server\.venv\Scripts",
         "$env:LOCALAPPDATA\Programs\Ollama",
         "$env:USERPROFILE\.local\bin"
     )
@@ -36,6 +41,7 @@ function Refresh-Path {
 function Show-Status {
     Refresh-Path
     $hermes = Get-Command hermes -ErrorAction SilentlyContinue
+    $ivyea = Get-Command ivyea -ErrorAction SilentlyContinue
     $bun = Get-Command bun -ErrorAction SilentlyContinue
     $gbrain = Get-Command gbrain -ErrorAction SilentlyContinue
     $node = Get-Command node -ErrorAction SilentlyContinue
@@ -43,6 +49,7 @@ function Show-Status {
     $ollama = Get-Command ollama -ErrorAction SilentlyContinue
     $codex = Get-Command codex -ErrorAction SilentlyContinue
     $claude = Get-Command claude -ErrorAction SilentlyContinue
+    Write-Host "IvyeaAgent: $(if ($ivyea) { $ivyea.Source } else { 'not installed' })"
     Write-Host "Hermes: $(if ($hermes) { $hermes.Source } else { 'not installed' })"
     Write-Host "Bun:    $(if ($bun) { $bun.Source } else { 'not installed' })"
     Write-Host "GBrain: $(if ($gbrain) { $gbrain.Source } else { 'not installed' })"
@@ -52,6 +59,7 @@ function Show-Status {
     Write-Host "Codex:  $(if ($codex) { $codex.Source } else { 'not installed' })"
     Write-Host "Claude: $(if ($claude) { $claude.Source } else { 'not installed' })"
     Write-Host "Brain:  $env:USERPROFILE\brain"
+    Write-Host "Ivyea:  $env:USERPROFILE\.ivyea\knowledge"
 }
 
 function Add-UserPath($dir) {
@@ -122,6 +130,59 @@ function Install-NpmPackage($commandName, $packageName) {
     } else {
         Write-Info "$commandName installed: $((Get-Command $commandName).Source)"
     }
+}
+
+function Install-IvyeaAgent {
+    Refresh-Path
+    if (Test-Cmd "ivyea") {
+        Write-Info "IvyeaAgent already installed: $((Get-Command ivyea).Source)"
+    } else {
+        $VenvPy = Join-Path $RepoRoot "server\.venv\Scripts\python.exe"
+        if (-not (Test-Path $VenvPy)) {
+            $python = Get-Command python -ErrorAction SilentlyContinue
+            if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
+            if (-not $python) { throw "Python not found. Run scripts\install.ps1 first or install Python 3.9+." }
+            Write-Info "Creating server virtualenv for IvyeaAgent..."
+            & $python.Source -m venv (Join-Path $RepoRoot "server\.venv")
+        }
+        if (-not (Test-Path $VenvPy)) { throw "server virtualenv was not created: $VenvPy" }
+
+        $IvyeaAgentSource = $env:IVYEA_AGENT_LOCAL
+        $SiblingAgent = Join-Path (Split-Path -Parent $RepoRoot) "ivyea-agent"
+        if ([string]::IsNullOrWhiteSpace($IvyeaAgentSource) -and (Test-Path $SiblingAgent)) {
+            $IvyeaAgentSource = (Resolve-Path $SiblingAgent).Path
+        }
+        if (-not [string]::IsNullOrWhiteSpace($IvyeaAgentSource) -and (Test-Path $IvyeaAgentSource)) {
+            Write-Info "Installing IvyeaAgent from local source: $IvyeaAgentSource"
+            & $VenvPy -m pip install -e $IvyeaAgentSource
+        } else {
+            $IvyeaAgentRepo = if ($env:IVYEA_AGENT_REPO) { $env:IVYEA_AGENT_REPO } else { "https://github.com/Hector-xue/ivyea-agent.git" }
+            $IvyeaAgentRef = if ($env:IVYEA_AGENT_REF) { $env:IVYEA_AGENT_REF } else { "main" }
+            Write-Info "Installing IvyeaAgent from Git: $IvyeaAgentRepo@$IvyeaAgentRef"
+            & $VenvPy -m pip install "git+$IvyeaAgentRepo@$IvyeaAgentRef"
+        }
+        if ($LASTEXITCODE -ne 0) { throw "IvyeaAgent pip install failed." }
+        Refresh-Path
+    }
+
+    $UserHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { [Environment]::GetFolderPath("UserProfile") }
+    $IvyeaHome = Join-Path $UserHome ".ivyea"
+    New-Item -ItemType Directory -Force -Path (Join-Path $IvyeaHome "knowledge") | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $IvyeaHome "models") | Out-Null
+
+    $ivyea = Get-Command ivyea -ErrorAction SilentlyContinue
+    if (-not $ivyea) {
+        $fallback = Join-Path $RepoRoot "server\.venv\Scripts\ivyea.exe"
+        if (Test-Path $fallback) { $ivyea = [pscustomobject]@{ Source = $fallback } }
+    }
+    if (-not $ivyea) { throw "ivyea command not found after installation." }
+    try { & $ivyea.Source self doctor | Out-Host } catch { Write-Warn "IvyeaAgent doctor reported warnings: $_" }
+    try { & $ivyea.Source retrieval sync --json | Out-Null } catch {}
+    try { & $ivyea.Source self service-start --host 127.0.0.1 --port 8765 | Out-Host } catch {
+        Write-Warn "IvyeaAgent service did not start now; IvyeaOps will retry automatically when opened."
+    }
+    Write-Info "IvyeaAgent ready: $($ivyea.Source)"
+    Write-Info "Knowledge root: $IvyeaHome\knowledge"
 }
 
 function Install-Hermes {
@@ -302,8 +363,10 @@ function Install-Ollama {
 }
 
 if ($Component -eq "status") { Show-Status; exit 0 }
-if ($Component -eq "all" -or $Component -eq "hermes") { Install-Hermes }
-if ($Component -eq "all" -or $Component -eq "gbrain") { Install-GBrain }
+if ($Component -eq "all" -or $Component -eq "ivyea-agent") { Install-IvyeaAgent }
+if ($Component -eq "legacy") { Install-Hermes; Install-GBrain }
+if ($Component -eq "hermes") { Install-Hermes }
+if ($Component -eq "gbrain") { Install-GBrain }
 if ($Component -eq "ollama") { Install-Ollama }
 if ($Component -eq "codex") { Install-NpmPackage "codex" "@openai/codex" }
 if ($Component -eq "claude") { Install-NpmPackage "claude" "@anthropic-ai/claude-code" }

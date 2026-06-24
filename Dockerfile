@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════
-# IvyeaOps Dockerfile — with Hermes Agent built-in
+# IvyeaOps Dockerfile — with IvyeaAgent built-in
 # ═══════════════════════════════════════════════════════════════════
 
 # ── Stage 1: Frontend build ────────────────────────────────────────
@@ -20,20 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Hermes Agent
-RUN git clone --depth 1 https://github.com/nousresearch/hermes-agent.git /opt/hermes-agent 2>/dev/null || \
-    git clone --depth 1 https://github.com/Hector-xue/hermes-agent.git /opt/hermes-agent 2>/dev/null || true
-RUN if [ -d /opt/hermes-agent ]; then \
-        cd /opt/hermes-agent && \
-        python3 -m venv venv && \
-        . venv/bin/activate && \
-        pip install --no-cache-dir -e . 2>/dev/null || true && \
-        ln -sf /opt/hermes-agent/venv/bin/hermes /usr/local/bin/hermes; \
-    fi
-
 # Python dependencies for IvyeaOps
 COPY server/requirements.txt ./server/requirements.txt
 RUN pip install --no-cache-dir -r server/requirements.txt
+
+# Built-in IvyeaAgent runtime (Agent + knowledge base + local retrieval).
+ARG IVYEA_AGENT_REPO=https://github.com/Hector-xue/ivyea-agent.git
+ARG IVYEA_AGENT_REF=main
+RUN pip install --no-cache-dir "git+${IVYEA_AGENT_REPO}@${IVYEA_AGENT_REF}"
 
 # Copy backend source
 COPY server/ ./server/
@@ -51,9 +45,10 @@ ENV IVYEA_OPS_PORT=8001
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/server
 ENV HOME=/root
+ENV IVYEA_HOME=/root/.ivyea
 
 # Create data directory
-RUN mkdir -p /app/data /root/.hermes
+RUN mkdir -p /app/data /root/.ivyea/knowledge /root/.ivyea/models
 
 # Expose ports
 EXPOSE 80

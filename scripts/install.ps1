@@ -205,19 +205,57 @@ IVYEA_OPS_ALLOWED_ORIGINS=http://127.0.0.1:8001
 
 if (-not (Test-Path "$RepoRoot\data")) { New-Item -ItemType Directory -Path "$RepoRoot\data" | Out-Null }
 
-# ── 4.5 可选：本地 AI Agent (Hermes) + 知识库 (GBrain) ────────────────────────
-# 二者均可选；不装也能用（首启向导填「全局兜底大模型」即可）。装上后解锁
-# 需要本地工具/MCP 的进阶功能。失败不阻断主程序，后续可在首启向导/系统配置重试。
+# ── 4.5 内置 IvyeaAgent ─────────────────────────────────────────────────────
+# 新部署默认使用 IvyeaAgent 承担 Agent、知识库与本地检索；Hermes/GBrain/Ollama
+# 只作为旧部署兼容组件，需要显式设置 IVYEA_OPS_INSTALL_LEGACY_AI=1 才安装。
 Write-Host ""
-$ai = Read-Host "顺便安装本地 AI Agent (Hermes) + 知识库 (GBrain)？联网较慢，可跳过 (y/N)"
-if ($ai -eq "y" -or $ai -eq "Y") {
-    try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File "$RepoRoot\scripts\install-components.ps1" -Component all
-    } catch {
-        Write-Warn "Hermes/GBrain 组件安装失败（不影响 IvyeaOps 主程序）：$_"
-        Write-Warn "稍后可运行：powershell -ExecutionPolicy Bypass -File scripts\install-components.ps1 -Component all"
+Write-Info "安装内置 IvyeaAgent（Agent + 知识库 + 本地检索）..."
+try {
+    $VenvScripts = Split-Path -Parent $VenvPy
+    $IvyeaBin = Join-Path $VenvScripts "ivyea.exe"
+    if (-not (Test-Path $IvyeaBin)) {
+        $IvyeaAgentSource = $env:IVYEA_AGENT_LOCAL
+        $SiblingAgent = Join-Path (Split-Path -Parent $RepoRoot) "ivyea-agent"
+        if ([string]::IsNullOrWhiteSpace($IvyeaAgentSource) -and (Test-Path $SiblingAgent)) {
+            $IvyeaAgentSource = (Resolve-Path $SiblingAgent).Path
+        }
+        if (-not [string]::IsNullOrWhiteSpace($IvyeaAgentSource) -and (Test-Path $IvyeaAgentSource)) {
+            Write-Info "  从本地源码安装 IvyeaAgent：$IvyeaAgentSource"
+            & $VenvPy -m pip install -q @PipMirror -e $IvyeaAgentSource
+        } else {
+            $IvyeaAgentRepo = if ($env:IVYEA_AGENT_REPO) { $env:IVYEA_AGENT_REPO } else { "https://github.com/Hector-xue/ivyea-agent.git" }
+            $IvyeaAgentRef = if ($env:IVYEA_AGENT_REF) { $env:IVYEA_AGENT_REF } else { "main" }
+            Write-Info "  从 Git 安装 IvyeaAgent：$IvyeaAgentRepo@$IvyeaAgentRef"
+            & $VenvPy -m pip install -q @PipMirror "git+$IvyeaAgentRepo@$IvyeaAgentRef"
+        }
     }
-    Write-Host "  安装路径会被 IvyeaOps 自动发现；如未识别，可在「系统配置 → 智能体」里填路径。" -ForegroundColor Yellow
+    $UserHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { [Environment]::GetFolderPath("UserProfile") }
+    $IvyeaHome = Join-Path $UserHome ".ivyea"
+    New-Item -ItemType Directory -Force -Path (Join-Path $IvyeaHome "knowledge") | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $IvyeaHome "models") | Out-Null
+    if (Test-Path $IvyeaBin) {
+        & $IvyeaBin self doctor
+        try { & $IvyeaBin retrieval sync --json | Out-Null } catch {}
+        try { & $IvyeaBin self service-start --host 127.0.0.1 --port 8765 | Out-Host } catch {
+            Write-Warn "IvyeaAgent 服务暂未启动；打开 IvyeaOps 后会自动重试拉起。"
+        }
+        Write-Info "  IvyeaAgent 已就绪：$IvyeaBin"
+    } else {
+        Write-Warn "未检测到 ivyea.exe；IvyeaOps 仍可启动，但右下角 IvyeaAgent 会显示未连接。"
+    }
+} catch {
+    Write-Warn "IvyeaAgent 自动安装失败（不影响 IvyeaOps 主程序）：$_"
+    Write-Warn "可设置 IVYEA_AGENT_LOCAL 指向本地 ivyea-agent 源码后重跑安装脚本。"
+}
+
+if ($env:IVYEA_OPS_INSTALL_LEGACY_AI -eq "1") {
+    try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File "$RepoRoot\scripts\install-components.ps1" -Component legacy
+    } catch {
+        Write-Warn "旧兼容组件 Hermes/GBrain 安装失败（不影响 IvyeaOps 主程序）：$_"
+        Write-Warn "稍后可运行：powershell -ExecutionPolicy Bypass -File scripts\install-components.ps1 -Component legacy"
+    }
+    Write-Host "  旧链路安装路径会被 IvyeaOps 自动发现；如未识别，可在「系统配置 → 智能体」里填路径。" -ForegroundColor Yellow
 }
 
 # ── 4.6 可选：Listing 采集服务 (amazon-image-workflow, 经 Docker) ─────────────

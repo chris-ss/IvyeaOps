@@ -32,6 +32,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
+
+from app.services import ivyea_agent_service as ivyea_agent
 from app.services.runners import (  # noqa: F401 — re-exported for tests
     RUNNER_LABELS,
     RUNNER_ORDER,
@@ -41,13 +44,16 @@ from app.services.runners import (  # noqa: F401 — re-exported for tests
     _resolve_runner,
     build_child_env,
     resolve_with_pref,
-    runner_status,
+    runner_status as _cli_runner_status,
 )
 
 AUDIT_ROOT = Path.home() / ".hermes" / "ivyea-ops-data" / "amazon-audits"
 
 _log = logging.getLogger(__name__)
 AUDIT_ROOT.mkdir(parents=True, exist_ok=True)
+
+IVYEA_AGENT_RUNNER = "ivyea-agent"
+VALID_RUNNERS = (IVYEA_AGENT_RUNNER,) + RUNNER_ORDER
 
 
 # Hard kill after this many seconds.
@@ -270,32 +276,178 @@ def _build_prompt(asin: str, marketplace: str, mode: str) -> str:
 """
 
 
+def _ivyea_agent_available() -> tuple[bool, str]:
+    try:
+        status = ivyea_agent.ensure_available()
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+    if status.get("available"):
+        return True, ""
+    return False, str(status.get("error") or "IvyeaAgent 服务不可用")
+
+
+def _resolve_audit_runner(pref: str) -> tuple[Optional[str], Optional[str], str]:
+    pref = (pref or "auto").lower()
+    if pref == "auto":
+        ok, reason = _ivyea_agent_available()
+        if ok:
+            return IVYEA_AGENT_RUNNER, None, ""
+        runner, runner_bin = _resolve_runner()
+        if runner and runner_bin:
+            return runner, runner_bin, ""
+        return None, None, reason or f"no runner available; tried {IVYEA_AGENT_RUNNER}, {', '.join(RUNNER_ORDER)}"
+    if pref == IVYEA_AGENT_RUNNER:
+        ok, reason = _ivyea_agent_available()
+        return (IVYEA_AGENT_RUNNER, None, "") if ok else (None, None, reason)
+    if pref in RUNNER_ORDER:
+        runner_bin = _find_bin(pref)
+        return (pref, runner_bin, "") if runner_bin else (None, None, f"runner '{pref}' is not available")
+    return None, None, f"unknown runner: {pref}"
+
+
+def runner_status() -> List[Dict[str, Any]]:
+    """Report availability of the embedded IvyeaAgent plus legacy CLI runners."""
+    ivyea_ok, ivyea_reason = _ivyea_agent_available()
+    cli_rows = _cli_runner_status()
+    cli_auto = next((row.get("auto_resolved_to") for row in cli_rows if row.get("name") == "auto"), None)
+    auto_target = IVYEA_AGENT_RUNNER if ivyea_ok else cli_auto
+    return [
+        {
+            "name": "auto",
+            "label": f"自动（当前：{auto_target or '无'}）",
+            "available": bool(auto_target),
+            "path": None,
+            "reason": None if auto_target else "IvyeaAgent 和外部 CLI 均不可用",
+            "auto_resolved_to": auto_target,
+        },
+        {
+            "name": IVYEA_AGENT_RUNNER,
+            "label": "IvyeaAgent（内置）",
+            "available": ivyea_ok,
+            "path": ivyea_agent.base_url(),
+            "reason": None if ivyea_ok else ivyea_reason,
+        },
+        *[row for row in cli_rows if row.get("name") != "auto"],
+    ]
+
+
+async def _run_ivyea_agent(job: Job, prompt: str, stdout_log: Path) -> bool:
+    job.runner_used = IVYEA_AGENT_RUNNER
+    job.status = "running"
+    job.started_at = _now_iso()
+    job.progress = "已启动 IvyeaAgent 生成审计报告…"
+    _write_meta(job)
+
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    token = ivyea_agent._token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    payload = {
+        "message": prompt,
+        "max_steps": 24,
+        "plan_mode": True,
+        "persist": True,
+        "inject_retrieval": True,
+        "system": (
+            "你正在作为 IvyeaOps 内置 ASIN 深度审计智能体。"
+            "严格按用户要求输出完整 Markdown 报告，并在结尾追加指定 JSON 代码块。"
+            "没有真实工具数据时必须标注推断建议，不要把猜测写成页面事实。"
+        ),
+    }
+    start = time.monotonic()
+    got_token = False
+    final_text = ""
+    event = "message"
+    written = 0
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(HARD_TIMEOUT_SEC + 60, connect=10)) as client:
+        async with client.stream("POST", f"{ivyea_agent.base_url()}/v1/chat/stream", json=payload, headers=headers) as resp:
+            resp.raise_for_status()
+            with stdout_log.open("ab") as out:
+                async for line in resp.aiter_lines():
+                    if time.monotonic() - start > HARD_TIMEOUT_SEC:
+                        raise RuntimeError(f"timeout after {HARD_TIMEOUT_SEC}s")
+                    line = line.strip()
+                    if not line:
+                        event = "message"
+                        continue
+                    if line.startswith("event:"):
+                        event = line[6:].strip() or "message"
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    try:
+                        data = json.loads(line[5:].strip() or "{}")
+                    except Exception:
+                        continue
+                    if event == "token":
+                        text = str(data.get("text") or "")
+                        if not text:
+                            continue
+                        raw = text.encode("utf-8")
+                        out.write(raw)
+                        out.flush()
+                        got_token = True
+                        written += len(raw)
+                        job.stdout_bytes += len(raw)
+                        if written >= FLUSH_EVERY_BYTES:
+                            written = 0
+                            job.progress = f"已生成 ~{job.stdout_bytes // 1024} KB…"
+                            _write_meta(job)
+                    elif event == "final":
+                        final_text = str(data.get("text") or "")
+                    elif event == "error":
+                        raise RuntimeError(str(data.get("detail") or data.get("error") or data))
+    if not got_token and final_text:
+        raw = final_text.encode("utf-8")
+        stdout_log.write_bytes(raw)
+        job.stdout_bytes = len(raw)
+    return True
+
+
 async def _run_claude(job: Job) -> None:
-    """Spawn claude CLI, stream to stdout.log, kill on timeout."""
+    """Run the selected audit runner, stream to stdout.log, kill on timeout."""
     jd = _job_dir(job.job_id)
     jd.mkdir(parents=True, exist_ok=True)
     stdout_log = jd / "stdout.log"
 
     prompt = _build_prompt(job.asin, job.marketplace, job.mode)
 
-    # Respect an explicit runner preference; fall back to auto-pick.
     pref = (job.runner_pref or "auto").lower()
-    if pref == "auto":
-        runner, runner_bin = _resolve_runner()
-    elif pref in RUNNER_ORDER:
-        runner_bin = _find_bin(pref)
-        runner = pref if runner_bin else None
-    else:
-        runner, runner_bin = None, None
-        job.error = f"unknown runner: {pref}"
+    runner, runner_bin, resolve_error = _resolve_audit_runner(pref)
 
-    if not runner_bin or not runner:
+    if not runner:
         job.status = "failed"
-        if not job.error:
-            job.error = (
-                f"runner '{pref}' not available; tried {', '.join(RUNNER_ORDER)} "
-                f"in {', '.join(_extra_paths())}"
-            )
+        job.error = resolve_error or f"runner '{pref}' not available"
+        job.finished_at = _now_iso()
+        _write_meta(job)
+        return
+
+    if runner == IVYEA_AGENT_RUNNER:
+        try:
+            await _run_ivyea_agent(job, prompt, stdout_log)
+            job.finished_at = _now_iso()
+            raw = stdout_log.read_text(encoding="utf-8", errors="replace")
+            md_text, structured = _split_report_and_json(raw)
+            (jd / "report.md").write_text(md_text, encoding="utf-8")
+            if structured is not None:
+                (jd / "report.json").write_text(
+                    json.dumps(structured, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            job.status = "done"
+            job.progress = "完成"
+            _write_meta(job)
+        except Exception as exc:  # noqa: BLE001
+            job.status = "failed"
+            job.error = f"IvyeaAgent 审计失败：{exc}"
+            job.finished_at = _now_iso()
+            _write_meta(job)
+        return
+
+    if not runner_bin:
+        job.status = "failed"
+        job.error = resolve_error or f"runner '{pref}' not available"
         job.finished_at = _now_iso()
         _write_meta(job)
         return
@@ -465,18 +617,14 @@ async def start_job(
         raise RuntimeError("another audit is currently running")
 
     runner_pref = (runner_pref or "auto").lower()
-    if runner_pref not in ("auto",) + RUNNER_ORDER:
+    if runner_pref not in ("auto",) + VALID_RUNNERS:
         raise ValueError(f"unknown runner: {runner_pref}")
 
     # Pre-flight: refuse early if the requested runner isn't actually available,
     # so the user gets a 400 instead of a job that silently fails.
-    if runner_pref == "auto":
-        picked, _ = _resolve_runner()
-        if not picked:
-            raise RuntimeError("no agent CLI is available on this host")
-    else:
-        if not _find_bin(runner_pref):
-            raise RuntimeError(f"runner '{runner_pref}' is not available")
+    picked, _, reason = _resolve_audit_runner(runner_pref)
+    if not picked:
+        raise RuntimeError(reason or f"runner '{runner_pref}' is not available")
 
     job_id = uuid.uuid4().hex[:12]
     job = Job(

@@ -221,6 +221,30 @@ async def _probe_url(url: str, *, label: str = "URL") -> Dict[str, Any]:
         return _err(f"{label} 检测失败：{e}")
 
 
+async def _probe_ivyea_agent(url: str) -> Dict[str, Any]:
+    if not url:
+        return _err("未填写")
+    if not url.startswith(("http://", "https://")):
+        return _err("应以 http(s):// 开头")
+    headers: dict[str, str] = {}
+    token = _hub_get("ivyea_agent_token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.get(url.rstrip("/") + "/health", headers=headers)
+        if r.status_code == 200:
+            data = r.json()
+            version = data.get("version") or ""
+            cards = (data.get("knowledge") or {}).get("cards")
+            return _ok(f"已连接 IvyeaAgent {version} · 知识卡 {cards}")
+        if r.status_code in (401, 403):
+            return _err("Token 不正确或服务要求认证")
+        return _err(f"HTTP {r.status_code}")
+    except Exception as e:
+        return _err(f"连接失败：{e}")
+
+
 def _probe_bin(path: str) -> Dict[str, Any]:
     if not path:
         return _err("未填写")
@@ -385,6 +409,8 @@ async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
         return await _probe_sellersprite(val)
     if key == "openai_api_key":
         return await _probe_openai(val)
+    if key in ("ivyea_agent_url", "ivyea_agent_token"):
+        return await _probe_ivyea_agent(_hub_get("ivyea_agent_url") or "http://127.0.0.1:8765")
 
     if key == "imgflow_url":
         # imgflow's root may not respond to GET; try /api/health or /

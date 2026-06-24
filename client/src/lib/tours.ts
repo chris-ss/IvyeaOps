@@ -38,7 +38,7 @@ export const TOURS: Record<string, TourStep[]> = {
   "/market": [
     { title: "市场调研", body: "输入关键词或 ASIN，一键生成结构化的市场调研报告（市场规模、竞争格局、机会风险、SWOT、行动清单）。" },
     { sel: ".market-query-input", title: "输入调研对象", body: "选「关键词 / ASIN」模式，填入内容，并在右侧选数据源与站点。" },
-    { sel: ".market-btn-submit", title: "生成报告", body: "点这里开始生成。AI 走标准降级链（Hermes 优先，失败自动切全局兜底模型），过程会流式输出。" },
+    { sel: ".market-btn-submit", title: "生成报告", body: "点这里开始生成。AI 优先走「全局兜底大模型」，再按配置回退到可选外部 Agent，过程会流式输出。" },
     { title: "深入分析 & 历史", body: "出报告后，报告下方会出现「深入分析」：选一个角度 + 智能体，把整份报告带进「智能体会话」继续追问。历史记录自动保存，可随时载入 / 导出。" },
   ],
 
@@ -73,12 +73,12 @@ export const TOURS: Record<string, TourStep[]> = {
   // ── Skill 中心 ───────────────────────────────────────────────────────────────
   "/skill-hub": [
     { title: "Skill 中心 · 想法工坊", body: "一句话生成 Skill：输入需求 → 多阶段流水线（理解→规划→复核→优化→生成→自检修复）产出 SKILL.md，并可视化其 Tool Spec。" },
-    { title: "管理已有", body: "除创建外，还能管理已有 Skill、从 GitHub 导入、查看执行历史、可视化执行 Tool。Skill 生成默认走稳定标准链（Hermes 优先 + 兜底）。" },
+    { title: "管理已有", body: "除创建外，还能管理已有 Skill、从 GitHub 导入、查看执行历史、可视化执行 Tool。Skill 生成默认走稳定文本链（应用模型优先 + 可选外部 Agent）。" },
   ],
 
   // ── AI 问答 ──────────────────────────────────────────────────────────────────
   "/assistant": [
-    { title: "AI 问答", body: "直连大模型的自由对话 / 写作，不经过智能体、不碰文件系统，对普通用户安全。用「全局兜底大模型」，留空回退 DeepSeek→Apimart。" },
+    { title: "AI 问答", body: "直连大模型的自由对话 / 写作，不经过外部 CLI、不碰文件系统，对普通用户安全。用「全局兜底大模型」，留空回退 IvyeaAgent→DeepSeek。" },
     { sel: ".market-query-input", title: "输入问题", body: "输入问题或写作要求，Enter 发送（Shift+Enter 换行）。回答流式输出，不调用任何工具。" },
   ],
 
@@ -90,16 +90,16 @@ export const TOURS: Record<string, TourStep[]> = {
 
   // ── 智能体会话 ───────────────────────────────────────────────────────────────
   "/agents": [
-    { title: "智能体会话", body: "浏览器里直接驱动本地 Agent CLI（Claude Code / Hermes / Codex…）的完整会话界面：多会话、流式输出、工具可视化、文件上传（≤300MB）、resume。" },
-    { title: "怎么用", body: "左侧新建 / 切换会话，顶部选 provider（claude / hermes / codex），底部输入框发消息。市场调研 / 打法 / 分析工具的「深入分析」就是把报告带进这里继续探讨。" },
-    { title: "前提", body: "至少装一个 Agent CLI 才能用（首启向导可一键装 Codex / Claude）。" },
+    { title: "外部智能体", body: "这里保留 Claude Code / Hermes / Codex 等外部 CLI 的完整会话界面：多会话、流式输出、工具可视化、文件上传（≤300MB）、resume。" },
+    { title: "怎么用", body: "左侧新建 / 切换会话，顶部选 provider（claude / hermes / codex），底部输入框发消息。默认 IvyeaAgent 会话和知识库在右下角常驻图标里。" },
+    { title: "前提", body: "外部 CLI 是可选增强项；新部署不再要求安装 Hermes/GBrain/Ollama。" },
   ],
 
-  // ── GBrain 知识库 ─────────────────────────────────────────────────────────────
+  // ── 知识库工作台（GBrain 兼容） ────────────────────────────────────────────────
   "/brain": [
-    { title: "GBrain 知识库", body: "本地知识库：把 Markdown 笔记 / 文档喂进去，做语义检索与基于知识的问答。" },
-    { sel: ".tabs", title: "功能标签", body: "对话 / 上传 / 搜索 / 页面 / 模板 / 概览 / 设置。上传文档后即可在「对话」里基于知识问答、在「搜索」里语义检索。" },
-    { title: "配置", body: "需要 GBrain CLI、知识库根目录、Embedding 模型（系统配置 → 智能体 → GBrain Embedding）。留空仅关键词检索，不影响对话。" },
+    { title: "知识库工作台", body: "这里保留原 GBrain 的上传、粘贴、URL 入库、编辑、搜索和知识库对话工作流。" },
+    { sel: ".tabs", title: "功能标签", body: "对话 / 上传 / 搜索 / 页面 / 模板 / 概览 / 设置。右下角 IvyeaAgent 知识库页可把 ~/brain 迁移到 ~/.ivyea/knowledge。" },
+    { title: "配置", body: "继续使用 GBrain 兼容流程时才需要配置 GBrain CLI、知识库根目录和 Embedding 模型。" },
   ],
 
   // ── 服务器终端 ───────────────────────────────────────────────────────────────

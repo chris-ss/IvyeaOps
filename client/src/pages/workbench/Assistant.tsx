@@ -223,7 +223,7 @@ export default function Assistant() {
             <div className="market-empty">
               <div className="market-empty-icon">✦</div>
               <div className="market-empty-title">问我任何问题，或让我帮你写文档/文案</div>
-              <div className="market-empty-hint">纯文本 AI（DeepSeek / Apimart）· 支持 Markdown 文档输出</div>
+              <div className="market-empty-hint">纯文本 AI（全局兜底 / DeepSeek）· 支持 Markdown 文档输出</div>
             </div>
           )}
           {turns.map((t, i) => (

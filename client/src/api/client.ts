@@ -207,7 +207,7 @@ export type AuditFull = AuditJobMeta & {
   structured?: AuditStructured | null;
 };
 
-export type RunnerName = "auto" | "hermes" | "codex" | "claude";
+export type RunnerName = "auto" | "ivyea-agent" | "hermes" | "codex" | "claude";
 
 export type RunnerStatus = {
   name: RunnerName;

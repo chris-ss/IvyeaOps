@@ -27,7 +27,7 @@ from app.core.skill_paths import (
     ensure_studio_dirs,
     studio_paths_summary,
 )
-from app.routers import ad_audit, agent_hub, amazon, auth, brain, health, monitor, news, skill, terminal
+from app.routers import ad_audit, agent_hub, amazon, auth, brain, health, ivyea_agent, monitor, news, skill, terminal
 from app.routers import listing as listing_router
 from app.routers import image_translate as image_translate_router
 from app.routers import market as market_router
@@ -392,6 +392,8 @@ app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"], d
 # gated by the same "agents" board permission; WS does its own cookie auth.
 app.include_router(agents_api_router, prefix="/api/agents", tags=["agents"], dependencies=[Depends(require_module("agents"))])
 app.include_router(agents_ws_router, prefix="/api/agents", tags=["agents-ws"])
+app.include_router(ivyea_agent.router, prefix="/api/ivyea-agent", tags=["ivyea-agent"], dependencies=[Depends(require_module("agents"))])
+app.include_router(ivyea_agent.bridge_router, prefix="/api/ivyea-agent-bridge", tags=["ivyea-agent-bridge"])
 app.include_router(deep_analysis_router.router, prefix="/api/deep-analysis", tags=["deep-analysis"], dependencies=[Depends(require_module("tools"))])
 app.include_router(skill_tools_router.router, prefix="/api/skill-tools", tags=["skill-tools"], dependencies=[Depends(require_module("tools"))])
 # --- Admin-only: config / other users / infra (never grantable) ---

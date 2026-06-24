@@ -70,8 +70,7 @@ fi
 # pip (PyPI) and npm are slow/unreliable from mainland China. If google is
 # unreachable we assume a mainland network and route both through fast domestic
 # mirrors (Tsinghua PyPI + npmmirror). Override: IVYEA_CN=1 (force on) /
-# IVYEA_CN=0 (force off). The exported env vars also speed up the optional
-# Hermes/GBrain installers' own pip/npm steps.
+# IVYEA_CN=0 (force off).
 PIP_MIRROR=""
 NPM_MIRROR=""
 _use_cn=""
@@ -87,12 +86,11 @@ if [ -n "$_use_cn" ]; then
   NPM_MIRROR="--registry=https://registry.npmmirror.com"
   export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
   export npm_config_registry="https://registry.npmmirror.com"
-  # uv (used by the optional Hermes installer) honours these — speeds up its
-  # Python dependency downloads too.
+  # uv / pip based optional tools also honour these.
   export UV_DEFAULT_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
   export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
-  # GitHub itself is slow/blocked from the mainland. Route the GitHub-hosted
-  # installers (bun, hermes) + bun's `github:` GBrain install through a proxy.
+  # GitHub itself is slow/blocked from the mainland. Route GitHub-hosted installs
+  # through a proxy when explicitly needed.
   # Override with IVYEA_GH_PROXY=<url-prefix/> or IVYEA_GH_PROXY=none to disable.
   GH_PROXY="${IVYEA_GH_PROXY:-https://ghfast.top/}"
   [ "$GH_PROXY" = "none" ] && GH_PROXY=""
@@ -225,13 +223,43 @@ fi
 cd "$REPO_ROOT"
 mkdir -p data
 
-# ── 5.5 Optional: local AI Agent (Hermes) + knowledge base (GBrain) ───────────
-# Both are optional — IvyeaOps works with just the global fallback model. They
-# unlock the local-tool / MCP-driven features. Official one-line installers.
+# ── 5.5 Built-in IvyeaAgent runtime ───────────────────────────────────────────
+# IvyeaAgent replaces the old default Hermes + GBrain + Ollama deployment path:
+# one Python package provides Agent, knowledge base, and local retrieval.
 echo ""
-printf "  顺便安装本地 AI Agent (Hermes) + 知识库 (GBrain)？联网较慢，可跳过 (y/N) "
-read -r ANS || ANS=""
-if [ "$ANS" = "y" ] || [ "$ANS" = "Y" ]; then
+info "安装内置 IvyeaAgent（Agent + 知识库 + 本地检索）..."
+IVYEA_AGENT_BIN="$VENV_DIR/bin/ivyea"
+if [ ! -x "$IVYEA_AGENT_BIN" ]; then
+  IVYEA_AGENT_SOURCE="${IVYEA_AGENT_LOCAL:-}"
+  if [ -z "$IVYEA_AGENT_SOURCE" ] && [ -d "$REPO_ROOT/../ivyea-agent" ]; then
+    IVYEA_AGENT_SOURCE="$REPO_ROOT/../ivyea-agent"
+  fi
+  if [ -n "$IVYEA_AGENT_SOURCE" ] && [ -d "$IVYEA_AGENT_SOURCE" ]; then
+    info "  从本地源码安装 IvyeaAgent：$IVYEA_AGENT_SOURCE"
+    "$VENV_PY" -m pip install -e "$IVYEA_AGENT_SOURCE" $PIP_MIRROR
+  else
+    IVYEA_AGENT_REF="${IVYEA_AGENT_REF:-main}"
+    IVYEA_AGENT_REPO="${IVYEA_AGENT_REPO:-https://github.com/Hector-xue/ivyea-agent.git}"
+    info "  从 Git 安装 IvyeaAgent：$IVYEA_AGENT_REPO@$IVYEA_AGENT_REF"
+    "$VENV_PY" -m pip install "git+$IVYEA_AGENT_REPO@$IVYEA_AGENT_REF" $PIP_MIRROR || \
+      warn "IvyeaAgent 自动安装失败；可稍后设置 IVYEA_AGENT_LOCAL=/path/to/ivyea-agent 后重跑安装脚本。"
+  fi
+fi
+if [ -x "$IVYEA_AGENT_BIN" ]; then
+  mkdir -p "$HOME/.ivyea/knowledge" "$HOME/.ivyea/models"
+  "$IVYEA_AGENT_BIN" self doctor || warn "IvyeaAgent doctor 有警告，可在 IvyeaOps 右下角 Agent 状态里查看。"
+  "$IVYEA_AGENT_BIN" retrieval sync --json >/dev/null 2>&1 || true
+  "$IVYEA_AGENT_BIN" self service-start --host 127.0.0.1 --port 8765 || \
+    warn "IvyeaAgent 服务暂未启动；打开 IvyeaOps 后会自动重试拉起。"
+  info "  IvyeaAgent 已就绪：$IVYEA_AGENT_BIN"
+else
+  warn "未检测到 ivyea 命令；IvyeaOps 仍可启动，但右下角 IvyeaAgent 会显示未连接。"
+fi
+
+# ── 5.5 legacy optional components ────────────────────────────────────────────
+# Hermes/GBrain/Ollama are retained only for old deployments that explicitly opt in.
+if [ "${IVYEA_OPS_INSTALL_LEGACY_AI:-0}" = "1" ]; then
+  warn "正在安装兼容旧链路 Hermes + GBrain。新部署不推荐；默认已由 IvyeaAgent 替代。"
   info "安装 Hermes Agent（官方安装器）..."
   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash || \
     warn "Hermes 安装失败，可稍后手动重试：curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
@@ -297,7 +325,7 @@ PYEOF
   else
     warn "未找到 bun，GBrain 跳过。可手动：bun install -g \"$GBRAIN_REF\""
   fi
-  info "  安装路径会被 IvyeaOps 自动发现；如未识别，可在「系统配置 → 智能体」里填路径。"
+  info "  旧链路安装路径会被 IvyeaOps 自动发现；如未识别，可在「系统配置 → 智能体」里填路径。"
 fi
 
 # ── 5.6 Listing 采集服务 (amazon-image-workflow, via Docker) ──────────────────

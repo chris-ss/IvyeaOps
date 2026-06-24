@@ -18,12 +18,10 @@ _DEFAULTS: Dict[str, Any] = {
     "apimart_base": "https://api.apimart.ai/v1",
     # Comma-separated text-AI fallback chain for market research / ad-audit /
     # AI digest etc. Tried in order. 'assistant' = the global fallback text
-    # model (the AI 问答 slot, assistant_*): when Hermes is down it keeps every
-    # board working before falling through to the Codex/Claude CLIs. Default
-    # skips Apimart because the common Apimart subscription only grants image
-    # models — add 'apimart' here only if your key has Claude text access.
-    # Valid values: hermes, assistant, codex, claude, apimart, deepseek
-    "text_ai_providers": "hermes,assistant,codex,claude",
+    # model (the AI 问答 slot, assistant_*). New installs do not depend on
+    # Hermes/GBrain; CLI agents are optional enhancement paths.
+    # Valid values: ivyea-agent, assistant, deepseek, codex, claude, hermes
+    "text_ai_providers": "ivyea-agent,assistant,deepseek,codex,claude",
     "deepseek_api_key": "",     # dedicated DeepSeek key (only used when 'deepseek' in text_ai_providers)
     # Comma-separated vision-AI fallback chain (for skills that accept file/image inputs).
     # Tried in order; first provider with a configured key wins.
@@ -50,6 +48,16 @@ _DEFAULTS: Dict[str, Any] = {
     "assistant_model": "",
     "assistant_api_key": "",
     "assistant_base_url": "",
+    # IvyeaAgent local service — primary embedded agent/runtime. New installs
+    # should not need to edit these; they are here so self-hosted deployments can
+    # point Ops at a different local/remote agent service if needed.
+    "ivyea_agent_url": "http://127.0.0.1:8765",
+    "ivyea_agent_token": "",
+    "ivyea_agent_auto_start": True,
+    "ivyea_agent_provider": "",
+    "ivyea_agent_model": "",
+    "ivyea_agent_api_key": "",
+    "ivyea_agent_base_url": "",
     # AI 生图（默认 Apimart gpt-image-2）— leave empty to use apimart_key.
     "image_model": "",            # default gpt-image-2
     "image_api_key": "",          # empty = reuse apimart_key
@@ -122,13 +130,13 @@ _DEFAULTS: Dict[str, Any] = {
     # forced off and stays off until an operator re-enables (which clears this).
     "lingxing_circuit_reason": "",
     # Heterogeneous triple review: provider per persona (data-rigour / devil's-
-    # advocate / business-balance). 'apimart' = Claude. Missing provider falls
-    # back to the default deepseek→apimart chain.
-    "lingxing_review_providers": "deepseek,apimart,deepseek",
+    # advocate / business-balance). Missing provider falls back to the default
+    # embedded text chain.
+    "lingxing_review_providers": "ivyea-agent,deepseek,assistant",
     # Model for the weekly advisory analysis (自动化建议). Same provider space as
-    # review (deepseek/apimart/hermes/claude/codex/custom:<id>); empty/unavailable
-    # falls back to the default deepseek→apimart chain.
-    "lingxing_analysis_provider": "deepseek",
+    # review (ivyea-agent/deepseek/assistant/hermes/claude/codex/custom:<id>);
+    # empty/unavailable falls back to the default embedded text chain.
+    "lingxing_analysis_provider": "ivyea-agent",
     # Custom review/analysis model slots: JSON list of
     # {"id","label","base_url","api_key","model"} (OpenAI-compatible). Reference
     # in lingxing_review_providers as "custom:<id>". CLI agents
@@ -211,6 +219,13 @@ _DEFAULTS: Dict[str, Any] = {
 _ENV_MAP: Dict[str, str] = {
     "apimart_key": "APIMART_KEY",
     "text_ai_providers": "IVYEA_OPS_TEXT_AI_PROVIDERS",
+    "ivyea_agent_url": "IVYEA_AGENT_URL",
+    "ivyea_agent_token": "IVYEA_AGENT_TOKEN",
+    "ivyea_agent_auto_start": "IVYEA_AGENT_AUTO_START",
+    "ivyea_agent_provider": "IVYEA_AGENT_PROVIDER",
+    "ivyea_agent_model": "IVYEA_AGENT_MODEL",
+    "ivyea_agent_api_key": "IVYEA_AGENT_API_KEY",
+    "ivyea_agent_base_url": "IVYEA_AGENT_BASE_URL",
     "deepseek_api_key": "DEEPSEEK_API_KEY",
     "sorftime_key": "SORFTIME_KEY",
     "openai_api_key": "OPENAI_API_KEY",
@@ -265,7 +280,8 @@ def load() -> Dict[str, Any]:
 
 def get(key: str, default: Any = None) -> Any:
     """Read one setting; empty/missing falls back to env var then default."""
-    val = load().get(key)
+    stored = _read_file()
+    val = stored.get(key) if key in stored else None
     if val is not None and val != "":
         return val
     env_key = _ENV_MAP.get(key)

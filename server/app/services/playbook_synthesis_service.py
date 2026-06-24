@@ -25,6 +25,7 @@ from app.services.ai_synthesis_service import (
     _try_assistant,
     _try_cli,
     _try_deepseek,
+    _try_ivyea_agent,
 )
 
 # ── Sorftime data-collection instructions (Hermes-native only) ────────────────
@@ -306,7 +307,7 @@ async def synthesize(
     data: Dict[str, Any],
 ) -> AsyncGenerator[tuple[str, str], None]:
     """Fallback path: feed pre-fetched Sorftime data to the provider chain
-    (deepseek / apimart / codex / claude). Yields (provider, chunk); on total
+    (ivyea-agent / deepseek / assistant / codex / claude). Yields (provider, chunk); on total
     failure yields ('error', diagnostic)."""
     prompt = _fallback_prompt(mode, query, marketplace, price, cost, data)
     failures: list[str] = []
@@ -315,7 +316,9 @@ async def synthesize(
     chain = [p for p in _text_provider_chain() if p != "hermes"] or ["assistant", "codex", "claude"]
 
     for provider in chain:
-        if provider == "deepseek":
+        if provider == "ivyea-agent":
+            gen = _try_ivyea_agent(prompt, failures)
+        elif provider == "deepseek":
             gen = _try_deepseek(prompt, failures)
         elif provider == "apimart":
             gen = _try_apimart(prompt, failures)

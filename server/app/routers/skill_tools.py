@@ -355,7 +355,7 @@ async def _run_llm_only(detail, params: dict):
     """Execute a runtime=llm-only skill.
 
     If any param value is a base64 data-URI image, routes to Claude Vision via
-    Apimart. Otherwise uses the standard text chain (DeepSeek→Apimart).
+    IvyeaAgent / 全局兜底 / DeepSeek. Otherwise uses the standard text chain.
     """
     from app.services import ai_synthesis_service
 
@@ -393,7 +393,7 @@ async def run_tool(
     """Execute a skill with user-provided parameters.
 
     Runtime routing (from the Tool Spec `tool.runtime`):
-      · llm-only → stable HTTP text chain (DeepSeek→Apimart), no hermes
+      · llm-only → stable embedded text chain (IvyeaAgent→全局兜底→DeepSeek), no hermes
       · mcp / unset → real hermes agent (`hermes --skills`)
     Every run is recorded to the lightweight history store.
     """

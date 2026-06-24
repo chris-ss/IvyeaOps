@@ -83,7 +83,7 @@ class AuditStartBody(BaseModel):
     mode: str = Field(default="full", description="full | rewrite_only")
     runner: str = Field(
         default="auto",
-        description="auto | hermes | codex | claude",
+        description="auto | ivyea-agent | hermes | codex | claude",
     )
 
 
@@ -113,7 +113,7 @@ async def audit_start(
         raise HTTPException(status_code=400, detail=f"unsupported marketplace {market}")
     mode = body.mode if body.mode in ("full", "rewrite_only") else "full"
     runner_pref = (body.runner or "auto").lower()
-    if runner_pref not in ("auto", "hermes", "codex", "claude"):
+    if runner_pref not in ("auto", "ivyea-agent", "hermes", "codex", "claude"):
         raise HTTPException(status_code=400, detail=f"unknown runner: {runner_pref}")
 
     if asin_audit.is_busy():
