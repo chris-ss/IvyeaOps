@@ -1944,6 +1944,10 @@ body::after{
 .hs-advanced-toggle-sub{margin-left:8px;font-size:11px;color:var(--t3);font-weight:400}
 .hs-advanced-body{margin-top:2px;padding-left:12px;border-left:2px solid var(--b)}
 .hs-row3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:end}
+.hs-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end}
+.hs-key-inline{display:flex;align-items:center;gap:8px}
+.hs-key-inline .hs-secret-row{flex:1;min-width:0}
+.hs-key-inline .hs-test-row{margin-top:0;flex-shrink:0}
 .hs-agent-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:12px;align-items:stretch}
 .hs-agent-card{border:1px solid var(--b);background:var(--bg2);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
 .hs-agent-card-main{background:color-mix(in srgb,var(--acc) 5%,var(--bg2))}
@@ -2007,7 +2011,7 @@ body::after{
 .hs-secret-row .hs-input{width:100%;padding-right:34px}
 .hs-eye{position:absolute;top:0;right:0;height:100%;width:30px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:var(--t3);font-size:13px;cursor:pointer;font-family:var(--font);transition:color .12s}
 .hs-eye:hover{color:var(--t)}
-@media(max-width:600px){.hs-row3,.hs-agent-grid{grid-template-columns:1fr}.hs-page{padding:16px 14px 48px}}
+@media(max-width:600px){.hs-row3,.hs-row2,.hs-agent-grid{grid-template-columns:1fr}.hs-page{padding:16px 14px 48px}.hs-key-inline{flex-wrap:wrap}}
 
 /* ── GBrain chat: fill content height so input pins to bottom ── */
 .content:has(.brain-page-chat){overflow:hidden;display:flex;flex-direction:column}
