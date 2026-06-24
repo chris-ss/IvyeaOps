@@ -269,7 +269,7 @@ export default function ServerMonitor() {
           <div className="ct" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>最近 AI 调用</span>
             <span style={{ color: "var(--t3)", fontSize: 9, textTransform: "none" }}>
-              降级链 Hermes→全局兜底→Codex→Claude
+              降级链 IvyeaAgent→全局兜底→DeepSeek→Codex/Claude
             </span>
           </div>
           {aiLog.length === 0 ? (

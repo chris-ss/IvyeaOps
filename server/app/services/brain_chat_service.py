@@ -712,7 +712,7 @@ def chat_model_status() -> dict[str, Any]:
             "mode": "hermes-cli",
         }
     # No Hermes — the chat still works via the unified global text chain
-    # (DeepSeek / Apimart / 全局兜底大模型), the same chain every other panel uses.
+    # (IvyeaAgent / DeepSeek / 全局兜底大模型), the same chain every other panel uses.
     from app.services import ai_synthesis_service as _ai
     if _ai.has_text_provider():
         return {

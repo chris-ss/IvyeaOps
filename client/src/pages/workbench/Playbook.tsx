@@ -584,7 +584,7 @@ export default function Playbook() {
             ))}
           </div>
           <div className="market-empty-hint">
-            数据来源：Sorftime MCP &nbsp;·&nbsp; AI：Hermes 优先 &nbsp;·&nbsp; 仅站内流量 · 纯白帽
+            数据来源：Sorftime MCP &nbsp;·&nbsp; AI：应用模型优先 &nbsp;·&nbsp; 仅站内流量 · 纯白帽
           </div>
         </div>
       )}

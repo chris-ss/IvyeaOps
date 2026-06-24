@@ -79,7 +79,7 @@ function TestButton({ settingKey, value, label = "测试" }: {
   return (
     <div className="hs-test-row">
       <button className="hs-test-btn" onClick={run} disabled={busy} type="button">
-        {busy ? "测试中…" : `🔌 ${label}`}
+        {busy ? "测试中…" : label}
       </button>
       {result && (
         <span className={"hs-test-result " + (result.ok ? "ok" : "err")}>
@@ -429,7 +429,7 @@ function HealthPanel() {
 
   useEffect(() => { check(); }, [check]);
 
-  type InstallableComponent = "hermes" | "gbrain" | "ollama" | "codex" | "claude" | "all";
+  type InstallableComponent = "ivyea-agent" | "legacy" | "hermes" | "gbrain" | "ollama" | "codex" | "claude" | "all";
 
   const installComponent = useCallback((component: InstallableComponent) => {
     if (installing) return;
@@ -459,17 +459,18 @@ function HealthPanel() {
   }, [check, installing]);
 
   const rows: Array<{ label: string; key: keyof HealthResp | string; nested?: string; install?: InstallableComponent }> = [
+    { label: "IvyeaAgent · 内置服务",      key: "ivyea_agent", install: "ivyea-agent" },
     { label: "AI · 文本链可用",           key: "ai_chain", nested: "text" },
     { label: "AI · 全局兜底大模型",       key: "ai_chain", nested: "global_fallback" },
     { label: "AI · 视觉识别",             key: "ai_chain", nested: "vision" },
     { label: "Apimart · 图片 / AI 服务", key: "apimart" },
     { label: "Sorftime · 市场数据",       key: "sorftime" },
-    { label: "GBrain · 知识库 CLI",       key: "gbrain_bin", install: "gbrain" },
-    { label: "Ollama · 本地 Embedding",   key: "ollama", install: "ollama" },
-    { label: "Agent · hermes",            key: "runners", nested: "hermes", install: "hermes" },
-    { label: "Agent · codex",             key: "runners", nested: "codex", install: "codex" },
-    { label: "Agent · claude",            key: "runners", nested: "claude", install: "claude" },
-    { label: "Agent · kiro",              key: "runners", nested: "kiro" },
+    { label: "兼容 · GBrain CLI",         key: "gbrain_bin", install: "gbrain" },
+    { label: "兼容 · Ollama Embedding",   key: "ollama", install: "ollama" },
+    { label: "外部 Agent · Hermes",       key: "runners", nested: "hermes", install: "hermes" },
+    { label: "外部 Agent · Codex",        key: "runners", nested: "codex", install: "codex" },
+    { label: "外部 Agent · Claude",       key: "runners", nested: "claude", install: "claude" },
+    { label: "外部 Agent · Kiro",         key: "runners", nested: "kiro" },
   ];
 
   const get = (row: typeof rows[0]) => {
@@ -634,10 +635,12 @@ const EMPTY: HubSettings = {
   hermes_fallback_provider: "", hermes_fallback_model: "",
   hermes_fallback_api_key: "", hermes_fallback_base_url: "",
   assistant_provider: "", assistant_model: "", assistant_api_key: "", assistant_base_url: "",
+  ivyea_agent_url: "http://127.0.0.1:8765", ivyea_agent_token: "", ivyea_agent_auto_start: true,
+  ivyea_agent_provider: "", ivyea_agent_model: "", ivyea_agent_api_key: "", ivyea_agent_base_url: "",
   image_model: "", image_api_key: "", image_base_url: "",
   gbrain_embed_provider: "", gbrain_embed_model: "", gbrain_embed_api_key: "",
   apimart_key: "", apimart_base: "https://api.apimart.ai/v1",
-  text_ai_providers: "hermes,assistant,codex,claude",
+  text_ai_providers: "ivyea-agent,assistant,deepseek,codex,claude",
   vision_ai_providers: "openai,assistant", deepseek_api_key: "", news_feeds: "",
   sorftime_key: "", sif_key: "", sellersprite_key: "",
   imgflow_url: "http://127.0.0.1:3001",
@@ -683,7 +686,8 @@ export default function HubSettings() {
     setVals({ ...EMPTY, ...r.settings });
   }, []);
 
-  const [gbrainPathsOpen, setGbrainPathsOpen] = useState(false);
+  const [imageAdvancedOpen, setImageAdvancedOpen] = useState(false);
+  const [compatPathsOpen, setCompatPathsOpen] = useState(false);
 
   if (loading) return (
     <div aria-busy="true" aria-live="polite" style={{ display: "grid", gap: 12, maxWidth: 720 }}>
@@ -705,18 +709,71 @@ export default function HubSettings() {
         <span className="hs-header-icon">⊙</span>
         <div>
           <div className="hs-header-title">系统配置</div>
-          <div className="hs-header-sub">填写下方密钥后点保存即可直接使用，大多数场景只需填「数据源」一栏。</div>
+          <div className="hs-header-sub">优先配置 IvyeaAgent、数据源和全局兜底大模型；低频项已放到页面下方。</div>
         </div>
       </div>
 
       <AutodetectPanel onApply={applySuggestions} />
-      <HealthPanel />
 
-      {/* -- 区块 1: 数据源 -- */}
+      {/* -- 核心 1: IvyeaAgent -- */}
+      <Section
+        title="IvyeaAgent"
+        desc={<>系统主智能体。右下角 Agent 对话、知识库推理，以及通过对话操作 IvyeaOps 各板块，都优先走这里。</>}
+        keys={[
+          "ivyea_agent_url", "ivyea_agent_token", "ivyea_agent_auto_start",
+          "ivyea_agent_provider", "ivyea_agent_model", "ivyea_agent_api_key", "ivyea_agent_base_url",
+        ]}
+        vals={vals} onSave={save}
+      >
+        <div className="hs-agent-grid">
+          <div className="hs-agent-card hs-agent-card-main">
+            <div className="hs-agent-card-title"><Tag kind="rec">推荐</Tag>内置 IvyeaAgent</div>
+            <div className="hs-agent-card-desc">本机服务默认地址即可；远程部署时再修改。</div>
+            <Field label="服务地址">
+              <TxtInput value={vals.ivyea_agent_url} onChange={v => set("ivyea_agent_url", v)} placeholder="http://127.0.0.1:8765" />
+              <TestButton settingKey="ivyea_agent_url" value={vals.ivyea_agent_url} label="测试 IvyeaAgent" />
+            </Field>
+          </div>
+
+          <div className="hs-agent-card">
+            <div className="hs-agent-card-title"><Tag kind="rec">推荐</Tag>运行方式</div>
+            <div className="hs-agent-card-desc">服务未启动时，IvyeaOps 自动拉起本机 IvyeaAgent。</div>
+            <label className="hs-toggle-line">
+              <input type="checkbox" checked={!!vals.ivyea_agent_auto_start}
+                onChange={e => set("ivyea_agent_auto_start", e.target.checked)} />
+              <span>{vals.ivyea_agent_auto_start ? "自动启动已开启" : "自动启动已关闭"}</span>
+            </label>
+          </div>
+
+          <div className="hs-agent-card">
+            <div className="hs-agent-card-title"><Tag kind="opt">可选</Tag>访问认证</div>
+            <div className="hs-agent-card-desc">本机 127.0.0.1 默认不需要；远程部署或开启认证时填写。</div>
+            <Field label="IvyeaAgent Token">
+              <SecretInput value={vals.ivyea_agent_token} onChange={v => set("ivyea_agent_token", v)} placeholder="留空 = 不带 Token" />
+            </Field>
+          </div>
+        </div>
+
+        <div className="hs-agent-tools">
+          <div className="hs-agent-tools-hd">
+            <span>IvyeaAgent 主脑大模型</span>
+            <em>保存后同步到本机 IvyeaAgent；留空则使用 Agent 自身默认配置。</em>
+          </div>
+          <LLMModelBlock
+            title="Agent 模型"
+            hint="可与全局兜底大模型不同。"
+            providerKey="ivyea_agent_provider" modelKey="ivyea_agent_model"
+            apiKeyKey="ivyea_agent_api_key" baseUrlKey="ivyea_agent_base_url"
+            vals={vals} set={set}
+          />
+        </div>
+      </Section>
+
+      {/* -- 核心 2: 数据源 -- */}
       <Section
         title="数据源"
-        desc={<>填 key 保存后<strong>自动配置到 Hermes MCP</strong>，无需手动操作。有哪个用哪个，都填则按情况择优调用。</>}
-        keys={["sorftime_key", "sif_key", "sellersprite_key", "apimart_key", "apimart_base"]}
+        desc={<>运营数据接口。填 key 保存后自动生效，有哪个用哪个，都填则按场景择优调用。</>}
+        keys={["sorftime_key", "sif_key", "sellersprite_key"]}
         vals={vals} onSave={save}
       >
         <Field
@@ -743,103 +800,209 @@ export default function HubSettings() {
           <TestButton settingKey="sellersprite_key" value={vals.sellersprite_key} label="测试" />
         </Field>
 
-        <Field
-          label={<><Tag kind="opt">可选</Tag>Apimart API Key</>}
-          hint={<>仅 Listing 图片生成需要。登录 apimart.ai → 控制台 → API Keys。</>}
-        >
-          <SecretInput value={vals.apimart_key} onChange={v => set("apimart_key", v)} placeholder="sk-..." />
-          <TestButton settingKey="apimart_key" value={vals.apimart_key} label="测试" />
-        </Field>
       </Section>
 
-      {/* -- 区块 2: 大模型 -- */}
+      {/* -- 核心 3: 全局兜底大模型 -- */}
       <Section
-        title="大模型"
-        desc="配置 Hermes 使用的主模型和 fallback 模型。保存后立即生效，下次调用 hermes 时自动使用新配置。"
+        title="全局兜底大模型"
+        dataTour="settings-fallback"
+        desc={<>所有板块的统一文本出口，也是 AI 问答的默认模型。建议配置一个稳定的文本大模型；IvyeaAgent 主脑模型可在最上方单独指定。</>}
+        keys={["assistant_provider", "assistant_model", "assistant_api_key", "assistant_base_url"]}
+        vals={vals} onSave={save}
+      >
+        <LLMModelBlock
+          title="文本大模型"
+          hint="市场调研、打法推荐、广告分析、AI 问答等文本任务会使用它。"
+          providerKey="assistant_provider" modelKey="assistant_model"
+          apiKeyKey="assistant_api_key" baseUrlKey="assistant_base_url"
+          vals={vals} set={set}
+        />
+      </Section>
+
+      {/* -- 核心 4: 图片生成服务 -- */}
+      <Section
+        title="图片生成服务"
+        desc={<>Apimart API Key 是图片生成主入口；“AI 生图”默认复用它，不需要再填一遍。只有接入独立生图网关时，才展开高级覆盖。</>}
+        keys={["apimart_key", "apimart_base", "image_model", "image_api_key", "image_base_url"]}
+        vals={vals} onSave={save}
+      >
+        <div className="hs-row3">
+          <Field
+            label={<><Tag kind="rec">推荐</Tag>Apimart API Key</>}
+            hint={<>Listing 图片生成、图片翻译和 AI 生图共用此 Key。</>}
+          >
+            <SecretInput value={vals.apimart_key} onChange={v => set("apimart_key", v)} placeholder="sk-..." />
+            <TestButton settingKey="apimart_key" value={vals.apimart_key} label="测试" />
+          </Field>
+          <Field label="模型名称" hint="默认 gpt-image-2">
+            <TxtInput value={vals.image_model} onChange={v => set("image_model", v)} placeholder="gpt-image-2" />
+          </Field>
+          <Field label="Apimart 地址" hint="非官方网关才需改，否则保持默认。">
+            <TxtInput value={vals.apimart_base} onChange={v => set("apimart_base", v)} placeholder="https://api.apimart.ai/v1" />
+          </Field>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setImageAdvancedOpen(o => !o)}
+          style={{
+            display: "flex", alignItems: "center", gap: 6, alignSelf: "flex-start",
+            background: "transparent", border: "1px solid var(--b)", borderRadius: 4,
+            padding: "5px 12px", color: "var(--t3)", fontSize: 11,
+            cursor: "pointer", fontFamily: "var(--font)",
+          }}
+        >
+          <span style={{ display: "inline-block", transition: "transform .15s", transform: imageAdvancedOpen ? "rotate(90deg)" : "none" }}>▶</span>
+          高级：独立生图接口覆盖
+        </button>
+
+        {imageAdvancedOpen && (
+          <div style={{ paddingLeft: 10, borderLeft: "2px solid var(--b)" }}>
+            <div className="hs-row3">
+              <Field label={<><Tag kind="opt">可选</Tag>独立生图 API Key</>}
+                hint="通常留空。填写后 AI 生图改用这里，不再复用 Apimart API Key。">
+                <SecretInput value={vals.image_api_key} onChange={v => set("image_api_key", v)} placeholder="留空 = 复用 Apimart API Key" />
+              </Field>
+              <Field label={<><Tag kind="opt">可选</Tag>独立生图 Base URL</>}
+                hint="通常留空。填写后 AI 生图改用这里，不再复用 Apimart 地址。">
+                <TxtInput value={vals.image_base_url} onChange={v => set("image_base_url", v)} placeholder="留空 = 复用 Apimart 地址" />
+              </Field>
+            </div>
+          </div>
+        )}
+      </Section>
+
+      <HealthPanel />
+
+      {/* -- 可选能力：AI 降级、视觉、Embedding -- */}
+      <Section
+        title="可选 AI 能力"
+        desc="低频或增强项：AI 降级链、图片分析、知识库语义检索和自动修复。默认值已可覆盖大多数场景。"
+        keys={["text_ai_providers", "autofix_enabled",
+          "vision_ai_providers", "openai_api_key", "deepseek_api_key",
+          "gbrain_embed_provider", "gbrain_embed_model", "gbrain_embed_api_key"]}
+        vals={vals} onSave={save}
+      >
+        <Field label={<><Tag kind="opt">可选</Tag>AI 提供商顺序（全局降级链）</>}
+          hint={<>逗号分隔，按顺序尝试：<code>ivyea-agent</code> <code>assistant</code>（全局兜底大模型）<code>deepseek</code> <code>codex</code> <code>claude</code>；<code>hermes</code> 仅用于旧兼容链路。</>}>
+          <TxtInput value={vals.text_ai_providers} onChange={v => set("text_ai_providers", v)} placeholder="ivyea-agent,assistant,deepseek,codex,claude" />
+        </Field>
+        <Field label={<><Tag kind="opt">可选</Tag>视觉识别顺序（图片分析）</>}
+          hint={<>Listing「AI 图片分析」走这条链。Apimart 只生图、无视觉，不在此列。</>}>
+          <TxtInput value={vals.vision_ai_providers} onChange={v => set("vision_ai_providers", v)} placeholder="openai,assistant" />
+        </Field>
+        <Field label={<><Tag kind="opt">可选</Tag>OpenAI API Key（视觉识别）</>}
+          hint={<>用于「AI 图片分析」的视觉模型（GPT-4o 系）。</>}>
+          <SecretInput value={vals.openai_api_key} onChange={v => set("openai_api_key", v)} placeholder="sk-..." />
+        </Field>
+        <Field label={<><Tag kind="opt">可选 · 进阶</Tag>DeepSeek 专用 Key</>}
+          hint={<>仅当把 <code>deepseek</code> 单独加进上面降级链时才需要；多数场景用「全局兜底大模型」选 DeepSeek 即可。</>}>
+          <SecretInput value={vals.deepseek_api_key} onChange={v => set("deepseek_api_key", v)} placeholder="sk-..." />
+        </Field>
+
+        <div style={{ borderTop: "1px solid var(--b)", margin: "4px 0 2px", paddingTop: 10 }}>
+          <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 600, marginBottom: 2 }}>
+            知识库语义检索（Embedding）
+          </div>
+          <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 8 }}>
+            配置后知识库支持语义检索；留空则仅关键词检索。
+          </div>
+        </div>
+        <Field label={<><Tag kind="opt">可选</Tag>Embedding 服务商</>}
+          hint={<>支持 embedding 的服务商。<code>ollama</code> 本地免费，其余需对应 API Key。</>}>
+          <SheetSelect className="hs-input" value={vals.gbrain_embed_provider} title="Embedding 服务商"
+            onChange={p => {
+              set("gbrain_embed_provider", p);
+              if (p && !vals.gbrain_embed_model) {
+                const dm: Record<string, string> = {
+                  openai: "text-embedding-3-large", zhipu: "embedding-3",
+                  dashscope: "text-embedding-v3", minimax: "embo-01",
+                  voyage: "voyage-3", google: "text-embedding-004",
+                  ollama: "nomic-embed-text",
+                };
+                if (dm[p]) set("gbrain_embed_model", dm[p]);
+              }
+            }}
+            options={[
+              { value: "", label: "未配置（关键词检索）" },
+              { value: "ollama", label: "Ollama（本地免费）" },
+              { value: "zhipu", label: "智谱 Zhipu" },
+              { value: "dashscope", label: "阿里 DashScope" },
+              { value: "minimax", label: "MiniMax" },
+              { value: "openai", label: "OpenAI" },
+              { value: "voyage", label: "Voyage" },
+              { value: "google", label: "Google" },
+            ]} />
+        </Field>
+        {vals.gbrain_embed_provider && (
+          <Field label="Embedding 模型" hint="已按服务商预填默认值，可改">
+            <TxtInput value={vals.gbrain_embed_model} onChange={v => set("gbrain_embed_model", v)} placeholder="模型名" />
+          </Field>
+        )}
+        {vals.gbrain_embed_provider && vals.gbrain_embed_provider !== "ollama" && (
+          <Field label="Embedding API Key">
+            <SecretInput value={vals.gbrain_embed_api_key} onChange={v => set("gbrain_embed_api_key", v)} placeholder="对应服务商的 API Key" />
+          </Field>
+        )}
+
+        <div className="hs-agent-card hs-agent-card-wide">
+          <div className="hs-agent-card-title"><Tag kind="opt">功能</Tag>自动修复 Bug</div>
+          <div className="hs-agent-card-desc">开启后，功能报错时弹窗询问是否 AI 修复；在隔离副本中排查，你审核 diff 后应用。默认关闭。</div>
+          <label className="hs-toggle-line">
+            <input type="checkbox" checked={vals.autofix_enabled}
+              onChange={e => set("autofix_enabled", e.target.checked)} />
+            <span>{vals.autofix_enabled ? "自动修复已开启" : "自动修复已关闭"}</span>
+          </label>
+        </div>
+      </Section>
+
+      {/* -- 低优先级：兼容与旧链路 -- */}
+      <Section
+        title="兼容与旧链路"
+        desc="Hermes/Codex/Claude/GBrain 仅作为兼容或增强链路。新部署通常不需要配置。"
         keys={[
           "hermes_provider", "hermes_model", "hermes_api_key", "hermes_base_url",
           "hermes_fallback_provider", "hermes_fallback_model",
           "hermes_fallback_api_key", "hermes_fallback_base_url",
+          "hermes_bin", "codex_bin", "claude_bin", "gbrain_bin", "brain_root",
         ]}
         vals={vals} onSave={save}
       >
         <LLMModelBlock
-          title="主模型"
+          title="Hermes 主模型（旧兼容）"
           providerKey="hermes_provider" modelKey="hermes_model"
           apiKeyKey="hermes_api_key" baseUrlKey="hermes_base_url"
           vals={vals} set={set}
         />
         <div style={{ borderTop: "1px solid var(--b)", margin: "12px 0" }} />
         <LLMModelBlock
-          title="Fallback 模型（可选）"
-          hint="主模型限流或报错时自动切换到这里"
+          title="Hermes Fallback 模型（可选）"
+          hint="旧 Hermes 链路主模型限流或报错时使用。"
           providerKey="hermes_fallback_provider" modelKey="hermes_fallback_model"
           apiKeyKey="hermes_fallback_api_key" baseUrlKey="hermes_fallback_base_url"
           vals={vals} set={set}
         />
-      </Section>
 
-      {/* -- 应用模型：AI 问答 / AI 生图（直连大模型，不走智能体）-- */}
-      <Section
-        title="应用模型"
-        dataTour="settings-fallback"
-        desc={<>「全局兜底大模型」是所有板块的<strong>统一降级出口</strong>：当 Hermes/Codex/Claude 都不可用时各板块都会调它，同时它也是「AI 问答」用的模型。「AI 生图」直接调生图 API。均<strong>不经过智能体</strong>；留空则回退默认链路（DeepSeek→Apimart）。</>}
-        keys={[
-          "assistant_provider", "assistant_model", "assistant_api_key", "assistant_base_url",
-          "image_model", "image_api_key", "image_base_url",
-        ]}
-        vals={vals} onSave={save}
-      >
-        <LLMModelBlock
-          title="全局兜底大模型（兼 AI 问答）"
-          hint="所有板块的智能体（Hermes/Codex/Claude）都不可用时，统一降级调用这个模型；同时也是「AI 问答」使用的模型。建议配一个稳定的文本大模型。"
-          providerKey="assistant_provider" modelKey="assistant_model"
-          apiKeyKey="assistant_api_key" baseUrlKey="assistant_base_url"
-          vals={vals} set={set}
-        />
-        <div style={{ borderTop: "1px solid var(--b)", margin: "12px 0" }} />
-        <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 600, marginBottom: 10 }}>
-          AI 生图
-          <span style={{ fontWeight: 400, color: "var(--t3)", marginLeft: 8 }}>留空用默认 Apimart gpt-image-2</span>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignItems: "end" }}>
-          <Field label="模型名称" hint="默认 gpt-image-2">
-            <TxtInput value={vals.image_model} onChange={v => set("image_model", v)} placeholder="gpt-image-2" />
-          </Field>
-          <Field label="API Key" hint="留空复用 Apimart key">
-            <SecretInput value={vals.image_api_key} onChange={v => set("image_api_key", v)} placeholder="留空 = 复用 Apimart key" />
-          </Field>
-          <Field label="Base URL" hint="留空复用 Apimart 地址">
-            <TxtInput value={vals.image_base_url} onChange={v => set("image_base_url", v)} placeholder="留空 = 复用 Apimart 地址" />
-          </Field>
-        </div>
-      </Section>
-
-      {/* -- 区块 3: 智能体 -- */}
-      <Section
-        title="智能体"
-        desc={<>Hermes、Claude、GBrain 均从系统 PATH <strong>自动发现</strong>，绿色即代表可用，无需手动配置路径。</>}
-        keys={["hermes_bin", "codex_bin", "claude_bin", "text_ai_providers", "autofix_enabled",
-          "vision_ai_providers", "openai_api_key", "deepseek_api_key",
-          "gbrain_bin", "brain_root",
-          "gbrain_embed_provider", "gbrain_embed_model", "gbrain_embed_api_key"]}
-        vals={vals} onSave={save}
-      >
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          {(["hermes", "codex", "claude"] as const).map(name => {
-            const key = `${name}_bin` as keyof HubSettings;
-            const val = (vals[key] as string) || "";
-            return (
-              <TestButton key={name} settingKey={key} value={val}
-                label={`${name === "hermes" ? "Hermes" : name === "codex" ? "Codex" : "Claude"} 检测`} />
-            );
-          })}
-          <TestButton settingKey="kiro_cli_bin" value={(vals.kiro_cli_bin as string) || ""} label="Kiro 检测" />
+        <div className="hs-agent-tools">
+          <div className="hs-agent-tools-hd">
+            <span>外部 CLI 检测</span>
+            <em>绿色即代表可用；通常无需手动配置路径。</em>
+          </div>
+          <div className="hs-agent-tools-list">
+            {(["hermes", "codex", "claude"] as const).map(name => {
+              const key = `${name}_bin` as keyof HubSettings;
+              const val = (vals[key] as string) || "";
+              return (
+                <TestButton key={name} settingKey={key} value={val}
+                  label={`${name === "hermes" ? "Hermes" : name === "codex" ? "Codex" : "Claude"} 检测`} />
+              );
+            })}
+          </div>
         </div>
 
         <button
           type="button"
-          onClick={() => setGbrainPathsOpen(o => !o)}
+          onClick={() => setCompatPathsOpen(o => !o)}
           style={{
             display: "flex", alignItems: "center", gap: 6, marginBottom: 4,
             background: "transparent", border: "1px solid var(--b)", borderRadius: 4,
@@ -847,30 +1010,17 @@ export default function HubSettings() {
             cursor: "pointer", fontFamily: "var(--font)",
           }}
         >
-          <span style={{ display: "inline-block", transition: "transform .15s", transform: gbrainPathsOpen ? "rotate(90deg)" : "none" }}>▶</span>
+          <span style={{ display: "inline-block", transition: "transform .15s", transform: compatPathsOpen ? "rotate(90deg)" : "none" }}>▶</span>
           手动指定路径（自动发现失败时才需要）
         </button>
 
-        {gbrainPathsOpen && (
+        {compatPathsOpen && (
           <div style={{ paddingLeft: 10, borderLeft: "2px solid var(--b)" }}>
-            <Field label={<><Tag kind="opt">可选</Tag>AI 提供商顺序（全局降级链）</>}
-              hint={<>逗号分隔，按顺序尝试：<code>hermes</code> <code>assistant</code>（全局兜底大模型）<code>codex</code> <code>claude</code> <code>apimart</code> <code>deepseek</code>。所有板块的文本 AI 都走这条链。</>}>
-              <TxtInput value={vals.text_ai_providers} onChange={v => set("text_ai_providers", v)} placeholder="hermes,assistant,codex,claude" />
-            </Field>
-            <Field label={<><Tag kind="opt">可选</Tag>视觉识别顺序（图片分析）</>}
-              hint={<>逗号分隔，按顺序尝试：<code>openai</code> <code>assistant</code>（支持视觉的全局兜底）。Listing「AI 图片分析」走这条链。apimart 只生图、无视觉，不在此列。</>}>
-              <TxtInput value={vals.vision_ai_providers} onChange={v => set("vision_ai_providers", v)} placeholder="openai,assistant" />
-            </Field>
-            <Field label={<><Tag kind="opt">可选</Tag>OpenAI API Key（视觉识别）</>}
-              hint={<>用于「AI 图片分析」的视觉模型（GPT‑4o 系）。登录 platform.openai.com → API Keys。</>}>
-              <SecretInput value={vals.openai_api_key} onChange={v => set("openai_api_key", v)} placeholder="sk-..." />
-            </Field>
-            <Field label={<><Tag kind="opt">可选 · 进阶</Tag>DeepSeek 专用 Key</>}
-              hint={<>仅当把 <code>deepseek</code> 单独加进上面「AI 提供商顺序」时才需要；多数人用上面的「全局兜底大模型」选 DeepSeek 即可，无需在此填。</>}>
-              <SecretInput value={vals.deepseek_api_key} onChange={v => set("deepseek_api_key", v)} placeholder="sk-..." />
-            </Field>
             <Field label={<><Tag kind="opt">可选</Tag>Hermes 路径</>} hint="留空 = PATH 自动发现">
               <TxtInput value={vals.hermes_bin} onChange={v => set("hermes_bin", v)} placeholder="留空 = PATH 自动发现" />
+            </Field>
+            <Field label={<><Tag kind="opt">可选</Tag>Codex 路径</>} hint="留空 = PATH 自动发现">
+              <TxtInput value={vals.codex_bin} onChange={v => set("codex_bin", v)} placeholder="留空 = PATH 自动发现" />
             </Field>
             <Field label={<><Tag kind="opt">可选</Tag>Claude 路径</>} hint={<>留空 = PATH 自动发现。<code>npm i -g @anthropic-ai/claude-code</code></>}>
               <TxtInput value={vals.claude_bin} onChange={v => set("claude_bin", v)} placeholder="留空 = PATH 自动发现" />
@@ -878,64 +1028,11 @@ export default function HubSettings() {
             <Field label={<><Tag kind="opt">可选</Tag>GBrain 路径</>} hint={<>留空 = PATH 自动发现（通常 <code>~/.bun/bin/gbrain</code>）。</>}>
               <TxtInput value={vals.gbrain_bin} onChange={v => set("gbrain_bin", v)} placeholder="留空 = PATH 自动发现" />
             </Field>
-            <Field label={<><Tag kind="opt">可选</Tag>知识库根目录</>} hint={<>GBrain 笔记目录，留空 = <code>~/brain</code>。</>}>
+            <Field label={<><Tag kind="opt">可选 · 旧兼容</Tag>知识库根目录</>} hint={<>GBrain 笔记目录，留空 = <code>~/brain</code>。新知识库文件由 IvyeaAgent 保存在 <code>~/.ivyea/knowledge</code>。</>}>
               <TxtInput value={vals.brain_root} onChange={v => set("brain_root", v)} placeholder="~/brain" />
             </Field>
-            <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--b)", margin: "4px 0 2px", paddingTop: 10 }}>
-              <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 600, marginBottom: 2 }}>
-                知识库语义检索（Embedding）
-              </div>
-              <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 8 }}>
-                配置后知识库支持语义检索；留空则仅关键词检索（不影响对话）。注意：deepseek 等纯对话模型不提供 embedding。
-              </div>
-            </div>
-            <Field label={<><Tag kind="opt">可选</Tag>Embedding 服务商</>}
-              hint={<>支持 embedding 的服务商。<code>ollama</code> 本地免费（需先 pull 模型），其余需对应 API Key。</>}>
-              <SheetSelect className="hs-input" value={vals.gbrain_embed_provider} title="Embedding 服务商"
-                onChange={p => {
-                  set("gbrain_embed_provider", p);
-                  if (p && !vals.gbrain_embed_model) {
-                    const dm: Record<string, string> = {
-                      openai: "text-embedding-3-large", zhipu: "embedding-3",
-                      dashscope: "text-embedding-v3", minimax: "embo-01",
-                      voyage: "voyage-3", google: "text-embedding-004",
-                      ollama: "nomic-embed-text",
-                    };
-                    if (dm[p]) set("gbrain_embed_model", dm[p]);
-                  }
-                }}
-                options={[
-                  { value: "", label: "未配置（关键词检索）" },
-                  { value: "ollama", label: "Ollama（本地免费）" },
-                  { value: "zhipu", label: "智谱 Zhipu" },
-                  { value: "dashscope", label: "阿里 DashScope" },
-                  { value: "minimax", label: "MiniMax" },
-                  { value: "openai", label: "OpenAI" },
-                  { value: "voyage", label: "Voyage" },
-                  { value: "google", label: "Google" },
-                ]} />
-            </Field>
-            {vals.gbrain_embed_provider && (
-              <Field label="Embedding 模型" hint="已按服务商预填默认值，可改">
-                <TxtInput value={vals.gbrain_embed_model} onChange={v => set("gbrain_embed_model", v)} placeholder="模型名" />
-              </Field>
-            )}
-            {vals.gbrain_embed_provider && vals.gbrain_embed_provider !== "ollama" && (
-              <Field label="Embedding API Key" hint="保存后写入 Hermes 环境，GBrain 自动读取">
-                <SecretInput value={vals.gbrain_embed_api_key} onChange={v => set("gbrain_embed_api_key", v)} placeholder="对应服务商的 API Key" />
-              </Field>
-            )}
           </div>
         )}
-
-        <Field label={<><Tag kind="opt">功能</Tag>自动修复 Bug</>}
-          hint={<>开启后，功能报错时弹窗询问是否 AI 修复（hermes 在隔离副本中排查，你审核 diff 后应用）。默认关闭。</>}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--t2)", cursor: "pointer" }}>
-            <input type="checkbox" checked={vals.autofix_enabled}
-              onChange={e => set("autofix_enabled", e.target.checked)} />
-            {vals.autofix_enabled ? "已开启" : "已关闭"}
-          </label>
-        </Field>
       </Section>
 
       {/* -- 区块 3 & 4: 通知 + 高级（折叠） -- */}
@@ -982,7 +1079,7 @@ export default function HubSettings() {
           title="高级 / 运维"
           desc="Listing 图片后端、嵌入服务 URL、Token 监控 DB 路径、Kiro 集成等。通常无需改动。"
           keys={["imgflow_url", "dashboard_url", "terminal_url", "hermes_db", "codex_db", "claude_projects_dir",
-            "apimart_base", "kiro_cli_bin", "kiro_gateway_db", "kiro_cli_db", "kiro_cli_sessions_dir",
+            "kiro_cli_bin", "kiro_gateway_db", "kiro_cli_db", "kiro_cli_sessions_dir",
             "feishu_codex_db", "hermes_node_bin", "bun_bin", "news_feeds"]}
           vals={vals} onSave={save}
         >
@@ -992,13 +1089,10 @@ export default function HubSettings() {
             <AreaInput value={vals.news_feeds} onChange={v => set("news_feeds", v)} rows={4}
               placeholder={"https://example.com/feed.xml | 来源名 | ai_industry\nhttps://.../rss | 卖家资讯 | amazon_seller"} />
           </Field>
-          <div className="hs-field-group-title">图片生成 · 嵌入服务</div>
+          <div className="hs-field-group-title">图片处理后端</div>
           <Field label={<><Tag kind="opt">可选</Tag>Imgflow 地址</>} hint={<>Listing 图片处理后端，默认 <code>http://127.0.0.1:3001</code>。</>}>
             <TxtInput value={vals.imgflow_url} onChange={v => set("imgflow_url", v)} placeholder="http://127.0.0.1:3001" />
             <TestButton settingKey="imgflow_url" value={vals.imgflow_url} label="测试" />
-          </Field>
-          <Field label={<><Tag kind="opt">可选</Tag>Apimart 地址</>} hint="非官方网关才需改，否则保持默认。">
-            <TxtInput value={vals.apimart_base} onChange={v => set("apimart_base", v)} placeholder="https://api.apimart.ai/v1" />
           </Field>
           <div className="hs-row3">
             <Field label="仪表盘地址">

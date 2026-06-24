@@ -11,12 +11,20 @@ export interface HubSettings {
   hermes_fallback_model: string;
   hermes_fallback_api_key: string;
   hermes_fallback_base_url: string;
-  // AI 问答（直连大模型，不走智能体）
+  // Global fallback LLM for text tasks and AI Q&A
   assistant_provider: string;
   assistant_model: string;
   assistant_api_key: string;
   assistant_base_url: string;
-  // AI 生图
+  // IvyeaAgent local service
+  ivyea_agent_url: string;
+  ivyea_agent_token: string;
+  ivyea_agent_auto_start: boolean;
+  ivyea_agent_provider: string;
+  ivyea_agent_model: string;
+  ivyea_agent_api_key: string;
+  ivyea_agent_base_url: string;
+  // Image generation. Empty image_api_key/base_url reuses Apimart below.
   image_model: string;
   image_api_key: string;
   image_base_url: string;
@@ -24,7 +32,7 @@ export interface HubSettings {
   gbrain_embed_provider: string;
   gbrain_embed_model: string;
   gbrain_embed_api_key: string;
-  // AI synthesis (Apimart for images)
+  // Primary image-generation gateway
   apimart_key: string;
   apimart_base: string;
   // Comma-separated text-AI fallback order for IvyeaOps internal synthesis
@@ -90,6 +98,7 @@ export interface RunnerStatus {
 
 export interface HealthResp {
   version: RunnerStatus;
+  ivyea_agent: RunnerStatus;
   apimart: RunnerStatus;
   sorftime: RunnerStatus;
   imgflow: RunnerStatus;

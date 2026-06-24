@@ -576,7 +576,7 @@ export default function Market() {
             ))}
           </div>
           <div className="market-empty-hint">
-            数据来源：Sorftime MCP &nbsp;·&nbsp; AI：Claude → Hermes → Codex
+            数据来源：Sorftime MCP &nbsp;·&nbsp; AI：IvyeaAgent → 全局兜底 → DeepSeek → Codex/Claude
           </div>
         </div>
       )}

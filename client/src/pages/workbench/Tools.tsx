@@ -227,14 +227,14 @@ function AsinAuditPanel() {
           value={runner}
           onChange={(v) => setRunner(v as RunnerName)}
           disabled={isRunning || runners.length === 0}
-          title="选择执行审计的智能体 CLI"
+          title="选择执行审计的智能体"
           style={{ width: 180 }}
           options={
             runners.length === 0
               ? [{ value: "auto", label: "自动" }]
               : runners.map((r) => ({
                   value: r.name,
-                  label: `${r.available ? "🤖 " : "⊘ "}${r.label}${!r.available && r.reason ? `（${r.reason}）` : ""}`,
+                  label: `${r.available ? "" : "不可用 · "}${r.label}${!r.available && r.reason ? `（${r.reason}）` : ""}`,
                   disabled: !r.available,
                 }))
           }

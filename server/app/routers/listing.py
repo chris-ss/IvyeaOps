@@ -694,7 +694,7 @@ async def _call_ai(prompt: str, max_tokens: int = 2000, web_search: bool = True)
         "输出要求：直接输出最终内容，不要解释调用过程，不要添加 Markdown 代码块。"
     )
 
-    # Use the user's configured provider order (text_ai_providers — hermes-first
+    # Use the user's configured provider order (text_ai_providers — application-model-first
     # by default). Hermes is slow for big generations but the long-request path
     # is sized for it (frontend 15-min axios timeout + nginx 900s on the listing
     # generate endpoints), so a slow hermes run completes instead of being cut.

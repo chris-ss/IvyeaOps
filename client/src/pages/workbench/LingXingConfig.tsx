@@ -25,8 +25,8 @@ export default function LingXingConfig() {
   const [probe, setProbe] = useState<any>(null);
   const [msg, setMsg] = useState(""); const [busy, setBusy] = useState(false);
   const [avail, setAvail] = useState<any[]>([]); const [personas, setPersonas] = useState<string[]>([]);
-  const [provs, setProvs] = useState<string[]>(["deepseek", "apimart", "deepseek"]);
-  const [analysisProv, setAnalysisProv] = useState("deepseek");
+  const [provs, setProvs] = useState<string[]>(["ivyea-agent", "deepseek", "assistant"]);
+  const [analysisProv, setAnalysisProv] = useState("ivyea-agent");
   const [models, setModels] = useState<any[]>([]); const [cm, setCm] = useState<any>({});
   const [rules, setRules] = useState(""); const [rulesDefault, setRulesDefault] = useState("");
 
@@ -38,8 +38,8 @@ export default function LingXingConfig() {
       const cfg = set.data.settings || {}; setS(cfg);
       setHost(cfg.lingxing_openapi_host || ""); setAppid(cfg.lingxing_openapi_appid || "");
       setAvail(rp.data.available || []); setPersonas(rp.data.personas || []);
-      setProvs(String(rp.data.review_providers || "deepseek,apimart,deepseek").split(",").map((x: string) => x.trim()));
-      setAnalysisProv(rp.data.analysis_provider || "deepseek");
+      setProvs(String(rp.data.review_providers || "ivyea-agent,deepseek,assistant").split(",").map((x: string) => x.trim()));
+      setAnalysisProv(rp.data.analysis_provider || "ivyea-agent");
       try { setModels(JSON.parse(cfg.lingxing_custom_models || "[]")); } catch { setModels([]); }
       setRules(rp.data.rules_doc || ""); setRulesDefault(rp.data.rules_doc_default || "");
     } catch (e: any) { setMsg(humanErr(e)); }
@@ -133,7 +133,7 @@ export default function LingXingConfig() {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {personas.map((pn, i) => (
             <Field key={i} label={`复核${i + 1}：${pn}`}>
-              <SheetSelect value={provs[i] || "deepseek"} onChange={(v) => { const n = [...provs]; n[i] = v; void saveProvs(n); }} title="选择模型" style={{ ...inputStyle, minWidth: 170 }}
+              <SheetSelect value={provs[i] || "ivyea-agent"} onChange={(v) => { const n = [...provs]; n[i] = v; void saveProvs(n); }} title="选择模型" style={{ ...inputStyle, minWidth: 170 }}
                 options={avail.map((a) => ({ value: a.id, label: a.label + (a.ok ? "" : "（未配置/未装）"), disabled: !a.ok }))} />
             </Field>
           ))}
@@ -143,7 +143,7 @@ export default function LingXingConfig() {
           </Field>
         </div>
         <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 6 }}>
-          可选：HTTP 文本(DeepSeek/Apimart) · CLI 智能体(hermes/claude/codex,较慢) · 下方自定义模型。某个不可用会自动回退默认链。建议把「魔鬼代言人」设成与其它不同的模型做真异构。「分析模型」是自动化建议产出建议时用的模型（优化引擎是纯规则、不用模型）。
+          默认优先用内置 IvyeaAgent；也可选全局兜底大模型、DeepSeek/Apimart、CLI 智能体(hermes/claude/codex,较慢)或下方自定义模型。某个不可用会自动回退默认链。建议把「魔鬼代言人」设成与其它不同的模型做真异构。「分析模型」是自动化建议产出建议时用的模型（优化引擎是纯规则、不用模型）。
         </div>
 
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--b)" }}>

@@ -5,6 +5,7 @@ routing, validation, and download plumbing.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -245,15 +246,58 @@ def test_download_html_renders_self_contained(tmp_path, monkeypatch):
     assert asin_audit.download_path("emptyjob", "html") is None
 
 
-def test_runner_status_lists_all_three(monkeypatch):
-    """runner_status should include auto + the three canonical runners."""
+def test_runner_status_lists_embedded_and_legacy_runners(monkeypatch):
+    """runner_status should expose IvyeaAgent first, then legacy CLI runners."""
     from app.services import asin_audit
 
+    monkeypatch.setattr(asin_audit, "_ivyea_agent_available", lambda: (True, ""))
+    monkeypatch.setattr(
+        asin_audit,
+        "_cli_runner_status",
+        lambda: [
+            {"name": "auto", "auto_resolved_to": "hermes", "available": True},
+            {"name": "hermes", "label": "Hermes", "available": True, "path": "/bin/hermes", "reason": None},
+            {"name": "codex", "label": "Codex", "available": True, "path": "/bin/codex", "reason": None},
+            {"name": "claude", "label": "Claude", "available": True, "path": "/bin/claude", "reason": None},
+        ],
+    )
     rows = asin_audit.runner_status()
     names = [r["name"] for r in rows]
     assert names[0] == "auto"
-    for n in ("hermes", "codex", "claude"):
+    assert rows[0]["auto_resolved_to"] == "ivyea-agent"
+    for n in ("ivyea-agent", "hermes", "codex", "claude"):
         assert n in names
+
+
+@pytest.mark.asyncio
+async def test_start_job_accepts_ivyea_agent_runner(tmp_path, monkeypatch):
+    from app.services import asin_audit
+
+    root = tmp_path / "audits"
+    root.mkdir()
+    monkeypatch.setattr(asin_audit, "AUDIT_ROOT", root)
+    monkeypatch.setattr(
+        asin_audit,
+        "_resolve_audit_runner",
+        lambda pref: ("ivyea-agent", None, ""),
+    )
+
+    async def fake_run(job):
+        job.status = "done"
+        asin_audit._write_meta(job)
+
+    monkeypatch.setattr(asin_audit, "_run_claude", fake_run)
+
+    job = await asin_audit.start_job(
+        asin="B0TEST1234",
+        marketplace="US",
+        mode="full",
+        runner_pref="ivyea-agent",
+    )
+    await asyncio.sleep(0)
+
+    assert job.runner_pref == "ivyea-agent"
+    assert (root / job.job_id / "meta.json").is_file()
 
 
 def test_build_runner_cmd_per_runner():

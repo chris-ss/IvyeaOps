@@ -331,7 +331,11 @@ def _custom_models() -> Dict[str, Dict[str, Any]]:
 def available_providers() -> List[Dict[str, Any]]:
     """All selectable review providers + availability (for the config UI)."""
     from app.services.runners import _find_bin
+    from app.services import ivyea_agent_service as _ivyea
+    ivyea_status = _ivyea.availability()
     out = [
+        {"id": "ivyea-agent", "label": "IvyeaAgent", "kind": "agent", "ok": bool(ivyea_status.get("available"))},
+        {"id": "assistant", "label": "全局兜底大模型", "kind": "http", "ok": bool(_ai.assistant_text_cfg().get("api_key"))},
         {"id": "deepseek", "label": "DeepSeek", "kind": "http", "ok": bool(_ai._deepseek_key())},
         {"id": "apimart", "label": "Apimart(Claude)", "kind": "http", "ok": bool(_ai._apimart_key())},
     ]
@@ -410,7 +414,7 @@ approve=是否批准；risk_score=重大风险概率(越高越危险)；理由�
 
 
 async def review_intent(intent: Dict[str, Any]) -> Dict[str, Any]:
-    provs = str(_hs.get("lingxing_review_providers") or "deepseek,apimart,deepseek").replace("，", ",").split(",")
+    provs = str(_hs.get("lingxing_review_providers") or "ivyea-agent,deepseek,assistant").replace("，", ",").split(",")
     reviews = []
     for i, (persona, framing) in enumerate(_REVIEWERS):
         prov = (provs[i].strip() if i < len(provs) and provs[i].strip() else "deepseek")

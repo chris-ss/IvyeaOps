@@ -224,7 +224,7 @@ function AgentRow({
         )}
       </div>
 
-      {/* Hermes/GBrain installers are optional; failures do not block setup. */}
+      {/* Legacy installers are optional; failures do not block setup. */}
       {!isOk && (name === "hermes" || name === "gbrain") && (
         <div style={S.hint}>
           将在线安装可选组件；如网络较慢或失败，可先跳过，稍后在系统配置或脚本中重试。
@@ -266,10 +266,10 @@ function StepWelcome({ onNext }: { onNext: () => void }) {
         }}
       >
         {[
-          ["🤖", "AI Agent", "hermes / codex / claude 本机运行"],
+          ["🤖", "AI Agent", "IvyeaAgent 内置运行"],
           ["🔍", "市场调研", "Sorftime 数据 + AI 分析"],
           ["🖼", "Listing 生成", "图片 + 文案一体化"],
-          ["🧠", "知识库", "本地 GBrain + Markdown 笔记"],
+          ["🧠", "知识库", "上传文档 + 本地检索"],
         ].map(([icon, name, desc]) => (
           <div
             key={name}
@@ -308,28 +308,28 @@ function StepAgents({
 }) {
   const agents: Array<{ name: string; label: string; hint?: string }> = [
     {
-      name: "hermes",
-      label: "Hermes（推荐 · 自带 MCP + 工具调用）",
-      hint: "使用 Hermes 官方安装器；需要联网，安装失败不影响继续配置。",
+      name: "ivyea-agent",
+      label: "IvyeaAgent（默认 · Agent + 知识库 + 本地检索）",
+      hint: "安装到 IvyeaOps 的 server/.venv；这是新部署的默认 AI 主链。",
     },
     {
       name: "codex",
-      label: "Codex（OpenAI · npm install -g @openai/codex）",
+      label: "Codex（可选 · 外部代码 Agent）",
       hint: "通过 npm 自动安装，需要本机有 Node.js 18+。",
     },
     {
       name: "claude",
-      label: "Claude Code（Anthropic · npm install -g @anthropic-ai/claude-code）",
+      label: "Claude Code（可选 · 外部代码 Agent）",
       hint: "通过 npm 自动安装，需要本机有 Node.js 18+。",
     },
   ];
 
   return (
     <>
-      <div style={S.title}>AI Agent 检测</div>
+      <div style={S.title}>IvyeaAgent 检测</div>
       <div style={S.sub}>
-        IvyeaOps 需要至少一个 Agent CLI 来驱动 AI 功能。检测到以下可选项，
-        安装至少一个即可。已安装的会自动识别。
+        新版本默认使用内置 IvyeaAgent 驱动对话、知识库和本地检索。Codex / Claude
+        仍可作为代码任务增强项安装，但不再是部署 IvyeaOps 的必要条件。
       </div>
       {agents.map((a) => (
         <AgentRow
@@ -340,20 +340,9 @@ function StepAgents({
           installHint={a.hint}
         />
       ))}
-      <AgentRow
-        name="gbrain"
-        label="GBrain（可选 · 本地知识库 CLI）"
-        found={!!checks.agents.gbrain}
-        installHint="自动安装 Bun + GBrain，并初始化本地 ~/brain；失败不影响主程序。"
-      />
-      <AgentRow
-        name="ollama"
-        label="Ollama（可选 · 本地免费 Embedding）"
-        found={!!checks.agents.ollama}
-        installHint="自动安装 Ollama，拉取 nomic-embed-text，并配置 GBrain 本地语义检索。"
-      />
       <div style={{ ...S.hint, marginTop: 4 }}>
-        💡 一个都不想装也可以「跳过」——下一步配置「全局兜底大模型」后，所有 AI 功能照样能用。
+        旧版 Hermes / GBrain / Ollama 链路保留为兼容组件；新部署无需额外配置。
+        需要云模型时，下一步配置「全局兜底大模型」即可。
       </div>
       <div style={S.row}>
         <button style={S.btnSecondary} onClick={onNext}>
@@ -371,7 +360,7 @@ function StepAgents({
 // Step 2 — Global fallback model (assistant slot)
 //
 // This is the practical "works out of the box" path: users without a local
-// agent CLI (hermes/codex/claude) can point IvyeaOps at any OpenAI-compatible
+// IvyeaAgent or an external agent CLI can point IvyeaOps at any OpenAI-compatible
 // model here, and every board's text AI falls back to it. Mirrors the
 // 「全局兜底大模型」 block in 系统配置.
 // ---------------------------------------------------------------------------
@@ -425,8 +414,8 @@ function StepFallbackModel({ onNext }: { onNext: () => void }) {
     <>
       <div style={S.title}>全局兜底大模型</div>
       <div style={S.sub}>
-        当本机的 Agent（Hermes/Codex/Claude）都不可用时，各板块的 AI 会统一降级到这个模型。
-        <strong>没装本地 Agent 的话，填这里就能直接用全部 AI 功能</strong>，强烈建议配置。
+        当内置 IvyeaAgent 或外部 Agent 需要调用云端模型时，各板块会统一使用这里的配置。
+        <strong>填好这里，新机器部署后就能直接使用主要 AI 功能</strong>。
       </div>
 
       <div style={{ marginBottom: 14 }}>

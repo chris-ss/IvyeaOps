@@ -192,8 +192,8 @@ async def help_doc() -> Dict[str, Any]:
 async def review_providers() -> Dict[str, Any]:
     cfg = _hs.load()
     return {"available": lxo.available_providers(),
-            "review_providers": cfg.get("lingxing_review_providers") or "deepseek,apimart,deepseek",
-            "analysis_provider": cfg.get("lingxing_analysis_provider") or "deepseek",
+            "review_providers": cfg.get("lingxing_review_providers") or "ivyea-agent,deepseek,assistant",
+            "analysis_provider": cfg.get("lingxing_analysis_provider") or "ivyea-agent",
             "personas": [p[0] for p in lxo._REVIEWERS],
             "rules_doc": _hs.get("lingxing_rules_doc") or "",
             "rules_doc_default": _hs._DEFAULTS.get("lingxing_rules_doc", "")}

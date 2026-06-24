@@ -19,7 +19,7 @@ _SECRET_KEYS: List[str] = [
     "apimart_key", "sorftime_key", "sif_key", "sellersprite_key",
     "hermes_api_key", "hermes_fallback_api_key", "gbrain_embed_api_key",
     "alert_app_secret", "alert_webhook", "openai_api_key",
-    "lingxing_mcp_key", "lingxing_openapi_secret",
+    "ivyea_agent_token", "ivyea_agent_api_key", "lingxing_mcp_key", "lingxing_openapi_secret",
 ]
 
 # Keys that, when changed, require syncing into Hermes config.
@@ -29,6 +29,10 @@ _HERMES_SYNC_KEYS = {
     "hermes_fallback_provider", "hermes_fallback_model",
     "hermes_fallback_api_key", "hermes_fallback_base_url",
     "gbrain_embed_provider", "gbrain_embed_model", "gbrain_embed_api_key",
+}
+
+_IVYEA_AGENT_SYNC_KEYS = {
+    "ivyea_agent_provider", "ivyea_agent_model", "ivyea_agent_api_key", "ivyea_agent_base_url",
 }
 
 
@@ -54,6 +58,13 @@ async def patch_settings(body: SettingsPatch, _u: str = Depends(require_user)):
         try:
             from app.services.hermes_config_sync import on_settings_saved
             on_settings_saved(updated)
+        except Exception:
+            pass  # non-fatal — settings are saved regardless
+    if _IVYEA_AGENT_SYNC_KEYS & body.settings.keys():
+        try:
+            from app.services import ivyea_agent_service
+            ivyea_agent_service.ensure_available()
+            ivyea_agent_service.sync_model_settings(updated, force=True)
         except Exception:
             pass  # non-fatal — settings are saved regardless
     return {"settings": updated, "secret_keys": _SECRET_KEYS}
@@ -137,6 +148,27 @@ async def settings_health(_u: str = Depends(require_user)):
                 return {"ok": True, "detail": p}
         return {"ok": False, "detail": "未安装"}
 
+    def _check_ivyea_agent() -> Dict[str, Any]:
+        from app.core.config import settings as _cfg
+        from app.services import ivyea_agent_service as _ivyea
+        import shutil
+
+        status = _ivyea.ensure_available()
+        if status.get("available"):
+            return {"ok": True, "detail": f"服务已连接 · {status.get('base_url')}"}
+
+        candidates = [
+            shutil.which("ivyea") or "",
+            str(_cfg.root_dir / "server" / ".venv" / "bin" / "ivyea"),
+            str(_cfg.root_dir / "server" / ".venv" / "Scripts" / "ivyea.exe"),
+            str(Path.home() / ".local" / "bin" / "ivyea"),
+        ]
+        found = next((p for p in candidates if p and Path(p).exists()), "")
+        if found:
+            detail = status.get("error") or "服务未启动"
+            return {"ok": True, "detail": f"CLI 已安装 · {found}；{detail}"}
+        return {"ok": False, "detail": "未安装 IvyeaAgent"}
+
     imgflow_url = (cfg.get("imgflow_url") or "http://127.0.0.1:3001").rstrip("/")
     gbrain_bin = cfg.get("gbrain_bin") or ""
     if not gbrain_bin:
@@ -176,16 +208,17 @@ async def settings_health(_u: str = Depends(require_user)):
     # fresh install an at-a-glance answer for "why is AI not working".
     from app.services import ai_synthesis_service as _ai
     from app.services.runners import _find_bin as _fb
+    ivyea_agent_result = _check_ivyea_agent()
     _global_fb = bool(_ai.assistant_text_cfg().get("api_key"))
     _any_runner = any(_fb(n) for n in ("hermes", "codex", "claude"))
     _http_text = bool(_ai._deepseek_key() or _ai._apimart_key())
-    _text_ok = _global_fb or _any_runner or _http_text
+    _text_ok = bool(ivyea_agent_result.get("ok")) or _global_fb or _any_runner or _http_text
     _vision_ok = _ai.has_vision_capability()
     ai_chain = {
         "text": {
             "ok": _text_ok,
             "detail": "至少一个文本 AI 可用" if _text_ok
-            else "无可用文本 AI：请配置「全局兜底大模型」或安装 hermes/codex/claude 任一",
+            else "无可用文本 AI：请配置「全局兜底大模型」或 DeepSeek Key",
         },
         "global_fallback": {
             "ok": _global_fb,
@@ -201,6 +234,7 @@ async def settings_health(_u: str = Depends(require_user)):
     return {
         "version": {"ok": True, "detail": app_version()},
         "ai_chain":  ai_chain,
+        "ivyea_agent": ivyea_agent_result,
         "apimart":   _check_key("apimart_key", "API Key 已设置"),
         "sorftime":  _check_key("sorftime_key", "API Key 已设置"),
         "imgflow":   imgflow_result,

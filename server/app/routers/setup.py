@@ -22,6 +22,7 @@ from app.core.proc import no_window_kwargs
 import asyncio
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -46,7 +47,7 @@ _INSTALLABLE: dict[str, str] = {
     "codex":  "@openai/codex",
     "claude": "@anthropic-ai/claude-code",
 }
-_COMPONENTS = {"hermes", "gbrain", "ollama", "codex", "claude", "all"}
+_COMPONENTS = {"ivyea-agent", "legacy", "hermes", "gbrain", "ollama", "codex", "claude", "all"}
 _LATEST_RELEASE_API = "https://api.github.com/repos/Hector-xue/IvyeaOps/releases/latest"
 
 
@@ -88,12 +89,14 @@ def setup_status(_u: str = Depends(require_user)):
     )
 
     agents_found = {name: bool(_find_bin(name)) for name in RUNNER_ORDER}
+    ivyea_found = bool(_ivyea_bin())
+    agents_found["ivyea-agent"] = ivyea_found
     agents_found["gbrain"] = bool(shutil.which("gbrain") or (Path.home() / ".bun" / "bin" / "gbrain.exe").exists())
     agents_found["ollama"] = bool(
         shutil.which("ollama")
         or (Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe").exists()
     )
-    any_agent_found = any(agents_found.get(name) for name in RUNNER_ORDER)
+    any_agent_found = ivyea_found or any(agents_found.get(name) for name in RUNNER_ORDER)
     apimart_set: bool = bool(cfg.get("apimart_key"))
 
     # Trigger the wizard only for genuine fresh installs.
@@ -148,6 +151,47 @@ def _runtime_root() -> Path:
         if (root / "scripts" / "install-components.ps1").is_file():
             return root
     return Path(__file__).resolve().parents[3]
+
+
+def _ivyea_bin(root: Path | None = None) -> str | None:
+    found = shutil.which("ivyea")
+    if found:
+        return found
+    root = root or _runtime_root()
+    candidates = [
+        root / "server" / ".venv" / "bin" / "ivyea",
+        root / "server" / ".venv" / "Scripts" / "ivyea.exe",
+        Path(sys.executable).resolve().parent / "ivyea",
+        Path(sys.executable).resolve().parent / "ivyea.exe",
+        Path.home() / ".local" / "bin" / "ivyea",
+    ]
+    for c in candidates:
+        if c.is_file() and (sys.platform == "win32" or os.access(c, os.X_OK)):
+            return str(c)
+    return None
+
+
+def _ivyea_install_shell(root: Path) -> str:
+    local = os.environ.get("IVYEA_AGENT_LOCAL", "").strip()
+    sibling = root.parent / "ivyea-agent"
+    if not local and sibling.is_dir():
+        local = str(sibling)
+    if local and Path(local).expanduser().is_dir():
+        target = "-e " + shlex.quote(str(Path(local).expanduser()))
+    else:
+        repo = os.environ.get("IVYEA_AGENT_REPO", "https://github.com/Hector-xue/ivyea-agent.git")
+        ref = os.environ.get("IVYEA_AGENT_REF", "main")
+        target = shlex.quote(f"git+{repo}@{ref}")
+
+    py = shlex.quote(sys.executable)
+    ivyea = shlex.quote(_ivyea_bin(root) or str(Path(sys.executable).resolve().parent / "ivyea"))
+    return (
+        f"{py} -m pip install {target} && "
+        'mkdir -p "$HOME/.ivyea/knowledge" "$HOME/.ivyea/models" && '
+        f"({ivyea} self doctor || true) && "
+        f"({ivyea} retrieval sync --json >/dev/null 2>&1 || true) && "
+        f"({ivyea} self service-start --host 127.0.0.1 --port 8765 || true)"
+    )
 
 
 def _windows_update_supported(root: Path) -> bool:
@@ -446,6 +490,10 @@ async def _component_install_stream(component: str) -> AsyncGenerator[str, None]
             yield "data: __ERROR__\n\n"
             return
         cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Component", component]
+    elif component in {"all", "ivyea-agent"}:
+        cmd = ["bash", "-lc", _ivyea_install_shell(root)]
+    elif component == "legacy":
+        cmd = ["bash", "-lc", "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash; " + _GBRAIN_INSTALL_SH]
     elif component == "hermes":
         cmd = ["bash", "-lc", "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"]
     elif component == "gbrain":
@@ -463,6 +511,8 @@ async def _component_install_stream(component: str) -> AsyncGenerator[str, None]
     env = {**os.environ}
     home = Path.home()
     extra = [
+        str(root / "server" / ".venv" / "bin"),
+        str(root / "server" / ".venv" / "Scripts"),
         str(home / ".bun" / "bin"),
         str(home / ".hermes" / "bin"),
         str(home / ".hermes" / "node" / "bin"),

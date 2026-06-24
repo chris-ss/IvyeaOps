@@ -19,6 +19,7 @@ function BoardFallback() {
 import ManualModal from "../components/ManualModal";
 import UpdateModal from "../components/UpdateModal";
 import Tour from "../components/Tour";
+import IvyeaAgentDock from "../components/IvyeaAgentDock";
 import { TOURS, hasTour } from "../lib/tours";
 
 // Boards with long-running tasks (research / generation / audit). These are kept
@@ -80,8 +81,7 @@ const NAV: NavSection[] = [
     items: [
       { to: "/assistant", icon: "⊡", label: "AI 问答" },
       { to: "/imagegen", icon: "▦", label: "AI 生图" },
-      { to: "/agents", icon: "◉", label: "智能体会话", admin: true, key: "agents" },
-      { to: "/brain", icon: "▣", label: "GBrain 知识库", admin: true, key: "brain" },
+      { to: "/agents", icon: "◉", label: "外部智能体", admin: true, key: "agents" },
       { to: "/terminal", icon: "▶", label: "服务器终端", admin: true, key: "terminal" },
       { to: "/servmon", icon: "⊙", label: "服务器监控", admin: true, key: "servmon" },
     ],
@@ -118,8 +118,8 @@ const PATH_LABEL: Record<string, string> = {
   "/skill-hub": "~/Skill中心",
   "/users": "~/用户管理",
   "/skill": "~/SkillStudio",
-  "/brain": "~/GBrain知识库",
-  "/agents": "~/智能体会话",
+  "/brain": "~/知识库工作台",
+  "/agents": "~/外部智能体",
   "/agent": "~/AgentOS",
   "/terminal": "~/服务器终端",
   "/servmon": "~/服务器监控",
@@ -585,6 +585,7 @@ export default function MainLayout() {
       {tourOn && hasTour(location.pathname) && (
         <Tour steps={TOURS[location.pathname]} onClose={() => setTourOn(false)} />
       )}
+      <IvyeaAgentDock />
     </div>
   );
 }

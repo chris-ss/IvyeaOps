@@ -569,11 +569,11 @@ export default function Brain() {
 
   return (
     <div className={tab === "chat" ? "brain-page-chat" : undefined}>
-      <div className="ptitle">/ GBrain 知识库</div>
+      <div className="ptitle">/ 知识库工作台</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <span className="tag tg">LOCAL BRAIN</span>
-        {!isMobile && <span style={{ color: "var(--t2)", fontSize: 11 }}>上传 / 对话 / 编辑本地知识库：先检索 GBrain，再调用本机 Hermes 对话；不新增公网端口</span>}
+        <span className="tag tg">GBRAIN COMPAT</span>
+        {!isMobile && <span style={{ color: "var(--t2)", fontSize: 11 }}>上传 / 对话 / 编辑本地知识库：保留原 GBrain 工作流；右下角 IvyeaAgent 可一键迁移 ~/brain 到新知识库</span>}
         <button className="tbtn" onClick={() => { loadOverview(); loadFiles(); loadUploads(); loadChat(); }} style={{ marginLeft: "auto" }}>刷新</button>
       </div>
 

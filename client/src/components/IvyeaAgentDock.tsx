@@ -1,0 +1,904 @@
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
+import {
+  ArrowLeft,
+  Bot,
+  Check,
+  Database,
+  FileText,
+  History,
+  Loader2,
+  MessageCircle,
+  Plus,
+  RefreshCw,
+  Search,
+  Send,
+  Upload,
+  X,
+} from "lucide-react";
+import {
+  ivyeaAgentChat,
+  ivyeaAgentChatStream,
+  ivyeaAgentStatus,
+  ivyeaChatSession,
+  ivyeaChatSessions,
+  ivyeaKnowledgeApplyText,
+  ivyeaKnowledgeFiles,
+  ivyeaKnowledgeImportDirectory,
+  ivyeaKnowledgeSearch,
+  ivyeaKnowledgeUpload,
+  ivyeaKnowledgeWatchlist,
+  ivyeaRetrievalEmbeddings,
+  ivyeaRetrievalStatus,
+  ivyeaRetrievalSync,
+  type IvyeaAgentStatus,
+  type IvyeaChatSession,
+  type KnowledgeDirectoryImport,
+  type KnowledgeCard,
+  type KnowledgeUpload,
+  type RetrievalEmbeddings,
+  type RetrievalStatus,
+} from "../api/ivyeaAgent";
+import "../styles/ivyea-agent-dock.css";
+
+type Tab = "chat" | "knowledge" | "status";
+type HistoryView = "chat" | "list" | "detail";
+type ChatMessage = { role: "user" | "assistant" | "system"; text: string };
+type FabPosition = { x: number; y: number };
+
+const FAB_SIZE = 52;
+const FAB_MARGIN = 12;
+
+function fmtSize(n = 0) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function apiErrorMessage(e: any, fallback: string) {
+  if (e?.response?.status === 404) {
+    return "IvyeaAgent 接口未加载，请重启 IvyeaOps 后端后再试。";
+  }
+  if (e?.code === "ECONNABORTED" || String(e?.message || "").toLowerCase().includes("timeout")) {
+    return "请求等待超时，模型可能仍在生成或网络已中断，请稍后重试。";
+  }
+  return e?.response?.data?.detail || e?.message || fallback;
+}
+
+function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.ceil((seconds % 3600) / 60);
+  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
+  return `${minutes} 分钟`;
+}
+
+function usageLimitSeconds(text: string) {
+  const match = text.match(/"resets_in_seconds"\s*:\s*(\d+)/);
+  return match ? Number(match[1]) : 0;
+}
+
+function isUsageLimitError(text: string) {
+  return /usage_limit_reached|usage limit has been reached|HTTP 429/i.test(text);
+}
+
+function agentErrorMessage(detail: string) {
+  const raw = detail || "模型暂不可用";
+  if (isUsageLimitError(raw)) {
+    const wait = formatDuration(usageLimitSeconds(raw));
+    return `当前 OpenAI Codex OAuth 账号额度已用完${wait ? `，约 ${wait} 后重置` : ""}。可以先切换其它模型，或使用知识库搜索、文本入库等本地能力。`;
+  }
+  return raw.replace(/^Codex Responses stream HTTP \d+:\s*/i, "").trim() || "模型暂不可用";
+}
+
+function isKnowledgeQuestion(text: string) {
+  return /知识库|知识|embedding|向量|索引|检索|gbrain/i.test(text);
+}
+
+function cleanSessionContent(role: string, content: string) {
+  if (role === "user") return content.split("\n\n[Ivyea 本地知识检索]")[0].trim();
+  return content.trim();
+}
+
+function formatSessionTime(ts?: number) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function sessionTitle(item?: IvyeaChatSession | null) {
+  const title = (item?.preview || item?.id || "未命名会话").replace(/\s+/g, " ").trim();
+  return title.length > 56 ? `${title.slice(0, 56)}...` : title;
+}
+
+function clampFabPosition(x: number, y: number): FabPosition {
+  if (typeof window === "undefined") return { x, y };
+  const maxX = Math.max(FAB_MARGIN, window.innerWidth - FAB_SIZE - FAB_MARGIN);
+  const maxY = Math.max(FAB_MARGIN, window.innerHeight - FAB_SIZE - FAB_MARGIN);
+  return {
+    x: Math.min(Math.max(FAB_MARGIN, x), maxX),
+    y: Math.min(Math.max(FAB_MARGIN, y), maxY),
+  };
+}
+
+export default function IvyeaAgentDock() {
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
+  const [fabPos, setFabPos] = useState<FabPosition | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem("ivyea-agent-fab-pos");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<FabPosition>;
+      if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y)) return null;
+      return clampFabPosition(Number(parsed.x), Number(parsed.y));
+    } catch {
+      return null;
+    }
+  });
+  const [tab, setTab] = useState<Tab>("chat");
+  const [status, setStatus] = useState<IvyeaAgentStatus | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [sessionId, setSessionId] = useState("");
+  const [sessions, setSessions] = useState<IvyeaChatSession[]>([]);
+  const [historyView, setHistoryView] = useState<HistoryView>("chat");
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [cards, setCards] = useState<KnowledgeCard[]>([]);
+  const [uploads, setUploads] = useState<KnowledgeUpload[]>([]);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadTags, setUploadTags] = useState("");
+  const [uploadSourceType, setUploadSourceType] = useState("user");
+  const [uploading, setUploading] = useState(false);
+  const [watchlistCount, setWatchlistCount] = useState<number | null>(null);
+  const [legacyImport, setLegacyImport] = useState<KnowledgeDirectoryImport["import"] | null>(null);
+  const [legacyLoading, setLegacyLoading] = useState(false);
+  const [retrievalStatus, setRetrievalStatus] = useState<RetrievalStatus["index"] | null>(null);
+  const [embeddings, setEmbeddings] = useState<RetrievalEmbeddings["embeddings"] | null>(null);
+  const [syncingRetrieval, setSyncingRetrieval] = useState(false);
+  const [textTitle, setTextTitle] = useState("");
+  const [textBody, setTextBody] = useState("");
+  const [textTags, setTextTags] = useState("");
+  const [savingText, setSavingText] = useState(false);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fabDragRef = useRef({
+    dragging: false,
+    moved: false,
+    suppressClick: false,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+  });
+
+  const online = !!status?.available;
+  const statusTone = status?.available ? "ok" : status?.ok === false ? "bad" : "idle";
+  const currentModel = status?.health?.model?.label || status?.health?.model?.model || "未连接";
+  const activeSession = sessions.find((item) => item.id === sessionId);
+  const activeSessionName = activeSession ? sessionTitle(activeSession) : "当前会话";
+  const fabStyle: CSSProperties | undefined = fabPos
+    ? { left: fabPos.x, top: fabPos.y, right: "auto", bottom: "auto" }
+    : undefined;
+  const opsContext = useMemo(() => ({
+    pathname: location.pathname,
+    search: location.search,
+    board: location.pathname.replace(/^\/+/, "") || "home",
+  }), [location.pathname, location.search]);
+
+  const loadStatus = async () => {
+    setLoadingStatus(true);
+    try {
+      const s = await ivyeaAgentStatus();
+      setStatus(s);
+    } catch (e: any) {
+      setStatus({ ok: false, available: false, base_url: "", token_configured: false, error: apiErrorMessage(e, "状态加载失败") });
+    } finally {
+      setLoadingStatus(false);
+    }
+  };
+
+  const loadKnowledge = async () => {
+    setFilesLoading(true);
+    try {
+      const [f, w, legacy, retrieval, embedding] = await Promise.all([
+        ivyeaKnowledgeFiles(),
+        ivyeaKnowledgeWatchlist(),
+        ivyeaKnowledgeImportDirectory({ confirm: false, maxFiles: 1000 }),
+        ivyeaRetrievalStatus(),
+        ivyeaRetrievalEmbeddings(),
+      ]);
+      setCards(f.cards || []);
+      setUploads(f.history || []);
+      setWatchlistCount(w.sources?.length || 0);
+      setLegacyImport(legacy.import);
+      setRetrievalStatus(retrieval.index || null);
+      setEmbeddings(embedding.embeddings || null);
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "知识库加载失败"));
+    } finally {
+      setFilesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    loadStatus();
+    ivyeaChatSessions(30).then((data) => setSessions(data.sessions || [])).catch(() => {});
+    if (tab === "knowledge") loadKnowledge();
+  }, [open, tab]);
+
+  useEffect(() => {
+    if (!messagesRef.current) return;
+    messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+  }, [messages, sending]);
+
+  useEffect(() => {
+    const onResize = () => setFabPos((prev) => {
+      if (!prev) return prev;
+      const next = clampFabPosition(prev.x, prev.y);
+      window.localStorage.setItem("ivyea-agent-fab-pos", JSON.stringify(next));
+      return next;
+    });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const onFabPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    fabDragRef.current = {
+      dragging: true,
+      moved: false,
+      suppressClick: false,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: fabPos?.x ?? rect.left,
+      originY: fabPos?.y ?? rect.top,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onFabPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = fabDragRef.current;
+    if (!drag.dragging) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (Math.abs(dx) + Math.abs(dy) < 4 && !drag.moved) return;
+    drag.moved = true;
+    drag.suppressClick = true;
+    setFabPos(clampFabPosition(drag.originX + dx, drag.originY + dy));
+  };
+
+  const onFabPointerUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = fabDragRef.current;
+    if (!drag.dragging) return;
+    drag.dragging = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+    if (drag.moved) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const next = clampFabPosition(rect.left, rect.top);
+      setFabPos(next);
+      window.localStorage.setItem("ivyea-agent-fab-pos", JSON.stringify(next));
+    }
+  };
+
+  const onFabClick = () => {
+    if (fabDragRef.current.suppressClick) {
+      fabDragRef.current.suppressClick = false;
+      return;
+    }
+    setOpen((v) => !v);
+  };
+
+  const sendMessage = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput("");
+    setError("");
+    setSending(true);
+    setMessages((prev) => [...prev, { role: "user", text }, { role: "assistant", text: "" }]);
+    const appendAssistant = (chunk: string, replace = false) => {
+      if (!chunk) return;
+      setMessages((prev) => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i -= 1) {
+          if (next[i].role === "assistant") {
+            next[i] = { ...next[i], text: replace ? chunk : `${next[i].text}${chunk}` };
+            return next;
+          }
+        }
+        return [...next, { role: "assistant", text: chunk }];
+      });
+    };
+    const replaceAssistantWithSystem = (message: string) => {
+      setMessages((prev) => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i -= 1) {
+          if (next[i].role === "assistant") {
+            next[i] = { role: "system", text: message };
+            return next;
+          }
+        }
+        return [...next, { role: "system", text: message }];
+      });
+    };
+    const replaceAssistant = (message: string) => {
+      setMessages((prev) => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i -= 1) {
+          if (next[i].role === "assistant") {
+            next[i] = { role: "assistant", text: message };
+            return next;
+          }
+        }
+        return [...next, { role: "assistant", text: message }];
+      });
+    };
+    try {
+      let finalText = "";
+      await ivyeaAgentChatStream(
+        {
+          message: text,
+          session_id: sessionId || undefined,
+          ops_context: opsContext,
+          max_steps: 18,
+          plan_mode: true,
+          persist: true,
+          inject_retrieval: true,
+        },
+        {
+          onStart: (data) => {
+            if (data.session_id) setSessionId(data.session_id);
+          },
+          onToken: (chunk) => {
+            finalText += chunk;
+            appendAssistant(chunk);
+          },
+          onFinal: (data) => {
+            if (data.session_id) setSessionId(data.session_id);
+            const textOut = String(data.text || "");
+            if (!finalText && textOut) appendAssistant(textOut, true);
+          },
+          onError: async (data) => {
+            const raw = String(data.detail || data.error || "模型暂不可用");
+            if (isUsageLimitError(raw) && isKnowledgeQuestion(text)) {
+              replaceAssistant(await localKnowledgeAnswer(text));
+            } else {
+              replaceAssistantWithSystem(agentErrorMessage(raw));
+            }
+          },
+        },
+      );
+    } catch (e: any) {
+      try {
+        const res = await ivyeaAgentChat({
+          message: text,
+          session_id: sessionId || undefined,
+          ops_context: opsContext,
+          max_steps: 18,
+          plan_mode: true,
+          persist: true,
+          inject_retrieval: true,
+        });
+        if (res.session_id) setSessionId(res.session_id);
+        if (!res.ok) {
+          const raw = res.detail || res.error || "模型暂不可用";
+          if (isUsageLimitError(raw) && isKnowledgeQuestion(text)) {
+            replaceAssistant(await localKnowledgeAnswer(text));
+          } else {
+            replaceAssistantWithSystem(agentErrorMessage(raw));
+          }
+        } else {
+          appendAssistant(res.text || "已完成。", true);
+        }
+      } catch (fallbackError: any) {
+        replaceAssistantWithSystem(apiErrorMessage(fallbackError, apiErrorMessage(e, "发送失败")));
+      }
+    } finally {
+      setSending(false);
+      ivyeaChatSessions(30).then((data) => setSessions(data.sessions || [])).catch(() => {});
+    }
+  };
+
+  const localKnowledgeAnswer = async (question: string) => {
+    try {
+      const [f, retrieval, embedding, search] = await Promise.all([
+        ivyeaKnowledgeFiles(),
+        ivyeaRetrievalStatus(),
+        ivyeaRetrievalEmbeddings(),
+        ivyeaKnowledgeSearch(question, 20),
+      ]);
+      const allCards = f.cards || [];
+      const adPattern = /广告|amazon.?ads|sponsored|campaign|acos|bid|budget|keyword|placement|targeting|search.?term/i;
+      const adCards = allCards.filter((card) => adPattern.test([
+        card.id,
+        card.title,
+        card.path,
+        card.source_type,
+        ...(card.tags || []),
+      ].join(" ")));
+      setCards(allCards);
+      setUploads(f.history || []);
+      setRetrievalStatus(retrieval.index || null);
+      setEmbeddings(embedding.embeddings || null);
+      setResults(search.results || []);
+      const hitCount = search.results?.length || 0;
+      return [
+        "Codex 当前额度已用完，这个问题我先用本地知识库直接回答：",
+        "",
+        `- 知识卡总数：${allCards.length}`,
+        `- 广告相关知识卡：约 ${adCards.length}`,
+        `- 本次问题检索命中：${hitCount}`,
+        `- 检索索引：${retrieval.index?.chunks ?? "-"} chunks，${retrieval.index?.needs_rebuild ? "需要同步" : "已同步"}`,
+        `- Embedding：${embedding.embeddings?.semantic_enabled ? "dense" : "local sparse"}（${embedding.embeddings?.active_backend || "-"}）`,
+        "",
+        "需要完整内容时，可以切到「知识库」页搜索，或等 Codex 额度重置后让 Agent 做总结分析。",
+      ].join("\n");
+    } catch (e: any) {
+      return agentErrorMessage(apiErrorMessage(e, "Codex 额度已用完，本地知识库兜底查询也失败了。"));
+    }
+  };
+
+  const loadSessions = async () => {
+    setLoadingHistory(true);
+    setError("");
+    try {
+      const data = await ivyeaChatSessions(30);
+      setSessions(data.sessions || []);
+      setHistoryView("list");
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "历史记录加载失败"));
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const openSession = async (sid: string) => {
+    setLoadingHistory(true);
+    setError("");
+    try {
+      const data = await ivyeaChatSession(sid);
+      setSessionId(data.session.id);
+      setMessages((data.session.messages || [])
+        .filter((msg) => msg.role === "user" || msg.role === "assistant")
+        .map((msg) => ({
+          role: msg.role as "user" | "assistant",
+          text: cleanSessionContent(msg.role, msg.content),
+        }))
+        .filter((msg) => msg.text));
+      setHistoryView("detail");
+      setTab("chat");
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "打开历史会话失败"));
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const newSession = () => {
+    setSessionId("");
+    setMessages([]);
+    setHistoryView("chat");
+    setTab("chat");
+  };
+
+  const runSearch = async () => {
+    const q = query.trim();
+    if (!q || searching) return;
+    setSearching(true);
+    setError("");
+    try {
+      const data = await ivyeaKnowledgeSearch(q, 8);
+      setResults(data.results || []);
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "搜索失败"));
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const uploadFile = async () => {
+    if (!file || uploading) return;
+    setUploading(true);
+    setError("");
+    try {
+      await ivyeaKnowledgeUpload({
+        file,
+        title: uploadTitle || file.name,
+        sourceType: uploadSourceType,
+        tags: uploadTags,
+        confirm: true,
+        rebuild: true,
+      });
+      setFile(null);
+      setUploadTitle("");
+      setUploadTags("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      await loadKnowledge();
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "保存到知识库失败"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const scanLegacyGbrain = async (confirm: boolean) => {
+    setLegacyLoading(true);
+    setError("");
+    try {
+      const data = await ivyeaKnowledgeImportDirectory({ confirm, rebuild: true, maxFiles: 1000 });
+      setLegacyImport(data.import);
+      if (confirm) {
+        const f = await ivyeaKnowledgeFiles();
+        setCards(f.cards || []);
+        setUploads(f.history || []);
+      }
+    } catch (e: any) {
+      setError(apiErrorMessage(e, confirm ? "迁移旧知识库失败" : "扫描旧知识库失败"));
+    } finally {
+      setLegacyLoading(false);
+    }
+  };
+
+  const syncRetrieval = async () => {
+    if (syncingRetrieval) return;
+    setSyncingRetrieval(true);
+    setError("");
+    try {
+      const data = await ivyeaRetrievalSync();
+      setRetrievalStatus(data.index || data);
+      const embedding = await ivyeaRetrievalEmbeddings();
+      setEmbeddings(embedding.embeddings || null);
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "索引同步失败"));
+    } finally {
+      setSyncingRetrieval(false);
+    }
+  };
+
+  const saveTextKnowledge = async () => {
+    const body = textBody.trim();
+    if (!body || savingText) return;
+    setSavingText(true);
+    setError("");
+    try {
+      const data = await ivyeaKnowledgeApplyText({
+        title: textTitle.trim() || body.slice(0, 32),
+        body,
+        tags: textTags,
+        sourceType: "user",
+        rebuild: true,
+      });
+      if (!data.ok) {
+        setError(data.result?.error || "保存文本知识失败");
+        return;
+      }
+      setTextTitle("");
+      setTextBody("");
+      setTextTags("");
+      await loadKnowledge();
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "保存文本知识失败"));
+    } finally {
+      setSavingText(false);
+    }
+  };
+
+  const askWithKnowledge = () => {
+    const q = query.trim();
+    if (!q) return;
+    setInput(`请结合 IvyeaAgent 本地知识库回答：${q}`);
+    setTab("chat");
+  };
+
+  const visibleUploads = useMemo(() => uploads.slice(0, 8), [uploads]);
+  const visibleCards = useMemo(() => cards.slice(0, 8), [cards]);
+
+  return (
+    <>
+      <button
+        className={`ivyea-agent-fab ${statusTone}`}
+        style={fabStyle}
+        onPointerDown={onFabPointerDown}
+        onPointerMove={onFabPointerMove}
+        onPointerUp={onFabPointerUp}
+        onPointerCancel={onFabPointerUp}
+        onClick={onFabClick}
+        title="Ivyea Agent"
+        aria-label="Ivyea Agent"
+      >
+        <Bot size={22} />
+        <span className="ivyea-agent-fab-dot" />
+      </button>
+
+      {open && (
+        <section className="ivyea-agent-panel" aria-label="Ivyea Agent">
+          <header className="ivyea-agent-head">
+            <div className="ivyea-agent-brand">
+              <span className="ivyea-agent-mark"><Bot size={17} /></span>
+              <div>
+                <div className="ivyea-agent-title">Ivyea Agent</div>
+                <div className="ivyea-agent-sub">{online ? currentModel : status?.error || "本地服务未连接"}</div>
+              </div>
+            </div>
+            <div className="ivyea-agent-head-actions">
+              <button className="ivyea-agent-icon-btn" onClick={loadStatus} disabled={loadingStatus} title="刷新">
+                <RefreshCw size={15} className={loadingStatus ? "spin" : ""} />
+              </button>
+              <button className="ivyea-agent-icon-btn" onClick={() => setOpen(false)} title="关闭">
+                <X size={16} />
+              </button>
+            </div>
+          </header>
+
+          <nav className="ivyea-agent-tabs">
+            <button className={tab === "chat" ? "active" : ""} onClick={() => setTab("chat")}><MessageCircle size={14} />对话</button>
+            <button className={tab === "knowledge" ? "active" : ""} onClick={() => setTab("knowledge")}><Database size={14} />知识库</button>
+            <button className={tab === "status" ? "active" : ""} onClick={() => setTab("status")}><Check size={14} />状态</button>
+          </nav>
+
+          {error && <div className="ivyea-agent-error">{error}</div>}
+
+          {tab === "chat" && (
+            <div className="ivyea-agent-chat">
+              <div className="ivyea-agent-chatbar">
+                <button className="ivyea-agent-mini-btn" onClick={loadSessions} disabled={loadingHistory}>
+                  {loadingHistory ? <Loader2 size={13} className="spin" /> : <History size={13} />}历史
+                </button>
+                <button className="ivyea-agent-mini-btn" onClick={newSession}>
+                  <Plus size={13} />新会话
+                </button>
+                {sessionId && <span className="ivyea-agent-session-id">{activeSessionName}</span>}
+              </div>
+              {historyView !== "chat" ? (
+                <div className="ivyea-agent-history-view">
+                  <div className="ivyea-agent-history-head">
+                    {historyView === "detail" ? (
+                      <button className="ivyea-agent-mini-btn" onClick={() => setHistoryView("list")}>
+                        <ArrowLeft size={13} />返回历史
+                      </button>
+                    ) : (
+                      <span>历史会话</span>
+                    )}
+                    {historyView === "detail" && <span className="ivyea-agent-history-title">{activeSessionName}</span>}
+                  </div>
+                  {historyView === "list" ? (
+                    <div className="ivyea-agent-history-list">
+                      {sessions.length === 0 ? (
+                        <div className="ivyea-agent-history-empty">暂无历史会话</div>
+                      ) : sessions.map((item) => (
+                        <button
+                          key={item.id}
+                          className="ivyea-agent-history-item"
+                          onClick={() => openSession(item.id)}
+                          title={`${sessionTitle(item)}${formatSessionTime(item.updated) ? ` · ${formatSessionTime(item.updated)}` : ""}`}
+                        >
+                          <span>{sessionTitle(item)}</span>
+                          <em>{formatSessionTime(item.updated) || "最近"} · {item.turns || 0} 轮</em>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="ivyea-agent-messages ivyea-agent-history-messages" ref={messagesRef}>
+                      {messages.length === 0 ? (
+                        <div className="ivyea-agent-empty">这个会话暂无内容</div>
+                      ) : messages.map((m, idx) => (
+                        <div key={idx} className={`ivyea-agent-msg ${m.role}`}>
+                          <div>{m.text}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="ivyea-agent-messages" ref={messagesRef}>
+                    {messages.length === 0 && (
+                      <div className="ivyea-agent-empty">
+                        <Bot size={22} />
+                        <span>亚马逊运营、Listing、广告、知识库和代码任务都可以问。</span>
+                      </div>
+                    )}
+                    {messages.map((m, idx) => (
+                      <div key={idx} className={`ivyea-agent-msg ${m.role}`}>
+                        <div>{m.text}</div>
+                      </div>
+                    ))}
+                    {sending && <div className="ivyea-agent-msg assistant"><Loader2 size={14} className="spin" /> 处理中...</div>}
+                  </div>
+                  <div className="ivyea-agent-composer">
+                    <textarea
+                      rows={1}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage();
+                        }
+                      }}
+                      placeholder="问 Ivyea Agent..."
+                    />
+                    <button onClick={sendMessage} disabled={!input.trim() || sending}><Send size={16} /></button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {tab === "knowledge" && (
+            <div className="ivyea-agent-knowledge">
+              <div className="ivyea-agent-kb-row">
+                <div className="ivyea-agent-kb-stat"><b>{cards.length}</b><span>知识卡</span></div>
+                <div className="ivyea-agent-kb-stat"><b>{uploads.length}</b><span>上传</span></div>
+                <div className="ivyea-agent-kb-stat"><b>{watchlistCount ?? "-"}</b><span>来源</span></div>
+                <button className="ivyea-agent-mini-btn" onClick={loadKnowledge} disabled={filesLoading}>
+                  <RefreshCw size={13} className={filesLoading ? "spin" : ""} />刷新
+                </button>
+              </div>
+
+              <div className="ivyea-agent-kb-pills">
+                <div className="ivyea-agent-kb-pill">
+                  <b>对话引用</b>
+                  <span>已开启</span>
+                </div>
+                <div className="ivyea-agent-kb-pill">
+                  <b>索引</b>
+                  <span>{retrievalStatus?.chunks ?? "-"} chunks{retrievalStatus?.needs_rebuild ? " · 待同步" : ""}</span>
+                </div>
+                <div className="ivyea-agent-kb-pill">
+                  <b>Embedding</b>
+                  <span>{embeddings?.semantic_enabled ? "dense" : "local sparse"} · {embeddings?.active_backend || "-"}</span>
+                </div>
+                <button className="ivyea-agent-mini-btn" onClick={syncRetrieval} disabled={syncingRetrieval}>
+                  {syncingRetrieval ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}同步索引
+                </button>
+              </div>
+
+              <div className="ivyea-agent-section ivyea-agent-legacy">
+                <div className="ivyea-agent-section-title"><Database size={14} />GBrain 旧知识迁移</div>
+                <div className="ivyea-agent-legacy-meta">
+                  <span>旧目录：{legacyImport?.root || "~/brain"}</span>
+                  <span>可迁移 {legacyImport?.summary?.candidate_files ?? "-"} 个</span>
+                  <span>新增 {legacyImport?.summary?.create ?? 0} / 更新 {legacyImport?.summary?.update ?? 0} / 已同步 {legacyImport?.summary?.noop ?? 0}</span>
+                </div>
+                <div className="ivyea-agent-legacy-actions">
+                  <button className="ivyea-agent-mini-btn" onClick={() => scanLegacyGbrain(false)} disabled={legacyLoading}>
+                    {legacyLoading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}扫描旧知识
+                  </button>
+                  <button
+                    className="ivyea-agent-primary"
+                    onClick={() => scanLegacyGbrain(true)}
+                    disabled={legacyLoading || !legacyImport || ((legacyImport.summary?.create || 0) + (legacyImport.summary?.update || 0) <= 0)}
+                  >
+                    {legacyLoading ? <Loader2 size={14} className="spin" /> : <Check size={14} />}迁移到 IvyeaAgent
+                  </button>
+                  <a className="ivyea-agent-mini-btn" href="/brain">完整工作台</a>
+                </div>
+                {legacyImport?.candidates?.slice(0, 3).map((item) => (
+                  <div className="ivyea-agent-file" key={item.card_id}>
+                    <span>{item.title || item.source_path}</span>
+                    <em>{item.action} · {item.source_path}</em>
+                  </div>
+                ))}
+              </div>
+
+              <div className="ivyea-agent-section">
+                <div className="ivyea-agent-section-title"><Upload size={14} />上传文档</div>
+                <label className="ivyea-agent-file-picker">
+                  <input ref={fileInputRef} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                  <span><Upload size={14} />选择文件</span>
+                  <em>{file ? file.name : "未选择文件"}</em>
+                </label>
+                <div className="ivyea-agent-grid2">
+                  <input className="ivyea-agent-input" value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="标题" />
+                  <select className="ivyea-agent-input" value={uploadSourceType} onChange={(e) => setUploadSourceType(e.target.value)}>
+                    <option value="user">用户知识</option>
+                    <option value="official">官方摘要</option>
+                    <option value="community">社区经验</option>
+                  </select>
+                </div>
+                <input className="ivyea-agent-input" value={uploadTags} onChange={(e) => setUploadTags(e.target.value)} placeholder="标签，逗号分隔" />
+                <button className="ivyea-agent-primary" onClick={uploadFile} disabled={!file || uploading}>
+                  {uploading ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}保存到知识库
+                </button>
+              </div>
+
+              <div className="ivyea-agent-section">
+                <div className="ivyea-agent-section-title"><FileText size={14} />粘贴文本</div>
+                <input className="ivyea-agent-input" value={textTitle} onChange={(e) => setTextTitle(e.target.value)} placeholder="标题" />
+                <input className="ivyea-agent-input" value={textTags} onChange={(e) => setTextTags(e.target.value)} placeholder="标签，逗号分隔" />
+                <textarea
+                  className="ivyea-agent-input ivyea-agent-textarea"
+                  value={textBody}
+                  onChange={(e) => setTextBody(e.target.value)}
+                  placeholder="粘贴运营方法论、FAQ、广告规则或复盘内容"
+                />
+                <button className="ivyea-agent-primary" onClick={saveTextKnowledge} disabled={!textBody.trim() || savingText}>
+                  {savingText ? <Loader2 size={14} className="spin" /> : <Check size={14} />}保存到知识库
+                </button>
+              </div>
+
+              <div className="ivyea-agent-section">
+                <div className="ivyea-agent-section-title"><Search size={14} />搜索 / 问答</div>
+                <div className="ivyea-agent-search">
+                  <input className="ivyea-agent-input" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runSearch()} placeholder="搜索知识库" />
+                  <button className="ivyea-agent-mini-btn" onClick={runSearch} disabled={!query.trim() || searching}>{searching ? <Loader2 size={13} className="spin" /> : <Search size={13} />}</button>
+                </div>
+                <div className="ivyea-agent-search-actions">
+                  <button className="ivyea-agent-mini-btn" onClick={askWithKnowledge} disabled={!query.trim()}>
+                    <MessageCircle size={13} />问智能体
+                  </button>
+                </div>
+                {results.map((r, idx) => (
+                  <div className="ivyea-agent-result" key={`${r.id || idx}`}>
+                    <b>{r.title || r.id}</b>
+                    <span>{r.snippet || r.source_type || ""}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="ivyea-agent-section">
+                <div className="ivyea-agent-section-title"><FileText size={14} />最近文件</div>
+                {visibleUploads.map((u) => (
+                  <div className="ivyea-agent-file" key={u.id}>
+                    <span>{u.title || u.filename}</span>
+                    <em>{fmtSize(u.size)} · {u.import_status || "draft"}</em>
+                  </div>
+                ))}
+                {visibleCards.map((c) => (
+                  <div className="ivyea-agent-file" key={c.id}>
+                    <span>{c.title || c.id}</span>
+                    <em>{c.source_type || "user"} · {c.path || c.id}</em>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === "status" && (
+            <div className="ivyea-agent-status">
+              <div className="ivyea-agent-status-card">
+                <span>连接</span>
+                <b>{online ? "已连接" : "未连接"}</b>
+              </div>
+              <div className="ivyea-agent-status-card">
+                <span>地址</span>
+                <b>{status?.base_url || "-"}</b>
+              </div>
+              <div className="ivyea-agent-status-card">
+                <span>模型</span>
+                <b>{currentModel}</b>
+              </div>
+              <div className="ivyea-agent-status-card">
+                <span>知识目录</span>
+                <b>{status?.health?.data_dir ? `${status.health.data_dir}/knowledge` : "-"}</b>
+              </div>
+              <button className="ivyea-agent-primary" onClick={loadStatus} disabled={loadingStatus}>
+                {loadingStatus ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}刷新状态
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+    </>
+  );
+}

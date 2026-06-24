@@ -94,33 +94,34 @@ def _deepseek_key() -> str:
 # safe for non-admin users and acts as the standard chain's fallback step.
 # NOTE: apimart is IMAGE-GEN ONLY (no text/chat endpoint) — it must NOT appear
 # in any text chain; calling its /v1/messages returns 403.
-_VALID_TEXT_PROVIDERS = ("hermes", "codex", "claude", "deepseek", "assistant")
+_VALID_TEXT_PROVIDERS = ("ivyea-agent", "hermes", "codex", "claude", "deepseek", "assistant")
 
 
 # Providers safe for non-admin users: pure HTTP APIs, no local CLI / shell / MCP.
-_HTTP_ONLY_PROVIDERS = ("deepseek", "assistant")
+_HTTP_ONLY_PROVIDERS = ("ivyea-agent", "deepseek", "assistant")
 
 
 def _text_provider_chain() -> list[str]:
     """Parse the comma-separated text_ai_providers setting and filter to
-    known names. Empty / malformed config falls back to deepseek-first order.
+    known names. Empty / malformed config falls back to the built-in-safe order.
 
     SECURITY: for non-admin users, the chain is forced to HTTP-only providers
     (deepseek / apimart) so a user request can NEVER spawn a local CLI agent
     (hermes/codex/claude) with shell / MCP / filesystem access."""
     from app.core import hub_settings
-    # Standard chain: Hermes first, then the global fallback model, then the
-    # local CLI agents. Hermes/Codex/Claude unavailable → automatically degrades.
+    # Standard chain: IvyeaAgent first, then global fallback / HTTP DeepSeek,
+    # then optional external CLI agents. Hermes remains supported, but is no
+    # longer the default deployment dependency.
     raw = str(hub_settings.get("text_ai_providers") or "").strip()
     if not raw:
-        chain = ["hermes", "assistant", "codex", "claude"]
+        chain = ["ivyea-agent", "assistant", "deepseek", "codex", "claude"]
     else:
         out: list[str] = []
         for p in raw.split(","):
             p = p.strip().lower()
             if p in _VALID_TEXT_PROVIDERS and p not in out:
                 out.append(p)
-        chain = out or ["hermes", "assistant", "codex", "claude"]
+        chain = out or ["ivyea-agent", "assistant", "deepseek", "codex", "claude"]
 
     # Non-admin (and only when a request context is set) → HTTP-only, with the
     # global fallback model first (it is the configured, safe default).
@@ -129,7 +130,7 @@ def _text_provider_chain() -> list[str]:
         cu = current_user.get()
         if cu is not None and cu.get("role") != "admin":
             http = [p for p in chain if p in _HTTP_ONLY_PROVIDERS]
-            return http or ["assistant", "deepseek"]
+            return http or ["ivyea-agent", "assistant", "deepseek"]
     except Exception:
         pass
     return chain
@@ -810,11 +811,36 @@ async def generate_text(prompt: str) -> str:
     """Plain text-only LLM generation — NO tools, NO Sorftime MCP.
 
     For tasks that just need the model to write text (e.g. authoring a
-    SKILL.md from a description). Tries DeepSeek first, then Apimart. This is
+    SKILL.md from a description). Tries IvyeaAgent / configured HTTP models first,
+    then legacy fallbacks. This is
     deliberately separate from ``synthesize_native``, which injects sorftime
     tool-calling templates and would (wrongly) try to fetch market data.
     """
     failures: list[str] = []
+
+    if "ivyea-agent" in _text_provider_chain():
+        try:
+            parts: list[str] = []
+            async for chunk in _stream_ivyea_agent(prompt):
+                parts.append(chunk)
+            text = "".join(parts).strip()
+            if text:
+                return text
+            failures.append("IvyeaAgent 返回空")
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"IvyeaAgent: {exc}")
+
+    if "assistant" in _text_provider_chain() and assistant_text_cfg().get("api_key"):
+        try:
+            parts = []
+            async for chunk in stream_assistant_prompt(prompt):
+                parts.append(chunk)
+            text = "".join(parts).strip()
+            if text:
+                return text
+            failures.append("全局兜底大模型返回空")
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"全局兜底大模型: {exc}")
 
     dkey = _deepseek_key()
     if dkey:
@@ -859,17 +885,35 @@ async def generate_text(prompt: str) -> str:
 
     raise RuntimeError(
         "无可用文本模型。" + (" / ".join(failures) if failures else
-        "请在「系统配置」配置 DeepSeek / Apimart key 或全局兜底大模型。")
+        "请在「系统配置」配置 IvyeaAgent / 全局兜底大模型 / DeepSeek。")
     )
 
 
 async def generate_text_provider(provider: str, prompt: str) -> str:
-    """Generate text via a SPECIFIC HTTP provider ('deepseek' | 'apimart').
+    """Generate text via a SPECIFIC safe provider.
 
     Raises if that provider isn't configured/usable — caller can fall back. Used
     for heterogeneous multi-model review (different personas → different models).
     """
     provider = (provider or "").lower().strip()
+    if provider == "ivyea-agent":
+        parts: list[str] = []
+        async for chunk in _stream_ivyea_agent(prompt):
+            parts.append(chunk)
+        text = "".join(parts).strip()
+        if not text:
+            raise RuntimeError("IvyeaAgent 返回空")
+        return text
+    if provider == "assistant":
+        if not assistant_text_cfg().get("api_key"):
+            raise RuntimeError("全局兜底大模型未配置")
+        parts = []
+        async for chunk in stream_assistant_prompt(prompt):
+            parts.append(chunk)
+        text = "".join(parts).strip()
+        if not text:
+            raise RuntimeError("全局兜底大模型返回空")
+        return text
     if provider == "deepseek":
         dkey = _deepseek_key()
         if not dkey:
@@ -925,11 +969,17 @@ ASSISTANT_PROVIDER_BASE = {
 
 
 def has_text_provider() -> bool:
-    """True when at least one HTTP text provider (DeepSeek / Apimart / the global
+    """True when at least one text provider (IvyeaAgent / DeepSeek / Apimart / global
     fallback model) is configured — i.e. ``generate_text`` can answer even when
     no local agent CLI (Hermes/Codex/Claude) is installed."""
     try:
-        return bool(_deepseek_key() or _apimart_key() or assistant_text_cfg().get("api_key"))
+        from app.services import ivyea_agent_service as ivyea
+        return bool(
+            ivyea.availability().get("available")
+            or _deepseek_key()
+            or _apimart_key()
+            or assistant_text_cfg().get("api_key")
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -1027,6 +1077,76 @@ async def _try_assistant(prompt: str, failures: list[str]) -> AsyncGenerator[tup
     except Exception as exc:  # noqa: BLE001
         failures.append(f"全局兜底模型调用失败：{exc}")
         _log.warning("assistant fallback failed: %s", exc)
+
+
+async def _stream_ivyea_agent(prompt: str) -> AsyncGenerator[str, None]:
+    """Stream text from the embedded IvyeaAgent service."""
+    from app.services import ivyea_agent_service as ivyea
+
+    status = await asyncio.to_thread(ivyea.ensure_available)
+    if not status.get("available"):
+        raise RuntimeError(status.get("error") or "IvyeaAgent 服务未连接")
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    token = ivyea._token()  # same bridge auth path; secret never leaves backend
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    payload = {
+        "message": prompt,
+        "max_steps": 8,
+        "plan_mode": True,
+        "persist": True,
+        "inject_retrieval": True,
+        "system": (
+            "你正在作为 IvyeaOps 的内置文本生成引擎。"
+            "除非用户明确要求工具诊断，否则直接基于输入数据生成最终报告。"
+        ),
+    }
+    got_token = False
+    final_text = ""
+    event = "message"
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as client:
+        async with client.stream("POST", f"{ivyea.base_url()}/v1/chat/stream", json=payload, headers=headers) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line:
+                    event = "message"
+                    continue
+                if line.startswith("event:"):
+                    event = line[6:].strip() or "message"
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    data = json.loads(line[5:].strip() or "{}")
+                except Exception:
+                    continue
+                if event == "token":
+                    text = str(data.get("text") or "")
+                    if text:
+                        got_token = True
+                        yield text
+                elif event == "final":
+                    final_text = str(data.get("text") or "")
+                elif event == "error":
+                    raise RuntimeError(str(data.get("detail") or data.get("error") or data))
+    if not got_token and final_text:
+        yield final_text
+
+
+async def _try_ivyea_agent(prompt: str, failures: list[str]) -> AsyncGenerator[tuple[str, str], None]:
+    yield "_attempt", "ivyea-agent"
+    try:
+        got = False
+        async for chunk in _stream_ivyea_agent(prompt):
+            got = True
+            yield "ivyea-agent", chunk
+        if not got:
+            failures.append("IvyeaAgent 返回空")
+        return
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"IvyeaAgent 调用失败：{exc}")
+        _log.warning("ivyea-agent failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1216,40 +1336,54 @@ async def stream_text(prompt: str) -> AsyncGenerator[tuple[str, str], None]:
     """Streaming counterpart of ``generate_text``: yields (provider, chunk).
 
     For llm-only skill execution where we want token-by-token UX but NO tools /
-    MCP. Tries DeepSeek then Apimart. On total failure yields ('error', detail).
+    MCP. Uses the configured safe text chain first. On total failure yields
+    ('error', detail).
     """
     failures: list[str] = []
+    tried: set[str] = set()
 
-    dkey = _deepseek_key()
-    if dkey:
-        try:
-            got = False
-            async for chunk in _stream_openai_compat(
-                dkey, "https://api.deepseek.com", "deepseek-chat", prompt
-            ):
-                got = True
-                yield "deepseek", chunk
-            if got:
-                return
-            failures.append("DeepSeek 返回空")
-        except Exception as exc:  # noqa: BLE001
-            failures.append(f"DeepSeek: {exc}")
+    async def _run_provider(provider: str) -> AsyncGenerator[tuple[str, str], None]:
+        tried.add(provider)
+        if provider == "ivyea-agent":
+            gen = _try_ivyea_agent(prompt, failures)
+        elif provider == "assistant":
+            gen = _try_assistant(prompt, failures)
+        elif provider == "deepseek":
+            gen = _try_deepseek(prompt, failures)
+        elif provider == "apimart":
+            gen = _try_apimart(prompt, failures)
+        else:
+            return
+        async for prov, chunk in gen:
+            if prov == "_attempt":
+                continue
+            yield prov, chunk
 
-    if _apimart_key():
-        try:
-            got = False
-            async for chunk in _stream_apimart(prompt):
-                got = True
-                yield "claude", chunk
-            if got:
-                return
-            failures.append("Apimart 返回空")
-        except Exception as exc:  # noqa: BLE001
-            failures.append(f"Apimart: {exc}")
+    for provider in [p for p in _text_provider_chain() if p in ("ivyea-agent", "assistant", "deepseek", "apimart")]:
+        if provider in tried:
+            continue
+        got = False
+        async for prov, chunk in _run_provider(provider):
+            got = True
+            yield prov, chunk
+        if got:
+            return
+
+    # Legacy fallback: keep Apimart reachable for older configs that still
+    # expect it, even though it is no longer part of the default text chain.
+    for provider in ("ivyea-agent", "assistant", "deepseek", "apimart"):
+        if provider in tried:
+            continue
+        got = False
+        async for prov, chunk in _run_provider(provider):
+            got = True
+            yield prov, chunk
+        if got:
+            return
 
     yield "error", (
         "无可用文本模型。"
-        + (" / ".join(failures) if failures else "请在「系统配置」配置 DeepSeek 或 Apimart key。")
+        + (" / ".join(failures) if failures else "请在「系统配置」配置 IvyeaAgent / 全局兜底大模型 / DeepSeek。")
     )
 
 
@@ -1510,7 +1644,7 @@ async def synthesize(
     """Async generator yielding (provider_name, text_chunk) tuples.
 
     Provider order is read from hub_settings.text_ai_providers (default
-    'deepseek,hermes,codex,claude'). deepseek uses true HTTP streaming so
+    'assistant,deepseek,codex,claude'). deepseek uses true HTTP streaming so
     tokens arrive immediately; CLI runners buffer their output internally and
     are kept as fallbacks. On total failure, yields ('error', diagnostic_text).
     """
@@ -1519,7 +1653,9 @@ async def synthesize(
     chain = _text_provider_chain()
 
     for provider in chain:
-        if provider == "deepseek":
+        if provider == "ivyea-agent":
+            gen = _try_ivyea_agent(prompt, failures)
+        elif provider == "deepseek":
             gen = _try_deepseek(prompt, failures)
         elif provider == "apimart":
             gen = _try_apimart(prompt, failures)
@@ -1590,7 +1726,9 @@ async def run_text_chain(
     chain = order or _text_provider_chain()
     failures: list[str] = []
     for provider in chain:
-        if provider == "deepseek":
+        if provider == "ivyea-agent":
+            gen = _try_ivyea_agent(prompt, failures)
+        elif provider == "deepseek":
             gen = _try_deepseek(prompt, failures)
         elif provider == "apimart":
             gen = _try_apimart(prompt, failures)

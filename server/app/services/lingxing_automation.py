@@ -245,7 +245,7 @@ async def run_once(trigger: str = "manual") -> Dict[str, Any]:
 
             from app.services import lingxing_operate as _op
             prompt = _build_prompt(metrics, days, max_pct)
-            provider = _hs.get("lingxing_analysis_provider") or "deepseek"
+            provider = _hs.get("lingxing_analysis_provider") or "ivyea-agent"
             try:
                 raw = await _op._review_generate(provider, prompt)
             except Exception:  # noqa: BLE001 — configured provider unavailable → default chain
