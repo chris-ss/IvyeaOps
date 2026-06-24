@@ -261,6 +261,38 @@ async def _source_to_bytes(url: str) -> tuple[bytes, str]:
         return r.content, (r.headers.get("content-type") or "image/png").split(";")[0]
 
 
+_BACKPRESSURE = ("try again", "please wait", "rate limit", "too many", "overload", "busy")
+
+
+def _upstream_message(body: str) -> str:
+    """Pull the human-readable message out of an upstream error body; '' for HTML pages."""
+    body = (body or "").strip()
+    if body[:1] == "<" or "<html" in body[:200].lower():
+        return ""  # Cloudflare/HTML gateway page — useless to the user.
+    try:
+        j = json.loads(body)
+        if isinstance(j, dict):
+            err = j.get("error")
+            if isinstance(err, dict) and err.get("message"):
+                return str(err["message"])
+            if isinstance(err, str) and err:
+                return err
+            if j.get("message"):
+                return str(j["message"])
+    except Exception:
+        pass
+    return body
+
+
+def _edit_error_text(status: int, body: str) -> str:
+    msg = _upstream_message(body)
+    tail = ("：" + msg[:180]) if msg else ""
+    # 502/503/504 = gateway timeout; 429 or an explicit "please wait" = provider overload.
+    if status in (429, 502, 503, 504) or any(s in msg.lower() for s in _BACKPRESSURE):
+        return f"编辑失败：生图上游（Apimart）繁忙或超时，请稍后再试{tail}"
+    return f"编辑失败 HTTP {status}{tail}"
+
+
 async def _run_edit_job(job_id: str, model: str, prompt: str, size: str, key: str, base: str, image_url: str) -> None:
     ts = _EDIT_JOBS.get(job_id, {}).get("ts", time.time())
     try:
@@ -268,11 +300,31 @@ async def _run_edit_job(job_id: str, model: str, prompt: str, size: str, key: st
         ext = "jpg" if ("jpe" in mime or "jpg" in mime) else ("webp" if "webp" in mime else "png")
         files = {"image": (f"source.{ext}", img, mime or "image/png")}
         data = {"model": model, "prompt": prompt, "size": size, "n": "1"}
-        async with httpx.AsyncClient(timeout=httpx.Timeout(280, connect=10)) as c:
-            r = await c.post(f"{base}/images/edits", data=data, files=files,
-                             headers={"Authorization": f"Bearer {key}"})
+        # /images/edits is slow and its gateway intermittently returns 5xx/504; retry transient failures.
+        r = None
+        last = ""
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(280, connect=10)) as c:
+                    r = await c.post(f"{base}/images/edits", data=data, files=files,
+                                     headers={"Authorization": f"Bearer {key}"})
+                if r.status_code < 500:
+                    break  # success or 4xx (won't get better by retrying)
+                # Explicit provider backpressure ("please wait / try again later"): an
+                # immediate retry won't help and just hammers an overloaded upstream — stop.
+                if any(s in (r.text or "").lower() for s in _BACKPRESSURE):
+                    break
+                last = f"HTTP {r.status_code}"
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                r = None
+                last = str(e) or e.__class__.__name__
+            if attempt < 2:
+                await asyncio.sleep(2 * (attempt + 1))
+        if r is None:
+            _EDIT_JOBS[job_id] = {"status": "failed", "images": [], "error": f"编辑失败：连接生图上游超时（{last}），请稍后重试", "ts": ts}
+            return
         if r.status_code >= 400:
-            _EDIT_JOBS[job_id] = {"status": "failed", "images": [], "error": f"编辑失败 HTTP {r.status_code}：{r.text[:200]}", "ts": ts}
+            _EDIT_JOBS[job_id] = {"status": "failed", "images": [], "error": _edit_error_text(r.status_code, r.text), "ts": ts}
             return
         images: list[str] = []
         for item in (r.json().get("data") or []):
