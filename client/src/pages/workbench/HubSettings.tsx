@@ -826,14 +826,17 @@ export default function HubSettings() {
         keys={["apimart_key", "apimart_base", "image_model", "image_api_key", "image_base_url"]}
         vals={vals} onSave={save}
       >
-        <div className="hs-row3">
-          <Field
-            label={<><Tag kind="rec">推荐</Tag>Apimart API Key</>}
-            hint={<>Listing 图片生成、图片翻译和 AI 生图共用此 Key。</>}
-          >
+        <Field
+          label={<><Tag kind="rec">推荐</Tag>Apimart API Key</>}
+          hint={<>Listing 图片生成、图片翻译和 AI 生图共用此 Key。</>}
+        >
+          <div className="hs-key-inline">
             <SecretInput value={vals.apimart_key} onChange={v => set("apimart_key", v)} placeholder="sk-..." />
             <TestButton settingKey="apimart_key" value={vals.apimart_key} label="测试" />
-          </Field>
+          </div>
+        </Field>
+
+        <div className="hs-row2">
           <Field label="模型名称" hint="默认 gpt-image-2">
             <TxtInput value={vals.image_model} onChange={v => set("image_model", v)} placeholder="gpt-image-2" />
           </Field>
