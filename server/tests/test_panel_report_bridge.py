@@ -52,6 +52,30 @@ def test_playbook_generate_report_persists_to_history(tmp_path, monkeypatch):
     assert len(playbook.get_history(_user="bridge")) == 1
 
 
+def test_deep_generate_report_persists_to_history(tmp_path, monkeypatch):
+    import app.routers.deep_analysis as da
+    from app.services import sif_service
+    monkeypatch.setattr(da, "_history_db_path", lambda: str(tmp_path / "dh.sqlite3"))
+
+    async def fake_kw(q, c, a):
+        return {"top": [{"asin": "B0", "share": 0.1}]}
+
+    monkeypatch.setattr(sif_service, "keyword_competition", fake_kw)
+
+    async def fake_gen(prompt, skip_agent=False):
+        assert skip_agent is True
+        return "# 关键词竞争分析报告\n正文"
+
+    monkeypatch.setattr(ai_synthesis_service, "generate_text", fake_gen)
+
+    res = asyncio.run(ivyea_ops_tools.call_tool(
+        "deep_generate_report", {"tool": "keyword", "query": "yoga mat"}))
+    assert res["ok"] is True
+    assert res["result"]["saved_to"] == "deep_analysis_history"
+    hist = da.get_history(_user="bridge")
+    assert len(hist) == 1 and hist[0]["tool"] == "keyword" and hist[0]["report"]
+
+
 def test_synthesize_skip_agent_excludes_ivyea_agent(monkeypatch):
     monkeypatch.setattr(ai_synthesis_service, "_text_provider_chain", lambda: ["ivyea-agent", "deepseek"])
     monkeypatch.setattr(ai_synthesis_service, "_build_prompt", lambda *a: "p")

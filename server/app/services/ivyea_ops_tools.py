@@ -359,6 +359,23 @@ async def _deep_traffic(args: dict[str, Any]) -> Any:
     ))
 
 
+async def _deep_history(args: dict[str, Any]) -> Any:
+    from app.routers import deep_analysis
+    return deep_analysis.get_history(_user="bridge")
+
+
+async def _deep_generate_report(args: dict[str, Any]) -> Any:
+    from app.routers import deep_analysis
+    tool = str(args.get("tool") or "").strip().lower()
+    query = str(args.get("query") or args.get("asin") or args.get("keyword") or "").strip()
+    if not query:
+        raise ValueError("query (keyword or ASIN) is required")
+    res = await deep_analysis.generate_report(tool, query, str(args.get("country") or "US").strip().upper())
+    return {"id": res["id"], "tool": res["tool"], "title": res["title"], "query": res["query"],
+            "country": res["country"], "elapsed_s": res["elapsed_s"],
+            "saved_to": "deep_analysis_history", "report": _limit(res["report"], 12000)}
+
+
 async def _news_latest(args: dict[str, Any]) -> Any:
     from app.routers import news
     return news.list_news(date=str(args.get("date") or "") or None, category=str(args.get("category") or "") or None, _user="bridge")
@@ -490,6 +507,14 @@ TOOLS: tuple[OpsTool, ...] = (
     OpsTool("deep_competitor_lookup", "tools", "竞品流量词反查", "调用深度分析工具箱反查 ASIN 关键词信号。", _obj(
         asin=_str("ASIN"), country=_str(default="US"), time_type=_str(default="lately"), time_value=_str(default="7"),
     ), _deep_competitor, long_running=True),
+    OpsTool("deep_analysis_history", "tools", "分析工具历史", "读取分析工具板块的历史分析报告。", _obj(), _deep_history),
+    OpsTool("deep_generate_report", "tools", "生成分析报告",
+            "跑一项深度分析(关键词竞争/竞品反查/流量诊断)并 AI 合成 Markdown 报告，"
+            "保存到「分析工具」板块历史。用户要做这类分析/出报告时用它。", _obj(
+                tool=_str("keyword(关键词竞争) / competitor(竞品反查) / traffic(流量诊断)"),
+                query=_str("关键词(keyword 时) 或 ASIN(competitor/traffic 时)"),
+                country=_str("站点，如 US/UK", default="US")),
+            _deep_generate_report, long_running=True),
     OpsTool("deep_traffic_diagnosis", "tools", "流量异动诊断", "调用深度分析工具箱诊断 ASIN 流量异常。", _obj(
         asin=_str("ASIN"), country=_str(default="US"),
     ), _deep_traffic, long_running=True),
