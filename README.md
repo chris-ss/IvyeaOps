@@ -136,6 +136,7 @@ Listing 制作、AI 生图、市场调研、深度分析、广告优化（含领
 | **市场调研** | 关键词 / 竞品 / 类目洞察，结合数据源 + AI 综合分析 |
 | **打法推荐** | 按品类给出运营策略建议 |
 | **Listing 工作台** | ASIN → 标题 · 五点 · 描述；AI 文案与改写 |
+| **一键图片翻译** | 多站点卖家：一套图 → 多语言 → 多站点；上传或从图片工作区选图，按目标站点语言批量翻译图上文字（产品/版式/配色不变） |
 | **分析工具（深度分析）** | 竞品速查 · 关键词竞争 · Listing 重写 · 评论聚类 · 流量诊断 |
 | **领星 ERP** | 经官方 OpenAPI 接入领星：数据浏览 / 大盘 / 广告优化引擎 / 自动化建议 / 受控写操作 / 审计（见下文专章） |
 | **Skill 中心 / 想法工坊** | 一句话生成 Skill（多阶段严谨生成 + 自检修复）、Tool Spec 可视化、执行历史、审核制一键修复 |
@@ -145,7 +146,7 @@ Listing 制作、AI 生图、市场调研、深度分析、广告优化（含领
 |---|---|
 | **AI 问答** | 浏览器内通用 AI 问答助手 |
 | **AI 生图** | Prompt → 批量主图 / 场景图（图像工作流） |
-| **智能体会话** | 原生移植 claudecodeui 体验：Claude 走 stream-json 结构化输出、会话 resume、工具调用可视化、终端 |
+| **外部智能体** | 原生移植 claudecodeui 体验：Claude 走 stream-json 结构化输出、会话 resume、工具调用可视化、终端 |
 | **IvyeaAgent 知识库** | 右下角可视化上传文档、搜索与本地检索；文件保存在 `~/.ivyea/knowledge` |
 | **服务器终端** | 浏览器内 PTY 多终端会话（仅 Linux） |
 | **服务器监控** | CPU / 进程 / 日志等资源一屏掌握，含告警 |
@@ -326,7 +327,7 @@ IvyeaOps 默认内置 IvyeaAgent：右下角常驻图标提供会话、知识库
 | **Hermes Agent** | 旧兼容 / 可选增强，支持 MCP / 工具调用 / Skill |
 | **GBrain** | 知识库工作台兼容 CLI；IvyeaAgent 可一键继承 `~/brain` 到 `~/.ivyea/knowledge` |
 | **Ollama** | 可选本地模型运行环境；用于旧 GBrain embedding 或其他本地模型工作流 |
-| **Claude Code** | 「智能体会话」原生移植 claudecodeui，走 stream-json 结构化输出，支持会话 resume、工具调用可视化 |
+| **Claude Code** | 「外部智能体」原生移植 claudecodeui，走 stream-json 结构化输出，支持会话 resume、工具调用可视化 |
 | **Codex** *(可选)* | OpenAI Codex CLI；如不使用可忽略 |
 
 安装后 IvyeaOps 会从 `$PATH` 自动探测，多数情况下无需手动配置路径。
@@ -386,7 +387,7 @@ IvyeaOps/
 ├── client/                React + Vite 前端（TypeScript）
 │   └── src/
 │       ├── pages/workbench/   各工作台板块
-│       ├── agents/            「智能体会话」原生移植子应用
+│       ├── agents/            「外部智能体」原生移植子应用
 │       ├── components/        通用组件
 │       ├── layouts/           侧边栏 / 主框架
 │       └── api/               类型化 API 客户端
@@ -422,7 +423,7 @@ IvyeaOps/
 
 IvyeaOps 站在不少优秀开源项目之上，特此致谢：
 
-- **[claudecodeui](https://github.com/siteboon/claudecodeui)**（**AGPL-3.0**）—— 「智能体会话」板块的浏览器端交互体验移植自该项目。正因如此，整个 IvyeaOps 依 AGPL-3.0 的 copyleft 要求以 **AGPL-3.0** 发布。
+- **[claudecodeui](https://github.com/siteboon/claudecodeui)**（**AGPL-3.0**）—— 「外部智能体」板块的浏览器端交互体验移植自该项目。正因如此，整个 IvyeaOps 依 AGPL-3.0 的 copyleft 要求以 **AGPL-3.0** 发布。
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent)**（NousResearch）· **[GBrain](https://github.com/garrytan/gbrain)**（MIT）—— 可选集成的本地智能体与本地知识库（作为独立程序由 IvyeaOps 经子进程调用，并未内置其源码，故不影响本项目的许可证）。
 - 基础设施：**FastAPI** · **React** · **Vite** · **xterm.js** 等众多开源库。
 
@@ -434,4 +435,4 @@ IvyeaOps 站在不少优秀开源项目之上，特此致谢：
 
 **AGPL-3.0**（GNU Affero General Public License v3.0）。完整条款见 [`LICENSE`](LICENSE)。
 
-本项目的「智能体会话」板块移植自 AGPL-3.0 的 [claudecodeui](https://github.com/siteboon/claudecodeui)，按其 copyleft 要求，整个 IvyeaOps 以 AGPL-3.0 发布：你可自由使用、修改、自托管；若你**修改后作为网络服务提供给他人使用**，须向这些用户提供完整的对应源码（AGPL 第 13 条「网络条款」）。
+本项目的「外部智能体」板块移植自 AGPL-3.0 的 [claudecodeui](https://github.com/siteboon/claudecodeui)，按其 copyleft 要求，整个 IvyeaOps 以 AGPL-3.0 发布：你可自由使用、修改、自托管；若你**修改后作为网络服务提供给他人使用**，须向这些用户提供完整的对应源码（AGPL 第 13 条「网络条款」）。
