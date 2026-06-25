@@ -733,11 +733,13 @@ def _build_hermes_native_prompt(mode: str, query: str, marketplace: str) -> str:
 # the pre-fetched sorftime data instead.
 
 
-def _build_prompt(mode: str, query: str, marketplace: str, data: Dict[str, Any]) -> str:
+def _build_prompt(mode: str, query: str, marketplace: str, data: Dict[str, Any],
+                  source: str = "Sorftime") -> str:
     """Build fallback prompt (codex / claude path) from the hermes-native template.
 
-    Strips the tool-calling phase from the native prompt and appends
-    pre-fetched sorftime data, so only one template needs to be maintained.
+    Strips the tool-calling phase from the native prompt and appends the
+    pre-fetched data. `source` is the human name of the data source (Sorftime /
+    卖家精灵 / …) so the report's 数据声明 doesn't always say "Sorftime".
     """
     data_summary = json.dumps(data, ensure_ascii=False, indent=2)
     if len(data_summary) > 40000:
@@ -756,10 +758,10 @@ def _build_prompt(mode: str, query: str, marketplace: str, data: Dict[str, Any])
         # Replace hermes-tool-specific preamble with data-dump preamble
         report_body = report_body.replace(
             "以上10个工具全部调用完毕后**，根据收集到的真实数据，填写以下报告模板。",
-            "请根据下方Sorftime原始数据，生成完整的市场调研报告。",
+            f"请根据下方{source}原始数据，生成完整的市场调研报告。",
         ).replace(
             "以上8个工具全部调用完毕后**，根据收集到的真实数据，填写以下报告模板。",
-            "请根据下方Sorftime原始数据，生成完整的市场调研报告。",
+            f"请根据下方{source}原始数据，生成完整的市场调研报告。",
         )
     else:
         report_body = native_filled
@@ -769,7 +771,7 @@ def _build_prompt(mode: str, query: str, marketplace: str, data: Dict[str, Any])
         if mode == "keyword"
         else "你是亚马逊跨境电商市场分析专家，擅长从竞品数据中提炼选品策略和差异化机会。"
     )
-    return f"{role}\n\n{report_body}\n\n---\n原始数据（来自Sorftime MCP）：\n{data_summary}"
+    return f"{role}\n\n{report_body}\n\n---\n原始数据（来自{source}）：\n{data_summary}"
 
 
 async def _stream_apimart(prompt: str) -> AsyncGenerator[str, None]:
@@ -1647,6 +1649,7 @@ async def synthesize(
     marketplace: str,
     data: Dict[str, Any],
     skip_agent: bool = False,
+    source: str = "Sorftime",
 ) -> AsyncGenerator[tuple[str, str], None]:
     """Async generator yielding (provider_name, text_chunk) tuples.
 
@@ -1658,7 +1661,7 @@ async def synthesize(
     skip_agent=True drops the ivyea-agent provider — used when the caller is
     *itself* the IvyeaAgent (the panel bridge), to avoid agent→ops→agent nesting.
     """
-    prompt = _build_prompt(mode, query, marketplace, data)
+    prompt = _build_prompt(mode, query, marketplace, data, source=source)
     failures: list[str] = []
     chain = _text_provider_chain()
     if skip_agent:

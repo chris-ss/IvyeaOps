@@ -348,6 +348,13 @@ async def _user_context(request: Request, call_next):
 async def _origin_guard(request: Request, call_next):
     # Only guard API writes; GETs and non-API routes (SPA) are unaffected.
     if request.method in _UNSAFE_METHODS and request.url.path.startswith("/api/"):
+        # The IvyeaAgent↔Ops bridge is a server-to-server callback authenticated
+        # by an explicit bridge token (not a cookie session), so it carries no
+        # Origin/Referer and is NOT CSRF-vulnerable. Without this exemption the
+        # whole agent→board flow (market_generate_report etc.) gets 403'd.
+        if request.url.path.startswith("/api/ivyea-agent-bridge/"):
+            return await call_next(request)
+
         # Native app requests (no browser CSRF risk) — skip origin check.
         ua = request.headers.get("user-agent", "")
         if "IvyeaOpsAndroid" in ua:

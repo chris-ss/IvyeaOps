@@ -17,7 +17,7 @@ def test_market_generate_report_persists_to_history(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sorftime_service, "keyword_pipeline", fake_kw)
 
-    async def fake_synth(mode, q, m, data, skip_agent=False):
+    async def fake_synth(mode, q, m, data, skip_agent=False, source='Sorftime'):
         assert skip_agent is True            # bridge must not re-enter the agent
         yield ("_attempt", "deepseek")
         yield ("deepseek", "# 市场调研报告\n正文")
@@ -78,7 +78,7 @@ def test_deep_generate_report_persists_to_history(tmp_path, monkeypatch):
 
 def test_synthesize_skip_agent_excludes_ivyea_agent(monkeypatch):
     monkeypatch.setattr(ai_synthesis_service, "_text_provider_chain", lambda: ["ivyea-agent", "deepseek"])
-    monkeypatch.setattr(ai_synthesis_service, "_build_prompt", lambda *a: "p")
+    monkeypatch.setattr(ai_synthesis_service, "_build_prompt", lambda *a, **k: "p")
     called = {"agent": False}
 
     async def fake_agent(prompt, failures):
@@ -122,7 +122,7 @@ def test_market_data_source_dispatch(monkeypatch, tmp_path):
     monkeypatch.setattr(sellersprite_service, "keyword_pipeline", ss_kw)
     monkeypatch.setattr(sorftime_service, "keyword_pipeline", sf_kw)
 
-    async def fake_synth(mode, q, m, data, skip_agent=False):
+    async def fake_synth(mode, q, m, data, skip_agent=False, source='Sorftime'):
         yield ("deepseek", "# r")
 
     monkeypatch.setattr(ai_synthesis_service, "synthesize", fake_synth)
