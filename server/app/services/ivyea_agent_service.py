@@ -280,9 +280,20 @@ def _run_step(cmd: list[str], timeout: float = 300.0) -> dict[str, Any]:
         return {"cmd": " ".join(cmd[:4]), "returncode": -1, "error": str(exc)}
 
 
-def upgrade_agent() -> dict[str, Any]:
+def upgrade_agent(progress=None) -> dict[str, Any]:
     """Update the bundled IvyeaAgent (pip -U from git into its venv) and restart
-    the local serve so the new code loads. Returns before/after version + logs."""
+    the local serve so the new code loads. Returns before/after version + logs.
+
+    progress(phase: str, percent: int) is called at each step so a UI can show a
+    progress bar instead of blocking silently."""
+    def _p(phase: str, pct: int) -> None:
+        if progress:
+            try:
+                progress(phase, pct)
+            except Exception:  # noqa: BLE001
+                pass
+
+    _p("preparing", 5)
     cli = _find_ivyea_cli()
     if not cli:
         return {"ok": False, "error": "ivyea CLI 未找到（IvyeaAgent 可能未安装）"}
@@ -290,11 +301,14 @@ def upgrade_agent() -> dict[str, Any]:
     repo = (os.getenv("IVYEA_AGENT_REPO") or "https://github.com/Hector-xue/ivyea-agent.git").strip()
     ref = (os.getenv("IVYEA_AGENT_REF") or "main").strip()
     before = agent_version()
+    _p("downloading", 25)   # pip install over git can take a while behind a proxy
     install = _run_step([py, "-m", "pip", "install", "-U", f"git+{repo}@{ref}"])
+    _p("restarting", 80)
     _run_step([cli, "self", "service-stop"], timeout=20.0)   # stop old serve
     restart = start_local_service()                          # start fresh (new code)
     after = agent_version()
     ok = install.get("returncode") == 0
+    _p("done" if ok else "error", 100)
     return {"ok": ok, "before": before, "after": after, "install": install,
             "restart": restart,
             "note": "" if ok else "升级失败，请查看 install.stderr 或在终端手动 pip 升级。"}

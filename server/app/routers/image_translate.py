@@ -35,6 +35,23 @@ from app.services.ai_synthesis_service import _apimart_base, _apimart_key
 
 router = APIRouter()
 
+
+# Image endpoint = the custom 生图接口 if configured, else Apimart. Keeps 图片翻译
+# on the same platform users pick in 系统配置 → 图片生成服务.
+def _img_base() -> str:
+    from app.core import hub_settings
+    return (str(hub_settings.get("image_base_url") or "").strip() or _apimart_base())
+
+
+def _img_key() -> str:
+    from app.core import hub_settings
+    return (str(hub_settings.get("image_api_key") or "").strip() or _apimart_key())
+
+
+def _img_model() -> str:
+    from app.core import hub_settings
+    return (str(hub_settings.get("image_model") or "").strip() or "gpt-image-2")
+
 WORKSPACE_DIR = settings.data_dir / "image_workspace"
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = settings.data_dir / "image_workspace.sqlite3"
@@ -206,8 +223,8 @@ async def _poll_task(client: httpx.AsyncClient, task_id: str, max_polls: int = 5
     for _ in range(max_polls):
         await asyncio.sleep(interval)
         poll = await client.get(
-            f"{_apimart_base()}/tasks/{task_id}",
-            headers={"Authorization": f"Bearer {_apimart_key()}"},
+            f"{_img_base()}/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {_img_key()}"},
         )
         if poll.status_code != 200:
             continue
@@ -230,7 +247,7 @@ async def _translate_one(data_uri: str, size: str, code: str, parent_id: str, fo
     if not meta:
         return {"code": code, "error": f"不支持的语言: {code}"}
     body = {
-        "model": "gpt-image-2",
+        "model": _img_model(),
         "prompt": _translate_prompt(meta["lang"], meta["locale"]),
         "n": 1,
         "size": size,
@@ -243,8 +260,8 @@ async def _translate_one(data_uri: str, size: str, code: str, parent_id: str, fo
             resp = None
             for attempt in attempts:
                 resp = await client.post(
-                    f"{_apimart_base()}/images/generations",
-                    headers={"Authorization": f"Bearer {_apimart_key()}", "Content-Type": "application/json"},
+                    f"{_img_base()}/images/generations",
+                    headers={"Authorization": f"Bearer {_img_key()}", "Content-Type": "application/json"},
                     json=attempt,
                 )
                 if resp.status_code == 200:
@@ -409,7 +426,7 @@ class TranslateReq(BaseModel):
 
 @router.post("/translate")
 async def translate_image(body: TranslateReq, _u: str = Depends(require_user)):
-    if not _apimart_key():
+    if not _img_key():
         raise HTTPException(400, "Apimart 密钥未配置 — 请在「系统配置 → AI 服务」填入有 gpt-image-2 权限的密钥。")
     if not body.target_langs:
         raise HTTPException(400, "请至少选择一个目标语言/站点")

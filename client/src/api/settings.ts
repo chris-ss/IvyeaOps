@@ -182,7 +182,22 @@ export async function getAgentVersion(): Promise<AgentVersionResp> {
   return data;
 }
 
-export async function upgradeAgent(): Promise<{ ok: boolean; before: string; after: string; note?: string; install?: { stderr?: string } }> {
-  const { data } = await api.post("/ivyea-agent/upgrade", {}, { timeout: 320000 });
+export interface AgentUpgradeProgress {
+  phase: "idle" | "preparing" | "downloading" | "restarting" | "done" | "error";
+  percent: number;
+  before: string;
+  after: string;
+  ok: boolean | null;
+  note?: string;
+  error?: string;
+}
+
+export async function startAgentUpgrade(): Promise<{ started: boolean; already_running?: boolean }> {
+  const { data } = await api.post("/ivyea-agent/upgrade", {}, { timeout: 10000 });
+  return data;
+}
+
+export async function getAgentUpgradeProgress(): Promise<AgentUpgradeProgress> {
+  const { data } = await api.get<AgentUpgradeProgress>("/ivyea-agent/upgrade/progress", { timeout: 8000 });
   return data;
 }

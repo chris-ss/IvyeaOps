@@ -169,10 +169,43 @@ def agent_version() -> dict[str, Any]:
     return {"version": svc.agent_version(), "available": svc.availability().get("available", False)}
 
 
+import threading as _threading
+
+_UPGRADE_LOCK = _threading.Lock()
+_UPGRADE_STATE: dict[str, Any] = {"phase": "idle", "percent": 0, "before": "", "after": "",
+                                  "ok": None, "note": "", "error": ""}
+
+
+def _upgrade_worker() -> None:
+    def _progress(phase: str, pct: int) -> None:
+        _UPGRADE_STATE.update(phase=phase, percent=pct)
+    try:
+        res = svc.upgrade_agent(progress=_progress)
+        _UPGRADE_STATE.update(phase="done" if res.get("ok") else "error", percent=100,
+                              before=res.get("before", ""), after=res.get("after", ""),
+                              ok=res.get("ok"), note=res.get("note", ""),
+                              error=res.get("error", ""))
+    except Exception as exc:  # noqa: BLE001
+        _UPGRADE_STATE.update(phase="error", percent=100, ok=False, error=str(exc))
+
+
 @router.post("/upgrade")
 def upgrade(_admin: str = Depends(require_admin)) -> dict[str, Any]:
-    """Update the bundled IvyeaAgent (pip -U from git) and restart the local serve."""
-    return svc.upgrade_agent()
+    """Start a background IvyeaAgent upgrade (pip -U from git + serve restart) and
+    return immediately. The UI polls /ivyea-agent/upgrade/progress for a progress
+    bar — no more blocking the request until a slow pip times out."""
+    with _UPGRADE_LOCK:
+        if _UPGRADE_STATE["phase"] in ("preparing", "downloading", "restarting"):
+            return {"started": True, "already_running": True}
+        _UPGRADE_STATE.update(phase="preparing", percent=0, before="", after="",
+                              ok=None, note="", error="")
+        _threading.Thread(target=_upgrade_worker, daemon=True, name="ivyea-agent-upgrade").start()
+    return {"started": True}
+
+
+@router.get("/upgrade/progress")
+def upgrade_progress(_admin: str = Depends(require_admin)) -> dict[str, Any]:
+    return dict(_UPGRADE_STATE)
 
 
 @router.get("/bootstrap")

@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import SheetSelect from "../../components/SheetSelect";
 import {
   getSettings, patchSettings, getHealth, changePassword,
-  testSetting, autodetectSettings, selfCheckSettings, getAgentVersion, upgradeAgent,
+  testSetting, autodetectSettings, selfCheckSettings, getAgentVersion,
+  startAgentUpgrade, getAgentUpgradeProgress,
   type HubSettings, type HealthResp, type TestResult, type SelfCheckResp,
 } from "../../api/settings";
 import { installAgentStreamUrl } from "../../api/setup";
@@ -680,33 +681,67 @@ function SelfCheckPanel() {
   );
 }
 
-// ── IvyeaAgent version + 一键更新 ──────────────────────────────────────────────
+// ── IvyeaAgent version + 一键更新（后台任务 + 进度条，不再阻塞超时）──────────────
+const _PHASE_LABEL: Record<string, string> = {
+  preparing: "准备中…", downloading: "拉取最新 IvyeaAgent…（可能需要 1–2 分钟）",
+  restarting: "重启本机服务…", done: "完成", error: "失败",
+};
+
 function AgentUpdateRow() {
   const [ver, setVer] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<string>("");
+  const [percent, setPercent] = useState(0);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const timer = useRef<number | null>(null);
   const load = () => { getAgentVersion().then(r => setVer(r.version || "")).catch(() => setVer("")); };
   useEffect(load, []);
+  useEffect(() => () => { if (timer.current) window.clearInterval(timer.current); }, []);
+
+  const poll = () => {
+    timer.current = window.setInterval(async () => {
+      try {
+        const p = await getAgentUpgradeProgress();
+        setPhase(p.phase); setPercent(p.percent || 0);
+        if (p.phase === "done" || p.phase === "error") {
+          if (timer.current) window.clearInterval(timer.current);
+          setBusy(false);
+          setVer(p.after || ver);
+          setMsg(p.ok
+            ? { ok: true, text: p.before === p.after ? `已是最新（${p.after || "未知"}）` : `已更新 ${p.before || "?"} → ${p.after || "?"}` }
+            : { ok: false, text: p.note || p.error || "更新失败" });
+        }
+      } catch { /* keep polling; transient errors during serve restart are expected */ }
+    }, 1500);
+  };
+
   const run = async () => {
     if (!confirm("将从 GitHub 拉取最新 IvyeaAgent 并重启本机服务（约 1–2 分钟），期间右下角 Agent 会短暂中断。继续？")) return;
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setPercent(0); setPhase("preparing");
     try {
-      const r = await upgradeAgent();
-      setVer(r.after || ver);
-      setMsg(r.ok
-        ? { ok: true, text: r.before === r.after ? `已是最新（${r.after || "未知"}）` : `已更新 ${r.before || "?"} → ${r.after || "?"}` }
-        : { ok: false, text: r.note || r.install?.stderr || "更新失败" });
+      await startAgentUpgrade();
+      poll();
     } catch (e: any) {
-      setMsg({ ok: false, text: e?.response?.data?.detail || e?.message || "更新失败" });
-    } finally { setBusy(false); }
+      setBusy(false);
+      setMsg({ ok: false, text: e?.response?.data?.detail || e?.message || "启动更新失败" });
+    }
   };
+
   return (
     <div className="hs-agent-card">
       <div className="hs-agent-card-title">版本与更新</div>
       <div className="hs-agent-card-desc">当前 IvyeaAgent 版本 <b style={{ color: "var(--t)" }}>{ver || "未知/未运行"}</b>。安装 IvyeaOps 时已内置 IvyeaAgent。</div>
+      {busy && (
+        <div style={{ margin: "8px 0" }}>
+          <div style={{ height: 6, borderRadius: 3, background: "var(--line,#e5e7eb)", overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${Math.max(percent, 8)}%`, background: "var(--acc,#16a34a)", transition: "width .4s ease" }} />
+          </div>
+          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 4 }}>{_PHASE_LABEL[phase] || "更新中…"}（{percent}%）</div>
+        </div>
+      )}
       <div className="hs-test-row" style={{ marginTop: 6 }}>
         <button className="hs-test-btn" onClick={run} disabled={busy} type="button">
-          {busy ? "更新中…（拉取 + 重启）" : "检查并更新"}
+          {busy ? "更新中…" : "检查并更新"}
         </button>
         {msg && <span className={"hs-test-result " + (msg.ok ? "ok" : "err")}>{msg.ok ? "✓" : "✗"} {msg.text}</span>}
       </div>
@@ -772,7 +807,6 @@ export default function HubSettings() {
     setVals({ ...EMPTY, ...r.settings });
   }, []);
 
-  const [imageAdvancedOpen, setImageAdvancedOpen] = useState(false);
   const [compatPathsOpen, setCompatPathsOpen] = useState(false);
 
   if (loading) return (
@@ -912,13 +946,13 @@ export default function HubSettings() {
       {/* -- 核心 4: 图片生成服务 -- */}
       <Section
         title="图片生成服务"
-        desc={<>Apimart API Key 是图片生成主入口；“AI 生图”默认复用它，不需要再填一遍。只有接入独立生图网关时，才展开高级覆盖。</>}
+        desc={<>默认走 Apimart。Apimart 不稳定/用不了时，在下方「自定义生图接口」填任意兼容 OpenAI <code>/images/generations</code> 的平台（地址 + Key + 模型名）即可切换——Listing 图片、图片翻译、AI 生图都会改用它。</>}
         keys={["apimart_key", "apimart_base", "image_model", "image_api_key", "image_base_url"]}
         vals={vals} onSave={save}
       >
         <Field
-          label={<><Tag kind="rec">推荐</Tag>Apimart API Key</>}
-          hint={<>Listing 图片生成、图片翻译和 AI 生图共用此 Key。</>}
+          label={<><Tag kind="rec">默认</Tag>Apimart API Key</>}
+          hint={<>不接自定义平台时用它；Listing 图片生成、图片翻译和 AI 生图共用。</>}
         >
           <div className="hs-key-inline">
             <SecretInput value={vals.apimart_key} onChange={v => set("apimart_key", v)} placeholder="sk-..." />
@@ -927,7 +961,7 @@ export default function HubSettings() {
         </Field>
 
         <div className="hs-row2">
-          <Field label="模型名称" hint="默认 gpt-image-2">
+          <Field label="模型名称" hint="Apimart 用 gpt-image-2；自定义平台填它的模型名（如 dall-e-3）。">
             <TxtInput value={vals.image_model} onChange={v => set("image_model", v)} placeholder="gpt-image-2" />
           </Field>
           <Field label="Apimart 地址" hint="非官方网关才需改，否则保持默认。">
@@ -935,34 +969,25 @@ export default function HubSettings() {
           </Field>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setImageAdvancedOpen(o => !o)}
-          style={{
-            display: "flex", alignItems: "center", gap: 6, alignSelf: "flex-start",
-            background: "transparent", border: "1px solid var(--b)", borderRadius: 4,
-            padding: "5px 12px", color: "var(--t3)", fontSize: 11,
-            cursor: "pointer", fontFamily: "var(--font)",
-          }}
-        >
-          <span style={{ display: "inline-block", transition: "transform .15s", transform: imageAdvancedOpen ? "rotate(90deg)" : "none" }}>▶</span>
-          高级：独立生图接口覆盖
-        </button>
-
-        {imageAdvancedOpen && (
-          <div style={{ paddingLeft: 10, borderLeft: "2px solid var(--b)" }}>
-            <div className="hs-row3">
-              <Field label={<><Tag kind="opt">可选</Tag>独立生图 API Key</>}
-                hint="通常留空。填写后 AI 生图改用这里，不再复用 Apimart API Key。">
-                <SecretInput value={vals.image_api_key} onChange={v => set("image_api_key", v)} placeholder="留空 = 复用 Apimart API Key" />
-              </Field>
-              <Field label={<><Tag kind="opt">可选</Tag>独立生图 Base URL</>}
-                hint="通常留空。填写后 AI 生图改用这里，不再复用 Apimart 地址。">
-                <TxtInput value={vals.image_base_url} onChange={v => set("image_base_url", v)} placeholder="留空 = 复用 Apimart 地址" />
-              </Field>
-            </div>
+        <div style={{ borderTop: "1px solid var(--b)", margin: "6px 0 2px", paddingTop: 10 }}>
+          <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 600, marginBottom: 2 }}>
+            自定义生图接口（填了就用它，不再走 Apimart）
           </div>
-        )}
+          <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 8 }}>
+            任意兼容 OpenAI <code>/images/generations</code> 的平台均可：同步返回（b64/url）或 Apimart 式异步任务都支持。换平台时记得把上面的「模型名称」也改成该平台的模型名。
+          </div>
+        </div>
+        <div className="hs-row2">
+          <Field label={<><Tag kind="opt">可选</Tag>接口地址 Base URL</>}
+            hint="到 /v1 为止，如 https://api.openai.com/v1。留空 = 用 Apimart。">
+            <TxtInput value={vals.image_base_url} onChange={v => set("image_base_url", v)} placeholder="https://api.openai.com/v1" />
+          </Field>
+          <Field label={<><Tag kind="opt">可选</Tag>API Key</>}
+            hint="该平台的 Key。留空 = 复用 Apimart Key。">
+            <SecretInput value={vals.image_api_key} onChange={v => set("image_api_key", v)} placeholder="sk-..." />
+          </Field>
+        </div>
+        <TestButton settingKey="image_base_url" value={vals.image_base_url} label="测试自定义生图接口" />
       </Section>
 
       <HealthPanel />
