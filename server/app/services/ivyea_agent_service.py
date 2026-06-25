@@ -419,6 +419,11 @@ def chat_session(session_id: str) -> dict[str, Any]:
     return request_json("GET", f"/v1/chat/sessions/{safe_id}")
 
 
+def chat_session_delete(session_id: str) -> dict[str, Any]:
+    safe_id = urllib.parse.quote(session_id.strip(), safe="")
+    return request_json("DELETE", f"/v1/chat/sessions/{safe_id}")
+
+
 def chat_create(payload: dict[str, Any]) -> dict[str, Any]:
     return request_json("POST", "/v1/chat/sessions", payload)
 

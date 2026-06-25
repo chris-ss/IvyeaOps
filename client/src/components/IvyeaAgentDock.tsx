@@ -10,9 +10,11 @@ import {
   Loader2,
   MessageCircle,
   Plus,
+  Power,
   RefreshCw,
   Search,
   Send,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -21,7 +23,9 @@ import {
   ivyeaAgentChatStream,
   ivyeaAgentStatus,
   ivyeaChatSession,
+  ivyeaChatSessionDelete,
   ivyeaChatSessions,
+  ivyeaServiceStart,
   ivyeaKnowledgeApplyText,
   ivyeaKnowledgeFiles,
   ivyeaKnowledgeImportDirectory,
@@ -500,6 +504,37 @@ export default function IvyeaAgentDock() {
     setTab("chat");
   };
 
+  // 继续这条历史会话：保留已加载的 sessionId + messages，切回对话视图即可接着聊。
+  const continueSession = () => {
+    setHistoryView("chat");
+    setTab("chat");
+  };
+
+  const deleteSession = async (sid: string) => {
+    if (!window.confirm("删除这条历史会话？不可恢复。")) return;
+    try {
+      await ivyeaChatSessionDelete(sid);
+      setSessions((prev) => prev.filter((s) => s.id !== sid));
+      if (sid === sessionId) newSession();
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "删除会话失败"));
+    }
+  };
+
+  const startService = async () => {
+    setLoadingStatus(true);
+    setError("");
+    try {
+      await ivyeaServiceStart();
+      await new Promise((r) => setTimeout(r, 1500));  // give serve a moment to bind
+      await loadStatus();
+    } catch (e: any) {
+      setError(apiErrorMessage(e, "启动本地服务失败"));
+    } finally {
+      setLoadingStatus(false);
+    }
+  };
+
   const runSearch = async () => {
     const q = query.trim();
     if (!q || searching) return;
@@ -679,21 +714,35 @@ export default function IvyeaAgentDock() {
                       <span>历史会话</span>
                     )}
                     {historyView === "detail" && <span className="ivyea-agent-history-title">{activeSessionName}</span>}
+                    {historyView === "detail" && (
+                      <button className="ivyea-agent-mini-btn" onClick={continueSession} style={{ marginLeft: "auto" }}>
+                        <Send size={12} />继续对话
+                      </button>
+                    )}
                   </div>
                   {historyView === "list" ? (
                     <div className="ivyea-agent-history-list">
                       {sessions.length === 0 ? (
                         <div className="ivyea-agent-history-empty">暂无历史会话</div>
                       ) : sessions.map((item) => (
-                        <button
-                          key={item.id}
-                          className="ivyea-agent-history-item"
-                          onClick={() => openSession(item.id)}
-                          title={`${sessionTitle(item)}${formatSessionTime(item.updated) ? ` · ${formatSessionTime(item.updated)}` : ""}`}
-                        >
-                          <span>{sessionTitle(item)}</span>
-                          <em>{formatSessionTime(item.updated) || "最近"} · {item.turns || 0} 轮</em>
-                        </button>
+                        <div key={item.id} className="ivyea-agent-history-row">
+                          <button
+                            className="ivyea-agent-history-item"
+                            onClick={() => openSession(item.id)}
+                            title={`${sessionTitle(item)}${formatSessionTime(item.updated) ? ` · ${formatSessionTime(item.updated)}` : ""}`}
+                          >
+                            <span>{sessionTitle(item)}</span>
+                            <em>{formatSessionTime(item.updated) || "最近"} · {item.turns || 0} 轮</em>
+                          </button>
+                          <button
+                            className="ivyea-agent-history-del"
+                            onClick={() => deleteSession(item.id)}
+                            title="删除会话"
+                            aria-label="删除会话"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -892,6 +941,11 @@ export default function IvyeaAgentDock() {
                 <span>知识目录</span>
                 <b>{status?.health?.data_dir ? `${status.health.data_dir}/knowledge` : "-"}</b>
               </div>
+              {!online && (
+                <button className="ivyea-agent-primary" onClick={startService} disabled={loadingStatus}>
+                  {loadingStatus ? <Loader2 size={14} className="spin" /> : <Power size={14} />}启动本地服务
+                </button>
+              )}
               <button className="ivyea-agent-primary" onClick={loadStatus} disabled={loadingStatus}>
                 {loadingStatus ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}刷新状态
               </button>

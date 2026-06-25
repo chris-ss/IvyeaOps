@@ -248,6 +248,11 @@ def chat_session(session_id: str) -> dict[str, Any]:
     return _call(svc.chat_session, session_id)
 
 
+@router.delete("/chat/sessions/{session_id}")
+def chat_session_delete(session_id: str) -> dict[str, Any]:
+    return _call(svc.chat_session_delete, session_id)
+
+
 @router.post("/chat/sessions")
 def chat_create(body: ChatSessionCreateBody) -> dict[str, Any]:
     return _call(svc.chat_create, _payload(body))
