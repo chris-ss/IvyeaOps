@@ -147,7 +147,7 @@ async def generate_report(mode: str, query: str, marketplace: str,
         raise RuntimeError("AI 合成返回空")
     elapsed = round(time.time() - start, 1)
     entry_id = save_history(mode=mode, query=query, marketplace=marketplace, price=price, cost=cost,
-                            provider=provider, elapsed_s=elapsed, ts=int(time.time()),
+                            provider=provider, elapsed_s=elapsed, ts=int(time.time() * 1000),
                             report=report, entry_id=uuid.uuid4().hex)
     return {"id": entry_id, "mode": mode, "query": query, "marketplace": marketplace,
             "price": price, "cost": cost, "provider": provider, "elapsed_s": elapsed,

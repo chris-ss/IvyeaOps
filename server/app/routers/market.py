@@ -131,7 +131,7 @@ async def generate_report(mode: str, query: str, marketplace: str,
         data, errors = await _svc.asin_pipeline(query, marketplace, _noop)
     parts: list[str] = []
     provider = "unknown"
-    async for prov, chunk in ai_synthesis_service.synthesize(mode, query, marketplace, data, skip_agent=True):
+    async for prov, chunk in ai_synthesis_service.synthesize(mode, query, marketplace, data, skip_agent=True, source=_source_label(data_source)):
         if prov == "_attempt":
             continue
         if prov == "error":
@@ -143,7 +143,7 @@ async def generate_report(mode: str, query: str, marketplace: str,
         raise RuntimeError("AI 合成返回空")
     elapsed = round(time.time() - start, 1)
     entry_id = save_history(mode=mode, query=query, marketplace=marketplace, provider=provider,
-                            elapsed_s=elapsed, ts=int(time.time()), report=report,
+                            elapsed_s=elapsed, ts=int(time.time() * 1000), report=report,
                             entry_id=uuid.uuid4().hex)
     return {"id": entry_id, "mode": mode, "query": query, "marketplace": marketplace,
             "provider": provider, "elapsed_s": elapsed, "warnings": errors, "report": report}
@@ -177,6 +177,11 @@ def _pipeline_for(data_source: str):
         from app.services import sellersprite_service
         return sellersprite_service
     return sorftime_service
+
+
+def _source_label(data_source: str) -> str:
+    """Human name of the data source for the report's 数据声明."""
+    return "卖家精灵" if (data_source or "").strip().lower() == "sellersprite" else "Sorftime"
 
 
 def _sse(event: dict) -> str:
@@ -324,7 +329,7 @@ async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
     # it would just receive a 40KB dump without MCP benefit).
     provider = "unknown"
     async for kind, a, b in _stream_synthesis(
-        lambda: ai_synthesis_service.synthesize(req.mode, req.query, req.marketplace, data)
+        lambda: ai_synthesis_service.synthesize(req.mode, req.query, req.marketplace, data, source=_source_label(req.data_source))
     ):
         if kind == "hb":
             yield _SSE_HEARTBEAT
