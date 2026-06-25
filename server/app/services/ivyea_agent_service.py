@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -297,6 +298,53 @@ def upgrade_agent() -> dict[str, Any]:
     return {"ok": ok, "before": before, "after": after, "install": install,
             "restart": restart,
             "note": "" if ok else "升级失败，请查看 install.stderr 或在终端手动 pip 升级。"}
+
+
+def _agent_is_editable() -> bool:
+    """True when IvyeaAgent runs from a source checkout (pip install -e / dev),
+    where auto-upgrading would clobber the developer's working tree."""
+    try:
+        import ivyea_agent
+        p = str(Path(ivyea_agent.__file__).resolve())
+        return "site-packages" not in p and "dist-packages" not in p
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def maybe_sync_agent_on_upgrade() -> None:
+    """When IvyeaOps boots on a NEW version, refresh the bundled IvyeaAgent once
+    (best-effort, background). The agent is pip-installed @main at IvyeaOps
+    install time and otherwise never moves with IvyeaOps updates; this keeps them
+    in sync. Skipped for editable/source installs and when auto-start is off."""
+    from app.core import hub_settings
+    from app.core.version import app_version
+    configured = hub_settings.get("ivyea_agent_auto_start")
+    auto = configured if isinstance(configured, bool) else \
+        os.getenv("IVYEA_AGENT_AUTO_START", "1").lower() not in {"0", "false", "no"}
+    if not auto or _agent_is_editable():
+        return
+    cur = app_version()
+    if cur in ("", "dev"):
+        return
+    marker = ops_settings.data_dir / "agent_sync.json"
+    try:
+        last = json.loads(marker.read_text(encoding="utf-8")).get("ops_version", "") if marker.exists() else ""
+    except Exception:  # noqa: BLE001
+        last = ""
+    if cur == last:
+        return  # already synced for this IvyeaOps version
+
+    def _bg() -> None:
+        try:
+            res = upgrade_agent()
+            marker.write_text(json.dumps({"ops_version": cur, "agent": res.get("after", "")}),
+                              encoding="utf-8")
+            print(f"[IvyeaOps] agent auto-sync on {cur}: "
+                  f"{res.get('before')}->{res.get('after')} ok={res.get('ok')}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[IvyeaOps] agent auto-sync failed: {e}")
+
+    threading.Thread(target=_bg, daemon=True).start()
 
 
 def ensure_available() -> dict[str, Any]:

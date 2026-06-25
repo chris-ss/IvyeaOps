@@ -79,3 +79,39 @@ def test_upgrade_agent_no_cli(monkeypatch):
     monkeypatch.setattr(svc, "_find_ivyea_cli", lambda: "")
     r = svc.upgrade_agent()
     assert r["ok"] is False and "未找到" in r["error"]
+
+
+def test_auto_sync_skips_editable_install(monkeypatch):
+    monkeypatch.setattr(svc, "_agent_is_editable", lambda: True)
+    called = []
+    monkeypatch.setattr(svc, "upgrade_agent", lambda: called.append(1) or {})
+    svc.maybe_sync_agent_on_upgrade()
+    import time
+    time.sleep(0.1)
+    assert called == []  # dev/source install must never be auto-clobbered
+
+
+def test_auto_sync_runs_once_on_version_change(monkeypatch, tmp_path):
+    import time
+    from app.core import hub_settings
+    from app.core.config import settings as ops_settings
+    import app.core.version as ver
+    monkeypatch.setattr(svc, "_agent_is_editable", lambda: False)
+    monkeypatch.setattr(hub_settings, "get", lambda k=None: True)
+    monkeypatch.setattr(ver, "app_version", lambda: "v1.1.69")
+    monkeypatch.setattr(ops_settings, "data_dir", tmp_path)
+    calls = []
+    monkeypatch.setattr(svc, "upgrade_agent",
+                        lambda: calls.append(1) or {"ok": True, "before": "1.0.19", "after": "1.0.24"})
+
+    svc.maybe_sync_agent_on_upgrade()
+    marker = tmp_path / "agent_sync.json"
+    for _ in range(40):
+        if marker.exists():
+            break
+        time.sleep(0.05)
+    assert marker.exists() and len(calls) == 1
+    # same version on next boot → no-op
+    svc.maybe_sync_agent_on_upgrade()
+    time.sleep(0.15)
+    assert len(calls) == 1

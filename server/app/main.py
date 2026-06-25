@@ -113,6 +113,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[IvyeaOps] ad-audit stale sweep skipped: {e}")
 
+    # Best-effort: when IvyeaOps boots on a new version, refresh the bundled
+    # IvyeaAgent once in the background so the two stay in sync (skipped for
+    # editable/source installs and when auto-start is off).
+    try:
+        from app.services.ivyea_agent_service import maybe_sync_agent_on_upgrade
+        maybe_sync_agent_on_upgrade()
+    except Exception as e:
+        print(f"[IvyeaOps] agent auto-sync skipped: {e}")
+
     # Market research history DB.
     try:
         from app.routers.market import _init_history_db as _init_market_hist
