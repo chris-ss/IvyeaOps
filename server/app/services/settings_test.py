@@ -166,29 +166,34 @@ async def _probe_sif(key: str) -> Dict[str, Any]:
 async def _probe_sellersprite(key: str) -> Dict[str, Any]:
     if not key:
         return _err("未填写")
-    # SellerSprite returns HTTP 200 even on auth failure — the real status is in the
-    # body's `code` (success == "OK"). Checking only the HTTP status wrongly reports
-    # an unauthorized key as 有效, which is exactly what misled the user.
-    import datetime
-    last_month = (datetime.date.today().replace(day=1) - datetime.timedelta(days=1)).strftime("%Y%m")
+    # SellerSprite's open platform is an MCP server (not REST) — connect the same
+    # way the data pipeline does (mcp.sellersprite.com/mcp?secret-key=...), and
+    # confirm tools/list answers. (The REST endpoint returns HTTP 200 even when
+    # unauthorized, so checking the MCP is both correct and matches real usage.)
+    from app.services.sellersprite_service import parse_sse
+    url = f"https://mcp.sellersprite.com/mcp?secret-key={key}"
+    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     try:
         async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
-            r = await c.post(
-                "https://api.sellersprite.com/v1/traffic/source",
-                json={"marketplace": "US", "date": last_month, "includeKeywords": "yoga mat",
-                      "page": 1, "size": 1},
-                headers={"Content-Type": "application/json", "secret-key": key},
-            )
-        body = r.json()
-        code = str(body.get("code") or "")
-        msg = str(body.get("message") or "")
-        if code == "OK":
-            return _ok("密钥有效")
-        if code == "ERROR_UNAUTHORIZED" or "未授权" in msg:
-            return _err("未授权：该 key 没有开放平台 API 权限，需在 open.sellersprite.com "
-                        "申请 API 并由客服开通对应接口")
-        return _err(f"{code or r.status_code}：{msg or r.text[:120]}")
-    except Exception as e:
+            await c.post(url, headers=headers, json={
+                "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                           "clientInfo": {"name": "IvyeaOps", "version": "1.0"}}})
+            r = await c.post(url, headers=headers,
+                             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        body = parse_sse(r.text)
+        tools = (body.get("result") or {}).get("tools") or []
+        names = [t.get("name") for t in tools if isinstance(t, dict)]
+        # An invalid key still answers tools/list — but with a single
+        # `secret_invalid`("密钥不合法") tool instead of the real toolset.
+        if "secret_invalid" in names:
+            return _err("密钥不合法（卖家精灵 MCP 拒绝该 key）")
+        if tools:
+            return _ok(f"MCP 已连接（{len(tools)} 个工具可用）")
+        if body.get("error"):
+            return _err(f"MCP 错误：{str(body['error'])[:150]}")
+        return _err("MCP 未返回工具，请检查 key 或开通的接口权限")
+    except Exception as e:  # noqa: BLE001
         return _err(str(e)[:200])
 
 
