@@ -158,7 +158,9 @@ export interface AutodetectResp {
 }
 
 export async function testSetting(key: keyof HubSettings, value?: string): Promise<TestResult> {
-  const { data } = await api.post<TestResult>("/settings/test", { key, value }, { timeout: 15000 });
+  // 35s > the backend probe's 20s timeout, so slow/proxied client networks don't
+  // get cut off by the HTTP client before the probe itself decides.
+  const { data } = await api.post<TestResult>("/settings/test", { key, value }, { timeout: 35000 });
   return data;
 }
 

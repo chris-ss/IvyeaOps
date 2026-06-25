@@ -30,7 +30,9 @@ _WINDOWS = sys.platform == "win32"
 # Helpers
 # ---------------------------------------------------------------------------
 
-_DEFAULT_TIMEOUT = 8.0
+# Generous enough for slow/proxied client networks (Windows behind Clash/VPN can
+# take >8s to reach api.apimart.ai etc.). A dead host still fails fast at connect.
+_DEFAULT_TIMEOUT = 20.0
 
 
 def _ok(detail: str = "可用") -> Dict[str, Any]:
@@ -166,19 +168,34 @@ async def _probe_sif(key: str) -> Dict[str, Any]:
 async def _probe_sellersprite(key: str) -> Dict[str, Any]:
     if not key:
         return _err("未填写")
+    # SellerSprite's open platform is an MCP server (not REST) — connect the same
+    # way the data pipeline does (mcp.sellersprite.com/mcp?secret-key=...), and
+    # confirm tools/list answers. (The REST endpoint returns HTTP 200 even when
+    # unauthorized, so checking the MCP is both correct and matches real usage.)
+    from app.services.sellersprite_service import parse_sse
+    url = f"https://mcp.sellersprite.com/mcp?secret-key={key}"
+    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     try:
         async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
-            r = await c.post(
-                "https://api.sellersprite.com/v1/traffic/keyword",
-                json={"keyword": "test", "marketplace": "US"},
-                headers={"Content-Type": "application/json", "secret-key": key},
-            )
-        if r.status_code == 200:
-            return _ok("密钥有效")
-        if r.status_code in (401, 403):
-            return _err("密钥无效或无权限")
-        return _err(f"HTTP {r.status_code}")
-    except Exception as e:
+            await c.post(url, headers=headers, json={
+                "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                           "clientInfo": {"name": "IvyeaOps", "version": "1.0"}}})
+            r = await c.post(url, headers=headers,
+                             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        body = parse_sse(r.text)
+        tools = (body.get("result") or {}).get("tools") or []
+        names = [t.get("name") for t in tools if isinstance(t, dict)]
+        # An invalid key still answers tools/list — but with a single
+        # `secret_invalid`("密钥不合法") tool instead of the real toolset.
+        if "secret_invalid" in names:
+            return _err("密钥不合法（卖家精灵 MCP 拒绝该 key）")
+        if tools:
+            return _ok(f"MCP 已连接（{len(tools)} 个工具可用）")
+        if body.get("error"):
+            return _err(f"MCP 错误：{str(body['error'])[:150]}")
+        return _err("MCP 未返回工具，请检查 key 或开通的接口权限")
+    except Exception as e:  # noqa: BLE001
         return _err(str(e)[:200])
 
 
