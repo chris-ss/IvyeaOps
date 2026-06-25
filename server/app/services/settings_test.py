@@ -30,7 +30,9 @@ _WINDOWS = sys.platform == "win32"
 # Helpers
 # ---------------------------------------------------------------------------
 
-_DEFAULT_TIMEOUT = 8.0
+# Generous enough for slow/proxied client networks (Windows behind Clash/VPN can
+# take >8s to reach api.apimart.ai etc.). A dead host still fails fast at connect.
+_DEFAULT_TIMEOUT = 20.0
 
 
 def _ok(detail: str = "可用") -> Dict[str, Any]:
