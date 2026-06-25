@@ -209,7 +209,8 @@ async def _market_generate_report(args: dict[str, Any]) -> Any:
         raise ValueError("query is required")
     mode = str(args.get("mode") or "keyword").strip().lower()
     marketplace = str(args.get("marketplace") or "US").strip().upper()
-    res = await market.generate_report(mode, query, marketplace)
+    data_source = str(args.get("data_source") or "sorftime").strip().lower()
+    res = await market.generate_report(mode, query, marketplace, data_source)
     # 报告已落库到市场调研历史；正文截断，避免回灌爆上下文（agent 可再 read 历史拿全文）。
     return {"id": res["id"], "mode": res["mode"], "query": res["query"],
             "marketplace": res["marketplace"], "provider": res["provider"],

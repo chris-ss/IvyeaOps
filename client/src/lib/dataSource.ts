@@ -17,8 +17,8 @@ export type DataSourceMeta = {
 
 export const DATA_SOURCES: DataSourceMeta[] = [
   { id: "sorftime", name: "Sorftime", ready: true },
+  { id: "sellersprite", name: "卖家精灵", ready: true, note: "需在系统配置填卖家精灵 Key" },
   { id: "sif", name: "SIF", ready: false, note: "即将支持" },
-  { id: "sellersprite", name: "卖家精灵", ready: false, note: "即将支持" },
 ];
 
 const KEY = "ivyea-ops-data-source";

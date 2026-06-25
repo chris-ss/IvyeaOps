@@ -106,6 +106,33 @@ def test_default_text_chain_leads_with_ivyea_agent():
     assert ai_synthesis_service._text_provider_chain()[0] == "ivyea-agent"
 
 
+def test_market_data_source_dispatch(monkeypatch, tmp_path):
+    monkeypatch.setattr(market, "_history_db_path", lambda: str(tmp_path / "mh.sqlite3"))
+    from app.services import sellersprite_service
+    seen = {"src": None}
+
+    async def ss_kw(q, m, prog):
+        seen["src"] = "sellersprite"
+        return ({"关键词流量": {"x": 1}}, [])
+
+    async def sf_kw(q, m, prog):
+        seen["src"] = "sorftime"
+        return ({"k": 1}, [])
+
+    monkeypatch.setattr(sellersprite_service, "keyword_pipeline", ss_kw)
+    monkeypatch.setattr(sorftime_service, "keyword_pipeline", sf_kw)
+
+    async def fake_synth(mode, q, m, data, skip_agent=False):
+        yield ("deepseek", "# r")
+
+    monkeypatch.setattr(ai_synthesis_service, "synthesize", fake_synth)
+
+    asyncio.run(market.generate_report("keyword", "yoga mat", "US", "sellersprite"))
+    assert seen["src"] == "sellersprite"
+    asyncio.run(market.generate_report("keyword", "yoga mat", "US", "sorftime"))
+    assert seen["src"] == "sorftime"
+
+
 def test_new_generate_tools_registered_and_listed():
     names = {t.name for t in ivyea_ops_tools.TOOLS}
     assert {"market_generate_report", "playbook_generate_report"} <= names
