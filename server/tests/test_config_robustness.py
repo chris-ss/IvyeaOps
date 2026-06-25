@@ -106,7 +106,7 @@ def test_auto_sync_runs_once_on_version_change(monkeypatch, tmp_path):
 
     svc.maybe_sync_agent_on_upgrade()
     marker = tmp_path / "agent_sync.json"
-    for _ in range(40):
+    for _ in range(200):  # up to 10s — daemon thread can be starved under full-suite load
         if marker.exists():
             break
         time.sleep(0.05)

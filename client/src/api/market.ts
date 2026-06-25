@@ -41,6 +41,7 @@ export interface ResearchReq {
   mode: ResearchMode;
   query: string;
   marketplace: string;
+  data_source?: string;   // "sorftime" | "sellersprite"
 }
 
 export type SseEvent =

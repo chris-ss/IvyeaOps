@@ -160,7 +160,7 @@ export default function Market() {
 
     try {
       await streamResearch(
-        { mode, query: query.trim(), marketplace },
+        { mode, query: query.trim(), marketplace, data_source: dataSource },
         (evt: SseEvent) => {
           if (evt.type === "phase") {
             setPhase(evt.phase as Phase);

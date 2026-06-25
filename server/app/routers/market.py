@@ -111,7 +111,8 @@ def add_history(entry: HistoryEntryIn, _user: str = Depends(require_user)) -> di
         report=entry.report, entry_id=entry.id)}
 
 
-async def generate_report(mode: str, query: str, marketplace: str) -> dict:
+async def generate_report(mode: str, query: str, marketplace: str,
+                          data_source: str = "sorftime") -> dict:
     """Collect + synthesize + persist one market report (no SSE), then return it.
     Used by the IvyeaAgent panel bridge so an agent-driven 市场调研 lands in the
     panel's 历史. Synthesis skips the ivyea-agent provider to avoid agent→ops→agent
@@ -123,10 +124,11 @@ async def generate_report(mode: str, query: str, marketplace: str) -> dict:
         return None
 
     start = time.time()
+    _svc = _pipeline_for(data_source)
     if mode == "keyword":
-        data, errors = await sorftime_service.keyword_pipeline(query, marketplace, _noop)
+        data, errors = await _svc.keyword_pipeline(query, marketplace, _noop)
     else:
-        data, errors = await sorftime_service.asin_pipeline(query, marketplace, _noop)
+        data, errors = await _svc.asin_pipeline(query, marketplace, _noop)
     parts: list[str] = []
     provider = "unknown"
     async for prov, chunk in ai_synthesis_service.synthesize(mode, query, marketplace, data, skip_agent=True):
@@ -165,6 +167,16 @@ class ResearchReq(BaseModel):
     mode: str = "keyword"       # "keyword" | "asin"
     query: str
     marketplace: str = "US"
+    data_source: str = "sorftime"   # "sorftime" | "sellersprite"
+
+
+def _pipeline_for(data_source: str):
+    """Data-collection service for the selected source. Both expose
+    keyword_pipeline / asin_pipeline(query, marketplace, on_progress) -> (data, errors)."""
+    if (data_source or "").strip().lower() == "sellersprite":
+        from app.services import sellersprite_service
+        return sellersprite_service
+    return sorftime_service
 
 
 def _sse(event: dict) -> str:
@@ -220,7 +232,10 @@ async def _stream_synthesis(
 async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
     start = time.time()
     chain = ai_synthesis_service._text_provider_chain()
-    hermes_first = bool(chain) and chain[0] == "hermes"
+    # hermes-native (Path A) only knows the Sorftime MCP; non-sorftime sources
+    # must pre-fetch (Path B).
+    is_sorftime = (req.data_source or "sorftime").strip().lower() != "sellersprite"
+    hermes_first = bool(chain) and chain[0] == "hermes" and is_sorftime
 
     # ── Path A: hermes-native ─────────────────────────────────────────────────
     # hermes has sorftime MCP configured; give it tool-calling instructions so
@@ -268,13 +283,14 @@ async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
 
     yield _sse({"type": "phase", "phase": "collecting"})
 
+    _svc = _pipeline_for(req.data_source)
     if req.mode == "keyword":
         pipeline_task = asyncio.create_task(
-            sorftime_service.keyword_pipeline(req.query, req.marketplace, on_progress)
+            _svc.keyword_pipeline(req.query, req.marketplace, on_progress)
         )
     else:
         pipeline_task = asyncio.create_task(
-            sorftime_service.asin_pipeline(req.query, req.marketplace, on_progress)
+            _svc.asin_pipeline(req.query, req.marketplace, on_progress)
         )
 
     last_yield = time.time()
