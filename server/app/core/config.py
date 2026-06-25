@@ -24,6 +24,31 @@ _ROOT = _detect_root()
 load_dotenv(_ROOT / "server" / ".env")
 
 
+def _ensure_localhost_no_proxy() -> None:
+    """Make every localhost HTTP call bypass a system/VPN proxy.
+
+    On Windows/macOS with a proxy (Clash/V2Ray/corporate), httpx honours
+    HTTP(S)_PROXY/ALL_PROXY and routes 127.0.0.1 (the embedded IvyeaAgent :8765,
+    imgflow :3001, server-terminal, …) through the proxy, which returns 502 for
+    localhost. urllib already skips it, which is why those calls silently worked
+    while httpx-based ones (probes, agent panel synthesis) failed with 502.
+    Augmenting NO_PROXY fixes httpx, requests and urllib at once; external hosts
+    (DeepSeek, Sorftime, …) still use the proxy."""
+    locals_ = ["127.0.0.1", "localhost", "::1", "0.0.0.0"]
+    existing: list[str] = []
+    for var in ("NO_PROXY", "no_proxy"):
+        for h in (os.environ.get(var) or "").split(","):
+            h = h.strip()
+            if h and h not in existing:
+                existing.append(h)
+    merged = ",".join(existing + [h for h in locals_ if h not in existing])
+    os.environ["NO_PROXY"] = merged
+    os.environ["no_proxy"] = merged
+
+
+_ensure_localhost_no_proxy()
+
+
 class Settings:
     # --- Runtime paths ---
     root_dir: Path = _ROOT
