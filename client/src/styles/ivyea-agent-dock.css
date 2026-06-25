@@ -273,6 +273,37 @@
   margin-top: 8px;
 }
 
+/* Row = clickable session + delete button */
+.ivyea-agent-history-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.ivyea-agent-history-row + .ivyea-agent-history-row {
+  margin-top: 8px;
+}
+.ivyea-agent-history-row .ivyea-agent-history-item {
+  flex: 1;
+  min-width: 0;
+}
+.ivyea-agent-history-del {
+  flex: none;
+  width: 36px;
+  border: 1px solid var(--ivyea-agent-border);
+  background: var(--ivyea-agent-surface-2);
+  color: var(--t3);
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.ivyea-agent-history-del:hover {
+  color: #dc2626;
+  border-color: color-mix(in srgb, #dc2626 40%, var(--b));
+  background: color-mix(in srgb, #dc2626 8%, transparent);
+}
+
 .ivyea-agent-history-item:hover {
   background: color-mix(in srgb, var(--acc) 10%, transparent);
   border-color: color-mix(in srgb, var(--acc) 35%, var(--b));

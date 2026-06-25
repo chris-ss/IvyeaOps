@@ -238,6 +238,18 @@ export async function ivyeaChatSession(sessionId: string) {
   return data;
 }
 
+export async function ivyeaChatSessionDelete(sessionId: string) {
+  const { data } = await api.delete<{ ok: boolean; deleted: string }>(
+    `/ivyea-agent/chat/sessions/${encodeURIComponent(sessionId)}`,
+  );
+  return data;
+}
+
+export async function ivyeaServiceStart() {
+  const { data } = await api.post<{ ok: boolean }>("/ivyea-agent/service/start", {}, { timeout: 25000 });
+  return data;
+}
+
 export async function ivyeaRetrievalStatus() {
   const { data } = await api.get<RetrievalStatus>("/ivyea-agent/retrieval/status");
   return data;
