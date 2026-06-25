@@ -15,6 +15,7 @@ Auth: header `secret-key: <sellersprite_key>`.
 """
 from __future__ import annotations
 
+import datetime
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -30,18 +31,38 @@ def _key() -> str:
     return str(hub_settings.get("sellersprite_key") or "").strip()
 
 
+def recent_month() -> str:
+    """Most recently completed month as yyyyMM (SellerSprite traffic data lags ~1 month)."""
+    first_of_this = datetime.date.today().replace(day=1)
+    last_month = first_of_this - datetime.timedelta(days=1)
+    return last_month.strftime("%Y%m")
+
+
 async def _post(path: str, payload: dict) -> Any:
+    """POST a SellerSprite endpoint. NOTE: SellerSprite returns HTTP 200 even on
+    errors — the real status is in the body's `code` (success == "OK"), so we must
+    inspect the body, not the HTTP status, or an error would be fed to the report
+    as if it were data."""
     key = _key()
     if not key:
-        raise RuntimeError("卖家精灵 key 未配置（系统配置 → 图片/数据源 → 卖家精灵 Key）")
+        raise RuntimeError("卖家精灵 key 未配置（系统配置 → 图片生成服务 / 数据源 → 卖家精灵 Key）")
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         r = await c.post(_BASE + path, json=payload,
                          headers={"Content-Type": "application/json", "secret-key": key})
-    if r.status_code in (401, 403):
-        raise RuntimeError("卖家精灵 key 无效或无权限")
+    try:
+        body = r.json()
+    except Exception:
+        raise RuntimeError(f"卖家精灵返回非 JSON（HTTP {r.status_code}）：{r.text[:160]}")
+    code = str(body.get("code") or "")
+    if code and code != "OK":
+        msg = str(body.get("message") or "")
+        if code == "ERROR_UNAUTHORIZED" or "未授权" in msg:
+            raise RuntimeError("卖家精灵未授权：该 key 没有开放平台 API 权限——请在 "
+                               "open.sellersprite.com 申请 API 并由客服开通对应接口")
+        raise RuntimeError(f"卖家精灵 {code}：{msg}")
     if r.status_code != 200:
-        raise RuntimeError(f"SellerSprite HTTP {r.status_code}: {r.text[:200]}")
-    return r.json()
+        raise RuntimeError(f"卖家精灵 HTTP {r.status_code}：{r.text[:160]}")
+    return body.get("data", body)
 
 
 async def _run_steps(steps: list[tuple[str, str, dict]], progress: ProgressFn) -> tuple[dict, list[str]]:
@@ -58,15 +79,19 @@ async def _run_steps(steps: list[tuple[str, str, dict]], progress: ProgressFn) -
     return data, errors
 
 
+# /traffic/source (MCP traffic_source) returns a keyword/ASIN's traffic keywords:
+# search vs ad split, source breakdown, asinInfo. `includeKeywords` accepts a
+# keyword or an ASIN, so it covers both modes. (Verified endpoint + params per
+# open.sellersprite.com/api/17.)
 async def keyword_pipeline(query: str, marketplace: str, progress: ProgressFn) -> tuple[dict, list[str]]:
     return await _run_steps([
-        ("关键词流量", "/traffic/keyword", {"keyword": query, "marketplace": marketplace}),
-        ("关键词拓展", "/keyword/research", {"keyword": query, "marketplace": marketplace, "page": 1, "size": 30}),
+        ("关键词流量来源", "/traffic/source",
+         {"marketplace": marketplace, "date": recent_month(), "includeKeywords": query, "page": 1, "size": 50}),
     ], progress)
 
 
 async def asin_pipeline(asin: str, marketplace: str, progress: ProgressFn) -> tuple[dict, list[str]]:
     return await _run_steps([
-        ("ASIN 关键词反查", "/product/keyword", {"asin": asin, "marketplace": marketplace, "page": 1, "size": 30}),
-        ("竞品词重叠", "/product/keywords/competitor", {"asins": [asin], "marketplace": marketplace}),
+        ("ASIN 流量来源", "/traffic/source",
+         {"marketplace": marketplace, "date": recent_month(), "includeKeywords": asin, "page": 1, "size": 50}),
     ], progress)

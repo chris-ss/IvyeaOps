@@ -166,18 +166,28 @@ async def _probe_sif(key: str) -> Dict[str, Any]:
 async def _probe_sellersprite(key: str) -> Dict[str, Any]:
     if not key:
         return _err("未填写")
+    # SellerSprite returns HTTP 200 even on auth failure — the real status is in the
+    # body's `code` (success == "OK"). Checking only the HTTP status wrongly reports
+    # an unauthorized key as 有效, which is exactly what misled the user.
+    import datetime
+    last_month = (datetime.date.today().replace(day=1) - datetime.timedelta(days=1)).strftime("%Y%m")
     try:
         async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
             r = await c.post(
-                "https://api.sellersprite.com/v1/traffic/keyword",
-                json={"keyword": "test", "marketplace": "US"},
+                "https://api.sellersprite.com/v1/traffic/source",
+                json={"marketplace": "US", "date": last_month, "includeKeywords": "yoga mat",
+                      "page": 1, "size": 1},
                 headers={"Content-Type": "application/json", "secret-key": key},
             )
-        if r.status_code == 200:
+        body = r.json()
+        code = str(body.get("code") or "")
+        msg = str(body.get("message") or "")
+        if code == "OK":
             return _ok("密钥有效")
-        if r.status_code in (401, 403):
-            return _err("密钥无效或无权限")
-        return _err(f"HTTP {r.status_code}")
+        if code == "ERROR_UNAUTHORIZED" or "未授权" in msg:
+            return _err("未授权：该 key 没有开放平台 API 权限，需在 open.sellersprite.com "
+                        "申请 API 并由客服开通对应接口")
+        return _err(f"{code or r.status_code}：{msg or r.text[:120]}")
     except Exception as e:
         return _err(str(e)[:200])
 
