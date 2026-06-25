@@ -807,7 +807,6 @@ export default function HubSettings() {
     setVals({ ...EMPTY, ...r.settings });
   }, []);
 
-  const [imageAdvancedOpen, setImageAdvancedOpen] = useState(false);
   const [compatPathsOpen, setCompatPathsOpen] = useState(false);
 
   if (loading) return (
@@ -947,13 +946,13 @@ export default function HubSettings() {
       {/* -- 核心 4: 图片生成服务 -- */}
       <Section
         title="图片生成服务"
-        desc={<>Apimart API Key 是图片生成主入口；“AI 生图”默认复用它，不需要再填一遍。只有接入独立生图网关时，才展开高级覆盖。</>}
+        desc={<>默认走 Apimart。Apimart 不稳定/用不了时，在下方「自定义生图接口」填任意兼容 OpenAI <code>/images/generations</code> 的平台（地址 + Key + 模型名）即可切换——Listing 图片、图片翻译、AI 生图都会改用它。</>}
         keys={["apimart_key", "apimart_base", "image_model", "image_api_key", "image_base_url"]}
         vals={vals} onSave={save}
       >
         <Field
-          label={<><Tag kind="rec">推荐</Tag>Apimart API Key</>}
-          hint={<>Listing 图片生成、图片翻译和 AI 生图共用此 Key。</>}
+          label={<><Tag kind="rec">默认</Tag>Apimart API Key</>}
+          hint={<>不接自定义平台时用它；Listing 图片生成、图片翻译和 AI 生图共用。</>}
         >
           <div className="hs-key-inline">
             <SecretInput value={vals.apimart_key} onChange={v => set("apimart_key", v)} placeholder="sk-..." />
@@ -962,7 +961,7 @@ export default function HubSettings() {
         </Field>
 
         <div className="hs-row2">
-          <Field label="模型名称" hint="默认 gpt-image-2">
+          <Field label="模型名称" hint="Apimart 用 gpt-image-2；自定义平台填它的模型名（如 dall-e-3）。">
             <TxtInput value={vals.image_model} onChange={v => set("image_model", v)} placeholder="gpt-image-2" />
           </Field>
           <Field label="Apimart 地址" hint="非官方网关才需改，否则保持默认。">
@@ -970,34 +969,25 @@ export default function HubSettings() {
           </Field>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setImageAdvancedOpen(o => !o)}
-          style={{
-            display: "flex", alignItems: "center", gap: 6, alignSelf: "flex-start",
-            background: "transparent", border: "1px solid var(--b)", borderRadius: 4,
-            padding: "5px 12px", color: "var(--t3)", fontSize: 11,
-            cursor: "pointer", fontFamily: "var(--font)",
-          }}
-        >
-          <span style={{ display: "inline-block", transition: "transform .15s", transform: imageAdvancedOpen ? "rotate(90deg)" : "none" }}>▶</span>
-          高级：独立生图接口覆盖
-        </button>
-
-        {imageAdvancedOpen && (
-          <div style={{ paddingLeft: 10, borderLeft: "2px solid var(--b)" }}>
-            <div className="hs-row3">
-              <Field label={<><Tag kind="opt">可选</Tag>独立生图 API Key</>}
-                hint="通常留空。填写后 AI 生图改用这里，不再复用 Apimart API Key。">
-                <SecretInput value={vals.image_api_key} onChange={v => set("image_api_key", v)} placeholder="留空 = 复用 Apimart API Key" />
-              </Field>
-              <Field label={<><Tag kind="opt">可选</Tag>独立生图 Base URL</>}
-                hint="通常留空。填写后 AI 生图改用这里，不再复用 Apimart 地址。">
-                <TxtInput value={vals.image_base_url} onChange={v => set("image_base_url", v)} placeholder="留空 = 复用 Apimart 地址" />
-              </Field>
-            </div>
+        <div style={{ borderTop: "1px solid var(--b)", margin: "6px 0 2px", paddingTop: 10 }}>
+          <div style={{ fontSize: 11, color: "var(--t2)", fontWeight: 600, marginBottom: 2 }}>
+            自定义生图接口（填了就用它，不再走 Apimart）
           </div>
-        )}
+          <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 8 }}>
+            任意兼容 OpenAI <code>/images/generations</code> 的平台均可：同步返回（b64/url）或 Apimart 式异步任务都支持。换平台时记得把上面的「模型名称」也改成该平台的模型名。
+          </div>
+        </div>
+        <div className="hs-row2">
+          <Field label={<><Tag kind="opt">可选</Tag>接口地址 Base URL</>}
+            hint="到 /v1 为止，如 https://api.openai.com/v1。留空 = 用 Apimart。">
+            <TxtInput value={vals.image_base_url} onChange={v => set("image_base_url", v)} placeholder="https://api.openai.com/v1" />
+          </Field>
+          <Field label={<><Tag kind="opt">可选</Tag>API Key</>}
+            hint="该平台的 Key。留空 = 复用 Apimart Key。">
+            <SecretInput value={vals.image_api_key} onChange={v => set("image_api_key", v)} placeholder="sk-..." />
+          </Field>
+        </div>
+        <TestButton settingKey="image_base_url" value={vals.image_base_url} label="测试自定义生图接口" />
       </Section>
 
       <HealthPanel />

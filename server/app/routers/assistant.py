@@ -362,21 +362,39 @@ async def image_submit(req: ImageReq, _user: str = Depends(require_user)) -> dic
         asyncio.create_task(_run_edit_job(job_id, ic["model"], req.prompt, req.size, key, ic["base_url"], refs[0]))
         return {"task_id": job_id}
 
-    # Text-to-image
+    # Text-to-image. Apimart returns an async task_id (poll /tasks/{id}); a
+    # standard OpenAI-compatible platform returns the image synchronously in
+    # data[*].b64_json/url. Support BOTH so users can point image_base_url at any
+    # platform when Apimart is down.
     payload = {"model": ic["model"], "prompt": req.prompt, "n": min(max(req.n, 1), 4), "size": req.size}
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10)) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as c:
             r = await c.post(f"{ic['base_url']}/images/generations", json=payload,
                              headers={"Authorization": f"Bearer {key}"})
     except Exception as e:
         raise HTTPException(502, f"生图请求失败：{e}")
     if r.status_code >= 400:
-        raise HTTPException(502, f"Apimart 生图失败 HTTP {r.status_code}：{r.text[:200]}")
-    item = (r.json().get("data") or [{}])[0]
-    tid = item.get("task_id")
-    if not tid:
-        raise HTTPException(502, "Apimart 未返回任务 ID")
-    return {"task_id": tid}
+        raise HTTPException(502, f"生图失败 HTTP {r.status_code}：{_upstream_message(r.text) or r.text[:200]}")
+    data = r.json().get("data") or []
+    first = data[0] if data else {}
+    tid = first.get("task_id")
+    if tid:
+        return {"task_id": tid}   # async (Apimart) — client polls /image/status
+
+    # Synchronous (OpenAI-compatible): the image(s) are already here — stash them
+    # in the same in-memory job map so /image/status serves them on the first poll.
+    images: List[str] = []
+    for it in data:
+        if it.get("b64_json"):
+            images.append("data:image/png;base64," + it["b64_json"])
+        elif isinstance(it.get("url"), str):
+            images.append(it["url"])
+    if not images:
+        raise HTTPException(502, "生图未返回 task_id 也没有图片，请检查自定义生图接口是否兼容 /images/generations")
+    job_id = "sync_" + uuid.uuid4().hex[:16]
+    _EDIT_JOBS[job_id] = {"status": "completed", "images": images, "error": None, "ts": time.time()}
+    _prune_edit_jobs()
+    return {"task_id": job_id}
 
 
 @router.get("/image/status")

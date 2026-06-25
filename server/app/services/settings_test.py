@@ -420,6 +420,31 @@ def _validate_provider_list(val: str, known: set, label: str) -> Dict[str, Any]:
     return _ok(f"顺序合法：{' → '.join(items)}")
 
 
+async def _probe_image_gen(base: str = "") -> Dict[str, Any]:
+    """Lightweight reachability check for the image-gen endpoint (custom or
+    Apimart). Hits {base}/models — a real generation would cost money/time."""
+    base = (base or _hub_get("image_base_url") or _hub_get("apimart_base")
+            or "https://api.apimart.ai/v1").strip()
+    key = (_hub_get("image_api_key") or _hub_get("apimart_key")).strip()
+    if not base:
+        return _err("未填写接口地址")
+    if not key:
+        return _err("未填写 API Key（自定义留空时会复用 Apimart Key）")
+    try:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            r = await c.get(base.rstrip("/") + "/models",
+                            headers={"Authorization": f"Bearer {key}"})
+        if r.status_code == 200:
+            return _ok(f"接口可达（{base}）")
+        if r.status_code in (401, 403):
+            return _err("Key 不正确或无权限")
+        if r.status_code == 404:
+            return _ok("接口可达，但无 /models（404）；若支持 /images/generations 仍可用")
+        return _err(f"HTTP {r.status_code}")
+    except Exception as e:  # noqa: BLE001
+        return _err(f"连接失败：{str(e)[:120]}")
+
+
 async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
     """Test one setting. `value` is the in-flight (unsaved) value; when
     None or empty, falls back to the persisted value.
@@ -455,6 +480,10 @@ async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
         return _validate_provider_list(val, _KNOWN_TEXT_PROVIDERS, "文本 provider 链")
     if key == "vision_ai_providers":
         return _validate_provider_list(val, _KNOWN_VISION_PROVIDERS, "视觉 provider 链")
+    if key == "image_base_url":
+        return await _probe_image_gen(base=val)
+    if key in ("image_api_key", "image_model"):
+        return await _probe_image_gen()
 
     if key == "imgflow_url":
         # imgflow's root may not respond to GET; try /api/health or /
@@ -493,6 +522,7 @@ async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
 _SELF_CHECK_KEYS = [
     ("apimart_key", "图片生成 Apimart Key"),
     ("apimart_base", "Apimart 地址"),
+    ("image_base_url", "自定义生图接口"),
     ("text_ai_providers", "文本 provider 链"),
     ("deepseek_api_key", "DeepSeek Key"),
     ("assistant_api_key", "全局兜底大模型"),
