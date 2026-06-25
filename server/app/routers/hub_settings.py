@@ -77,6 +77,13 @@ async def test_setting(body: TestRequest, _u: str = Depends(require_user)):
     return await settings_test.test_value(body.key, body.value)
 
 
+@router.post("/settings/self-check")
+async def self_check_settings(_u: str = Depends(require_user)):
+    """一键自检：对每个已配置项跑真实在线测试，返回 ok/err/skip 矩阵。"""
+    from app.services import settings_test
+    return await settings_test.self_check()
+
+
 @router.post("/settings/autodetect")
 async def autodetect_settings(_u: str = Depends(require_user)):
     """Scan the host for known integration paths and return suggestions."""
