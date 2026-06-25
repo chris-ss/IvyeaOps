@@ -16,7 +16,15 @@ import uvicorn
 
 def _runtime_root() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        exe_dir = Path(sys.executable).resolve().parent
+        # macOS .app: sys.executable is IvyeaOps.app/Contents/MacOS/IvyeaOps, but the
+        # data dirs (client/dist, skills, docs) ship in ../Resources. Windows onedir
+        # keeps them next to the exe, so only branch when we're clearly in a .app.
+        if sys.platform == "darwin" and exe_dir.name == "MacOS":
+            res = exe_dir.parent / "Resources"
+            if (res / "client" / "dist").exists() or (res / "client").exists():
+                return res
+        return exe_dir
     return Path(__file__).resolve().parents[1]
 
 

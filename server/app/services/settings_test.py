@@ -10,6 +10,7 @@ click — saves them from typing paths by hand.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -391,9 +392,40 @@ async def _probe_feishu_app() -> Dict[str, Any]:
 # Public dispatch
 # ---------------------------------------------------------------------------
 
+_KNOWN_TEXT_PROVIDERS = {"ivyea-agent", "assistant", "deepseek", "codex", "claude", "hermes", "apimart"}
+_KNOWN_VISION_PROVIDERS = {"openai", "assistant", "apimart"}
+
+
+async def _probe_text_provider(provider: str, label: str) -> Dict[str, Any]:
+    """Real round-trip through one configured text provider, so a wrong
+    key/model/base is caught here instead of at runtime in a panel."""
+    from app.services import ai_synthesis_service
+    try:
+        text = await asyncio.wait_for(
+            ai_synthesis_service.generate_text_provider(provider, "只回复两个字：可用"), timeout=40.0)
+        return _ok(f"{label} 可用（返回 {len(text)} 字）") if text.strip() else _err(f"{label} 返回空")
+    except asyncio.TimeoutError:
+        return _err(f"{label} 超时（>40s）")
+    except Exception as e:  # noqa: BLE001
+        return _err(f"{label} 不可用：{str(e)[:160]}")
+
+
+def _validate_provider_list(val: str, known: set, label: str) -> Dict[str, Any]:
+    items = [p.strip().lower() for p in (val or "").split(",") if p.strip()]
+    if not items:
+        return _err("未填写")
+    bad = [p for p in items if p not in known]
+    if bad:
+        return _err(f"未知 provider：{', '.join(bad)}（可用：{', '.join(sorted(known))}）")
+    return _ok(f"顺序合法：{' → '.join(items)}")
+
+
 async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
     """Test one setting. `value` is the in-flight (unsaved) value; when
-    None or empty, falls back to the persisted value."""
+    None or empty, falls back to the persisted value.
+
+    Provider *bundles* (assistant_*, deepseek, …) are validated by a real
+    round-trip through the SAVED config — save the section first, then 测试."""
     val = value.strip() if value else _hub_get(key)
 
     # Map keys to probes
@@ -411,6 +443,18 @@ async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
         return await _probe_openai(val)
     if key in ("ivyea_agent_url", "ivyea_agent_token"):
         return await _probe_ivyea_agent(_hub_get("ivyea_agent_url") or "http://127.0.0.1:8765")
+
+    # Text-provider configs → real round-trip through the saved config.
+    if key == "deepseek_api_key":
+        return await _probe_text_provider("deepseek", "DeepSeek")
+    if key in ("assistant_provider", "assistant_model", "assistant_api_key", "assistant_base_url"):
+        return await _probe_text_provider("assistant", "全局兜底大模型")
+    if key in ("ivyea_agent_provider", "ivyea_agent_model", "ivyea_agent_api_key", "ivyea_agent_base_url"):
+        return await _probe_ivyea_agent(_hub_get("ivyea_agent_url") or "http://127.0.0.1:8765")
+    if key == "text_ai_providers":
+        return _validate_provider_list(val, _KNOWN_TEXT_PROVIDERS, "文本 provider 链")
+    if key == "vision_ai_providers":
+        return _validate_provider_list(val, _KNOWN_VISION_PROVIDERS, "视觉 provider 链")
 
     if key == "imgflow_url":
         # imgflow's root may not respond to GET; try /api/health or /
@@ -439,7 +483,51 @@ async def test_value(key: str, value: Optional[str]) -> Dict[str, Any]:
     if key in ("hermes_node_bin", "bun_bin"):
         return _probe_dir(val)
 
-    return _err(f"未知配置项：{key}")
+    # 兜底：没有专门在线测试的项也给出清楚结果，不再吓人地报"未知配置项"。
+    if not val:
+        return _err("未配置（留空）")
+    return _ok("已保存（此项无在线测试，保存即生效）")
+
+
+# 一键自检：对每个已配置项跑真实在线测试，让管理员一眼看清"配了但用不了"的项。
+_SELF_CHECK_KEYS = [
+    ("apimart_key", "图片生成 Apimart Key"),
+    ("apimart_base", "Apimart 地址"),
+    ("text_ai_providers", "文本 provider 链"),
+    ("deepseek_api_key", "DeepSeek Key"),
+    ("assistant_api_key", "全局兜底大模型"),
+    ("ivyea_agent_url", "IvyeaAgent 本地服务"),
+    ("vision_ai_providers", "视觉 provider 链"),
+    ("openai_api_key", "OpenAI 视觉 Key"),
+    ("sorftime_key", "Sorftime Key"),
+    ("sif_key", "SIF Key"),
+    ("sellersprite_key", "卖家精灵 Key"),
+    ("imgflow_url", "图片处理后端"),
+    ("alert_webhook", "告警 Webhook"),
+]
+
+
+async def self_check() -> Dict[str, Any]:
+    """Run the real online test for every *configured* item; return a matrix so
+    the admin sees green/red per item (no more 'saved but errors at runtime')."""
+    async def _one(key: str, label: str) -> Dict[str, Any]:
+        if not _hub_get(key):
+            return {"key": key, "label": label, "status": "skip", "detail": "未配置"}
+        try:
+            res = await test_value(key, None)
+        except Exception as e:  # noqa: BLE001
+            res = _err(str(e)[:160])
+        return {"key": key, "label": label,
+                "status": "ok" if res.get("ok") else "err", "detail": res.get("detail", "")}
+
+    results = list(await asyncio.gather(*[_one(k, lbl) for k, lbl in _SELF_CHECK_KEYS]))
+    return {
+        "results": results,
+        "ok": sum(1 for r in results if r["status"] == "ok"),
+        "err": sum(1 for r in results if r["status"] == "err"),
+        "skip": sum(1 for r in results if r["status"] == "skip"),
+        "total": len(results),
+    }
 
 
 # ---------------------------------------------------------------------------

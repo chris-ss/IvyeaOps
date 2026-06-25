@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.core.security import require_user
+from app.core.security import require_user, require_admin
 from app.services import ivyea_agent_service as svc
 from app.services import ivyea_ops_tools
 
@@ -161,6 +161,18 @@ def _with_ops_bridge(payload: dict[str, Any], request: Request) -> dict[str, Any
 @router.get("/status")
 def status() -> dict[str, Any]:
     return svc.ensure_available()
+
+
+@router.get("/version")
+def agent_version() -> dict[str, Any]:
+    """Current local IvyeaAgent version (for the 系统配置 update card)."""
+    return {"version": svc.agent_version(), "available": svc.availability().get("available", False)}
+
+
+@router.post("/upgrade")
+def upgrade(_admin: str = Depends(require_admin)) -> dict[str, Any]:
+    """Update the bundled IvyeaAgent (pip -U from git) and restart the local serve."""
+    return svc.upgrade_agent()
 
 
 @router.get("/bootstrap")

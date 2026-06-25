@@ -250,3 +250,78 @@ jobs:
           files: |
             IvyeaOps-Windows-x64-${{ steps.tag.outputs.tag }}.zip
             IvyeaOps-Windows-x64.zip
+
+  build-macos-app:
+    name: Build macOS self-contained .app
+    runs-on: macos-latest
+    needs: build-and-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build frontend
+        working-directory: client
+        env:
+          NODE_ENV: development
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/index.html || { echo "client/dist/index.html missing"; exit 1; }
+
+      - name: Build backend .app (PyInstaller --windowed, embeds Python)
+        run: |
+          python -m pip install --upgrade pip wheel pyinstaller
+          python -m pip install -r server/requirements.txt
+          # --windowed → a self-contained IvyeaOps.app (Python embedded, no install
+          # needed). --onedir keeps deps in Contents/Frameworks (no per-launch extract,
+          # mirrors the Windows x64 choice). Data dirs are copied into Contents/Resources
+          # below; _runtime_root() resolves there on darwin.
+          pyinstaller --noconfirm --clean --onedir --windowed \
+            --name IvyeaOps --paths server server/ivyeaops_server.py
+          test -d "dist/IvyeaOps.app" || { echo "IvyeaOps.app missing"; exit 1; }
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stage data into the .app + zip
+        shell: bash
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          res="dist/IvyeaOps.app/Contents/Resources"
+          mkdir -p "$res/client"
+          cp -R client/dist "$res/client/dist"
+          cp -R client/public "$res/client/public"
+          cp -R docs "$res/docs"
+          cp -R skills "$res/skills"
+          [ -d amazon-image-workflow ] && cp -R amazon-image-workflow "$res/amazon-image-workflow" || true
+          echo "$tag" > "$res/VERSION"
+          # zip the .app (ditto preserves the bundle bit + symlinks)
+          ( cd dist && ditto -c -k --sequesterRsrc --keepParent "IvyeaOps.app" "../IvyeaOps-macOS-$tag.zip" )
+          cp "IvyeaOps-macOS-$tag.zip" "IvyeaOps-macOS.zip"
+          ls -lh IvyeaOps-macOS-*.zip
+
+      - name: Upload macOS .app to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          files: |
+            IvyeaOps-macOS-${{ steps.tag.outputs.tag }}.zip
+            IvyeaOps-macOS.zip

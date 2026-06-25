@@ -251,6 +251,54 @@ def start_local_service() -> dict[str, Any]:
     }
 
 
+def _venv_python(cli: str) -> str:
+    """The python next to the ivyea CLI (its install env), for pip upgrades."""
+    parent = Path(cli).resolve().parent
+    for name in ("python", "python3", "python.exe"):
+        cand = parent / name
+        if cand.is_file():
+            return str(cand)
+    return sys.executable
+
+
+def agent_version() -> str:
+    try:
+        h = request_json("GET", "/health", timeout=2.0)
+        return str(h.get("version") or "") if isinstance(h, dict) else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _run_step(cmd: list[str], timeout: float = 300.0) -> dict[str, Any]:
+    try:
+        p = subprocess.run(cmd, cwd=str(ops_settings.root_dir), text=True,
+                           capture_output=True, timeout=timeout, **no_window_kwargs())
+        return {"cmd": " ".join(cmd[:4]), "returncode": p.returncode,
+                "stdout": (p.stdout or "")[-1500:], "stderr": (p.stderr or "")[-1500:]}
+    except Exception as exc:  # noqa: BLE001
+        return {"cmd": " ".join(cmd[:4]), "returncode": -1, "error": str(exc)}
+
+
+def upgrade_agent() -> dict[str, Any]:
+    """Update the bundled IvyeaAgent (pip -U from git into its venv) and restart
+    the local serve so the new code loads. Returns before/after version + logs."""
+    cli = _find_ivyea_cli()
+    if not cli:
+        return {"ok": False, "error": "ivyea CLI 未找到（IvyeaAgent 可能未安装）"}
+    py = _venv_python(cli)
+    repo = (os.getenv("IVYEA_AGENT_REPO") or "https://github.com/Hector-xue/ivyea-agent.git").strip()
+    ref = (os.getenv("IVYEA_AGENT_REF") or "main").strip()
+    before = agent_version()
+    install = _run_step([py, "-m", "pip", "install", "-U", f"git+{repo}@{ref}"])
+    _run_step([cli, "self", "service-stop"], timeout=20.0)   # stop old serve
+    restart = start_local_service()                          # start fresh (new code)
+    after = agent_version()
+    ok = install.get("returncode") == 0
+    return {"ok": ok, "before": before, "after": after, "install": install,
+            "restart": restart,
+            "note": "" if ok else "升级失败，请查看 install.stderr 或在终端手动 pip 升级。"}
+
+
 def ensure_available() -> dict[str, Any]:
     global _LAST_START_ATTEMPT
     current = availability()

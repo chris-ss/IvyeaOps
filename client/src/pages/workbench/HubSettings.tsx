@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import SheetSelect from "../../components/SheetSelect";
 import {
   getSettings, patchSettings, getHealth, changePassword,
-  testSetting, autodetectSettings,
-  type HubSettings, type HealthResp, type TestResult,
+  testSetting, autodetectSettings, selfCheckSettings, getAgentVersion, upgradeAgent,
+  type HubSettings, type HealthResp, type TestResult, type SelfCheckResp,
 } from "../../api/settings";
 import { installAgentStreamUrl } from "../../api/setup";
 import { lockBodyScroll } from "../../lib/scrollLock";
@@ -407,6 +407,11 @@ function LLMModelBlock({
           )}
         </div>
       )}
+      {provider && apiKey && (
+        <div style={{ marginTop: 8 }}>
+          <TestButton settingKey={apiKeyKey} value={apiKey} label="测试连通（真实调用一次）" />
+        </div>
+      )}
     </div>
   );
 }
@@ -628,6 +633,87 @@ function AdvancedBlock({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── One-click self-check: test every configured item, show green/red ──────────
+function SelfCheckPanel() {
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<SelfCheckResp | null>(null);
+  const [err, setErr] = useState("");
+  const run = async () => {
+    setBusy(true); setErr(""); setRes(null);
+    try { setRes(await selfCheckSettings()); }
+    catch (e: any) { setErr(e?.response?.data?.detail || e?.message || "自检失败"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t)" }}>一键全部自检</div>
+          <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>
+            对每个已配置项做一次真实在线测试，一眼看清"配了但用不了"的项。
+          </div>
+        </div>
+        <button className="hs-test-btn" onClick={run} disabled={busy} type="button" style={{ whiteSpace: "nowrap" }}>
+          {busy ? "自检中…（每项真实调用一次）" : "开始自检"}
+        </button>
+      </div>
+      {err && <div className="hs-test-result err" style={{ marginTop: 8 }}>✗ {err}</div>}
+      {res && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
+            通过 {res.ok} · 失败 {res.err} · 未配置 {res.skip} · 共 {res.total}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {res.results.map((r) => (
+              <div key={r.key} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 11 }}>
+                <span style={{ width: 14, color: r.status === "ok" ? "var(--ok,#16a34a)" : r.status === "err" ? "var(--err,#dc2626)" : "var(--t3)" }}>
+                  {r.status === "ok" ? "✓" : r.status === "err" ? "✗" : "—"}
+                </span>
+                <span style={{ minWidth: 130, fontWeight: 600, color: "var(--t2)" }}>{r.label}</span>
+                <span style={{ color: r.status === "err" ? "var(--err,#dc2626)" : "var(--t3)" }}>{r.detail}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── IvyeaAgent version + 一键更新 ──────────────────────────────────────────────
+function AgentUpdateRow() {
+  const [ver, setVer] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const load = () => { getAgentVersion().then(r => setVer(r.version || "")).catch(() => setVer("")); };
+  useEffect(load, []);
+  const run = async () => {
+    if (!confirm("将从 GitHub 拉取最新 IvyeaAgent 并重启本机服务（约 1–2 分钟），期间右下角 Agent 会短暂中断。继续？")) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await upgradeAgent();
+      setVer(r.after || ver);
+      setMsg(r.ok
+        ? { ok: true, text: r.before === r.after ? `已是最新（${r.after || "未知"}）` : `已更新 ${r.before || "?"} → ${r.after || "?"}` }
+        : { ok: false, text: r.note || r.install?.stderr || "更新失败" });
+    } catch (e: any) {
+      setMsg({ ok: false, text: e?.response?.data?.detail || e?.message || "更新失败" });
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="hs-agent-card">
+      <div className="hs-agent-card-title">版本与更新</div>
+      <div className="hs-agent-card-desc">当前 IvyeaAgent 版本 <b style={{ color: "var(--t)" }}>{ver || "未知/未运行"}</b>。安装 IvyeaOps 时已内置 IvyeaAgent。</div>
+      <div className="hs-test-row" style={{ marginTop: 6 }}>
+        <button className="hs-test-btn" onClick={run} disabled={busy} type="button">
+          {busy ? "更新中…（拉取 + 重启）" : "检查并更新"}
+        </button>
+        {msg && <span className={"hs-test-result " + (msg.ok ? "ok" : "err")}>{msg.ok ? "✓" : "✗"} {msg.text}</span>}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const EMPTY: HubSettings = {
@@ -715,6 +801,8 @@ export default function HubSettings() {
 
       <AutodetectPanel onApply={applySuggestions} />
 
+      <SelfCheckPanel />
+
       {/* -- 核心 1: IvyeaAgent -- */}
       <Section
         title="IvyeaAgent"
@@ -734,6 +822,8 @@ export default function HubSettings() {
               <TestButton settingKey="ivyea_agent_url" value={vals.ivyea_agent_url} label="测试 IvyeaAgent" />
             </Field>
           </div>
+
+          <AgentUpdateRow />
 
           <div className="hs-agent-card">
             <div className="hs-agent-card-title"><Tag kind="rec">推荐</Tag>运行方式</div>

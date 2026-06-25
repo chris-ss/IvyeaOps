@@ -166,3 +166,23 @@ export async function autodetectSettings(): Promise<AutodetectResp> {
   const { data } = await api.post<AutodetectResp>("/settings/autodetect", {}, { timeout: 10000 });
   return data;
 }
+
+export interface SelfCheckItem { key: string; label: string; status: "ok" | "err" | "skip"; detail: string; }
+export interface SelfCheckResp { results: SelfCheckItem[]; ok: number; err: number; skip: number; total: number; }
+
+export async function selfCheckSettings(): Promise<SelfCheckResp> {
+  const { data } = await api.post<SelfCheckResp>("/settings/self-check", {}, { timeout: 90000 });
+  return data;
+}
+
+export interface AgentVersionResp { version: string; available: boolean; }
+
+export async function getAgentVersion(): Promise<AgentVersionResp> {
+  const { data } = await api.get<AgentVersionResp>("/ivyea-agent/version", { timeout: 8000 });
+  return data;
+}
+
+export async function upgradeAgent(): Promise<{ ok: boolean; before: string; after: string; note?: string; install?: { stderr?: string } }> {
+  const { data } = await api.post("/ivyea-agent/upgrade", {}, { timeout: 320000 });
+  return data;
+}
