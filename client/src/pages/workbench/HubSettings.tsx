@@ -808,6 +808,7 @@ export default function HubSettings() {
   }, []);
 
   const [compatPathsOpen, setCompatPathsOpen] = useState(false);
+  const [sysOpen, setSysOpen] = useState(false);
 
   if (loading) return (
     <div aria-busy="true" aria-live="polite" style={{ display: "grid", gap: 12, maxWidth: 720 }}>
@@ -989,6 +990,18 @@ export default function HubSettings() {
         </div>
         <TestButton settingKey="image_base_url" value={vals.image_base_url} label="测试自定义生图接口" />
       </Section>
+
+      {/* ── 系统状态及以下：默认折叠，点开查看 ── */}
+      <div className="hs-advanced">
+        <button type="button" className="hs-advanced-toggle" onClick={() => setSysOpen(o => !o)}>
+          <span style={{ display: "inline-block", transition: "transform .15s", transform: sysOpen ? "rotate(90deg)" : "none" }}>▶</span>
+          <span className="hs-advanced-toggle-label">系统状态与更多设置</span>
+          <span className="hs-advanced-toggle-sub">
+            {sysOpen ? "点击收起" : "系统状态 · 可选 AI 能力 · 兼容旧链路 · 高级选项 · 修改密码 · Skill Studio"}
+          </span>
+        </button>
+        {sysOpen && (
+        <div className="hs-advanced-body">
 
       <HealthPanel />
 
@@ -1275,6 +1288,10 @@ export default function HubSettings() {
             前往配置 →
           </Link>
         </div>
+      </div>
+
+        </div>
+        )}
       </div>
 
     </div>
