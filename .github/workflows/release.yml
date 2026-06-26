@@ -115,6 +115,13 @@ jobs:
             --exclude='server/.env' \
             ./ "$STAGE/"
           test -f "$STAGE/client/dist/index.html"   # 确保预构建前端进了包
+          # Ship IvyeaAgent source so install.sh / install-components.ps1 install it
+          # OFFLINE from the bundle (no git/proxy failures at the user's end).
+          AGENT_REF="${IVYEA_AGENT_REF:-main}"
+          git clone --depth 1 --branch "$AGENT_REF" https://github.com/Hector-xue/ivyea-agent.git "$STAGE/agent" \
+            || git clone --depth 1 https://github.com/Hector-xue/ivyea-agent.git "$STAGE/agent"
+          rm -rf "$STAGE/agent/.git"
+          test -f "$STAGE/agent/pyproject.toml"   # bundled agent source present
           ( cd staging && zip -rq "../IvyeaOps-${TAG}.zip" IvyeaOps )
           cp "IvyeaOps-${TAG}.zip" "IvyeaOps.zip"   # 版本无关的稳定名，供 releases/latest/download 一键下载
           ls -lh "IvyeaOps-${TAG}.zip" "IvyeaOps.zip"
@@ -180,6 +187,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel pyinstaller
           python -m pip install -r server/requirements.txt
+          # Bundle IvyeaAgent INTO the exe so the 免-Python package needs no
+          # separate pip/Python/git install — the #1 deploy-failure source.
+          $agentRef = if ($env:IVYEA_AGENT_REF) { $env:IVYEA_AGENT_REF } else { "main" }
+          python -m pip install "git+https://github.com/Hector-xue/ivyea-agent.git@$agentRef"
+          python -c "import ivyea_agent; print('bundling IvyeaAgent', ivyea_agent.__version__)"
           # Build the PyInstaller arg list. --collect-all winpty bundles pywinpty's
           # native ConPTY DLLs so the server-terminal board works in the frozen exe.
           # Best-effort: if winpty isn't importable, build without it (the terminal
@@ -193,9 +205,16 @@ jobs:
           $piArgs = @("--noconfirm","--clean","--onedir","--windowed","--hidden-import","tkinter","--hidden-import","tkinter.messagebox")
           try { python -c "import winpty"; $piArgs += @("--collect-all","winpty"); Write-Host "bundling pywinpty (ConPTY)" }
           catch { Write-Host "winpty not importable; building without ConPTY bundle" }
+          $piArgs += @("--collect-all","ivyea_agent","--collect-submodules","ivyea_agent")
           $piArgs += @("--icon","client/public/favicon.ico","--name","IvyeaOpsServer","--paths","server","server/ivyeaops_server.py")
           pyinstaller @piArgs
           if (!(Test-Path dist/IvyeaOpsServer/IvyeaOpsServer.exe)) { throw "IvyeaOpsServer.exe missing" }
+          # Smoke: the exe must run the bundled agent serve from `agent-serve`.
+          $p = Start-Process -FilePath "dist/IvyeaOpsServer/IvyeaOpsServer.exe" -ArgumentList "agent-serve","--host","127.0.0.1","--port","8799" -PassThru
+          Start-Sleep -Seconds 12
+          try { $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8799/health" -TimeoutSec 5; Write-Host "bundled agent serve OK: $($r.Content)" }
+          catch { $p | Stop-Process -Force; throw "bundled agent serve did not answer /health: $_" }
+          $p | Stop-Process -Force
 
       - name: Resolve tag
         id: tag
@@ -282,13 +301,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel pyinstaller
           python -m pip install -r server/requirements.txt
+          # Bundle IvyeaAgent into the .app so it needs no separate install.
+          AGENT_REF="${IVYEA_AGENT_REF:-main}"
+          python -m pip install "git+https://github.com/Hector-xue/ivyea-agent.git@${AGENT_REF}"
+          python -c "import ivyea_agent; print('bundling IvyeaAgent', ivyea_agent.__version__)"
           # --windowed → a self-contained IvyeaOps.app (Python embedded, no install
           # needed). --onedir keeps deps in Contents/Frameworks (no per-launch extract,
           # mirrors the Windows x64 choice). Data dirs are copied into Contents/Resources
           # below; _runtime_root() resolves there on darwin.
           pyinstaller --noconfirm --clean --onedir --windowed \
+            --collect-all ivyea_agent --collect-submodules ivyea_agent \
             --name IvyeaOps --paths server server/ivyeaops_server.py
           test -d "dist/IvyeaOps.app" || { echo "IvyeaOps.app missing"; exit 1; }
+          # Smoke: the .app binary must run the bundled agent serve.
+          "dist/IvyeaOps.app/Contents/MacOS/IvyeaOps" agent-serve --host 127.0.0.1 --port 8799 &
+          SMOKE_PID=$!; sleep 12
+          curl -fsS http://127.0.0.1:8799/health && echo " — bundled agent serve OK" || { kill $SMOKE_PID 2>/dev/null; echo "bundled agent serve failed"; exit 1; }
+          kill $SMOKE_PID 2>/dev/null || true
 
       - name: Resolve tag
         id: tag

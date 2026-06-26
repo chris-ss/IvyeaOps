@@ -221,10 +221,30 @@ def start_local_service() -> dict[str, Any]:
     bind = _service_bind()
     if not bind:
         return {"ok": False, "error": "auto_start_only_supports_localhost", "base_url": base_url()}
+    host, port = bind
+
+    # Frozen build (Windows x64 exe / macOS .app): the agent is bundled into this
+    # exe — there is no `ivyea` binary or python. Run the serve from the exe itself
+    # via `<exe> agent-serve …`, spawned detached. No pip/Python/git needed.
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "agent-serve", "--host", host, "--port", str(port)]
+        env = {**os.environ}
+        token = _token()
+        if token:
+            env["IVYEA_API_TOKEN"] = token   # serve reads the token from env
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(ops_settings.root_dir), env=env,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                close_fds=(os.name != "nt"), **no_window_kwargs(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "command": " ".join(cmd[:3])}
+        return {"ok": True, "frozen": True, "pid": proc.pid, "command": "agent-serve"}
+
     cli = _find_ivyea_cli()
     if not cli:
         return {"ok": False, "error": "ivyea_cli_not_found"}
-    host, port = bind
     cmd = [cli, "self", "service-start", "--host", host, "--port", str(port)]
     token = _token()
     env = {**os.environ}
@@ -273,6 +293,13 @@ def agent_version() -> str:
 def _installed_agent_version(py: str) -> str:
     """Version of the *installed* ivyea_agent package (reflects files on disk),
     independent of whether the serve has restarted to load them."""
+    if getattr(sys, "frozen", False):
+        # Bundled into this exe — import it directly (sys.executable isn't python).
+        try:
+            import ivyea_agent
+            return str(getattr(ivyea_agent, "__version__", "") or "")
+        except Exception:  # noqa: BLE001
+            return ""
     try:
         p = subprocess.run([py, "-c", "import ivyea_agent, sys; sys.stdout.write(ivyea_agent.__version__)"],
                            text=True, capture_output=True, timeout=15, **no_window_kwargs())
@@ -305,6 +332,13 @@ def upgrade_agent(progress=None) -> dict[str, Any]:
                 pass
 
     _p("preparing", 5)
+    # Frozen build: the agent is bundled into this exe, so it updates *with*
+    # IvyeaOps — there's nothing to pip-upgrade. Tell the user to update IvyeaOps.
+    if getattr(sys, "frozen", False):
+        v = _installed_agent_version("") or agent_version()
+        _p("done", 100)
+        return {"ok": True, "bundled": True, "before": v, "after": v,
+                "note": "内置 IvyeaAgent 随 IvyeaOps 一起更新——请用左下角的「更新」升级 IvyeaOps 即可。"}
     cli = _find_ivyea_cli()
     if not cli:
         return {"ok": False, "error": "ivyea CLI 未找到（IvyeaAgent 可能未安装）"}
@@ -354,7 +388,8 @@ def maybe_sync_agent_on_upgrade() -> None:
     configured = hub_settings.get("ivyea_agent_auto_start")
     auto = configured if isinstance(configured, bool) else \
         os.getenv("IVYEA_AGENT_AUTO_START", "1").lower() not in {"0", "false", "no"}
-    if not auto or _agent_is_editable():
+    # Frozen build: the agent is bundled and updates with IvyeaOps — nothing to pip.
+    if not auto or _agent_is_editable() or getattr(sys, "frozen", False):
         return
     cur = app_version()
     if cur in ("", "dev"):

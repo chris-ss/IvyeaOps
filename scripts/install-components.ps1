@@ -134,6 +134,12 @@ function Install-NpmPackage($commandName, $packageName) {
 
 function Install-IvyeaAgent {
     Refresh-Path
+    # Windows x64 免-Python package: IvyeaAgent is bundled INTO IvyeaOpsServer.exe —
+    # nothing to install, IvyeaOps starts it from the exe. Skip entirely.
+    if (Test-Path (Join-Path $RepoRoot "IvyeaOpsServer.exe")) {
+        Write-Info "IvyeaAgent is bundled into IvyeaOpsServer.exe — no separate install needed."
+        return
+    }
     if (Test-Cmd "ivyea") {
         Write-Info "IvyeaAgent already installed: $((Get-Command ivyea).Source)"
     } else {
@@ -148,6 +154,11 @@ function Install-IvyeaAgent {
         if (-not (Test-Path $VenvPy)) { throw "server virtualenv was not created: $VenvPy" }
 
         $IvyeaAgentSource = $env:IVYEA_AGENT_LOCAL
+        # Agent source shipped inside the prebuilt bundle → install OFFLINE.
+        $BundledAgent = Join-Path $RepoRoot "agent"
+        if ([string]::IsNullOrWhiteSpace($IvyeaAgentSource) -and (Test-Path (Join-Path $BundledAgent "pyproject.toml"))) {
+            $IvyeaAgentSource = $BundledAgent
+        }
         $SiblingAgent = Join-Path (Split-Path -Parent $RepoRoot) "ivyea-agent"
         if ([string]::IsNullOrWhiteSpace($IvyeaAgentSource) -and (Test-Path $SiblingAgent)) {
             $IvyeaAgentSource = (Resolve-Path $SiblingAgent).Path
