@@ -60,7 +60,8 @@ def test_upgrade_agent_pip_and_restart(monkeypatch):
     monkeypatch.setattr(svc, "_find_ivyea_cli", lambda: "/root/.local/bin/ivyea")
     monkeypatch.setattr(svc, "_venv_python", lambda cli: "/usr/bin/python")
     versions = iter(["1.0.23", "1.0.24"])
-    monkeypatch.setattr(svc, "agent_version", lambda: next(versions))
+    # version now comes from the installed package (not the possibly-stale serve)
+    monkeypatch.setattr(svc, "_installed_agent_version", lambda py: next(versions))
     ran = []
 
     def fake_run(cmd, timeout=300.0):
@@ -71,7 +72,7 @@ def test_upgrade_agent_pip_and_restart(monkeypatch):
 
     r = svc.upgrade_agent()
     assert r["ok"] is True and r["before"] == "1.0.23" and r["after"] == "1.0.24"
-    assert any("pip" in c for c in ran[0])           # pip -U install
+    assert any("pip" in c for c in ran[0]) and any("--no-cache-dir" in c for c in ran[0])
     assert any("service-stop" in c for c in ran[1])  # serve restart
 
 

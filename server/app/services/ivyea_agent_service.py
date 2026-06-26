@@ -270,6 +270,17 @@ def agent_version() -> str:
         return ""
 
 
+def _installed_agent_version(py: str) -> str:
+    """Version of the *installed* ivyea_agent package (reflects files on disk),
+    independent of whether the serve has restarted to load them."""
+    try:
+        p = subprocess.run([py, "-c", "import ivyea_agent, sys; sys.stdout.write(ivyea_agent.__version__)"],
+                           text=True, capture_output=True, timeout=15, **no_window_kwargs())
+        return (p.stdout or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _run_step(cmd: list[str], timeout: float = 300.0) -> dict[str, Any]:
     try:
         p = subprocess.run(cmd, cwd=str(ops_settings.root_dir), text=True,
@@ -300,13 +311,21 @@ def upgrade_agent(progress=None) -> dict[str, Any]:
     py = _venv_python(cli)
     repo = (os.getenv("IVYEA_AGENT_REPO") or "https://github.com/Hector-xue/ivyea-agent.git").strip()
     ref = (os.getenv("IVYEA_AGENT_REF") or "main").strip()
-    before = agent_version()
+    before = _installed_agent_version(py) or agent_version()
     _p("downloading", 25)   # pip install over git can take a while behind a proxy
-    install = _run_step([py, "-m", "pip", "install", "-U", f"git+{repo}@{ref}"])
+    # --no-cache-dir + --force-reinstall: pip caches VCS builds, so a plain
+    # `pip install -U git+…@main` can silently reinstall a stale build and report
+    # "已是最新" even when main moved. Force a fresh pull. --no-deps keeps it fast
+    # (the agent's deps are stable; the code is what changes).
+    install = _run_step([py, "-m", "pip", "install", "--no-cache-dir",
+                         "--force-reinstall", "--no-deps", f"git+{repo}@{ref}"])
     _p("restarting", 80)
     _run_step([cli, "self", "service-stop"], timeout=20.0)   # stop old serve
     restart = start_local_service()                          # start fresh (new code)
-    after = agent_version()
+    # Read the *installed* version (reflects the files pip just wrote), not the
+    # serve's /health — the serve restart can lag on Windows and report the old
+    # version, which previously made a real update look like "已是最新".
+    after = _installed_agent_version(py) or agent_version()
     ok = install.get("returncode") == 0
     _p("done" if ok else "error", 100)
     return {"ok": ok, "before": before, "after": after, "install": install,
