@@ -11,6 +11,13 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+# Run the bundled IvyeaAgent's serve straight from this exe — checked BEFORE the
+# heavy IvyeaOps imports so the frozen package needs no separate Python/pip/agent
+# install. IvyeaOps starts this via `<exe> agent-serve --host … --port …`.
+if len(sys.argv) > 1 and sys.argv[1] == "agent-serve":
+    from ivyea_agent.cli import main as _agent_main  # bundled via PyInstaller --collect-all
+    raise SystemExit(_agent_main(["serve", *sys.argv[2:]]))
+
 import uvicorn
 
 

@@ -231,6 +231,10 @@ info "安装内置 IvyeaAgent（Agent + 知识库 + 本地检索）..."
 IVYEA_AGENT_BIN="$VENV_DIR/bin/ivyea"
 if [ ! -x "$IVYEA_AGENT_BIN" ]; then
   IVYEA_AGENT_SOURCE="${IVYEA_AGENT_LOCAL:-}"
+  # Agent source shipped inside the prebuilt bundle → install OFFLINE, no git/proxy.
+  if [ -z "$IVYEA_AGENT_SOURCE" ] && [ -f "$REPO_ROOT/agent/pyproject.toml" ]; then
+    IVYEA_AGENT_SOURCE="$REPO_ROOT/agent"
+  fi
   if [ -z "$IVYEA_AGENT_SOURCE" ] && [ -d "$REPO_ROOT/../ivyea-agent" ]; then
     IVYEA_AGENT_SOURCE="$REPO_ROOT/../ivyea-agent"
   fi
