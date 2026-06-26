@@ -61,7 +61,7 @@ async def _deepseek_chat(messages: List[Msg]) -> AsyncGenerator[str, None]:
         "stream": True,
         "max_tokens": 4096,
     }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as c:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as c:
         async with c.stream("POST", "https://api.deepseek.com/chat/completions",
                             json=payload, headers={"Authorization": f"Bearer {key}"}) as r:
             r.raise_for_status()
@@ -91,7 +91,7 @@ async def _apimart_chat(messages: List[Msg]) -> AsyncGenerator[str, None]:
     payload = {"model": "claude-sonnet-4-6", "max_tokens": 4096, "messages": msgs, "stream": True}
     if system:
         payload["system"] = system
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as c:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as c:
         async with c.stream("POST", f"{_apimart_base()}/messages", json=payload,
                             headers={"Authorization": f"Bearer {key}", "anthropic-version": "2023-06-01"}) as r:
             r.raise_for_status()
@@ -123,7 +123,7 @@ async def _configured_chat(cfg: dict, messages: List[Msg]) -> AsyncGenerator[str
         payload = {"model": cfg["model"] or "claude-sonnet-4-6", "max_tokens": 4096, "messages": msgs, "stream": True}
         if system:
             payload["system"] = system
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as c:
             async with c.stream("POST", f"{base}/messages", json=payload,
                                 headers={"Authorization": f"Bearer {key}", "anthropic-version": "2023-06-01"}) as r:
                 r.raise_for_status()
@@ -148,7 +148,7 @@ async def _configured_chat(cfg: dict, messages: List[Msg]) -> AsyncGenerator[str
         "messages": [{"role": m.role, "content": m.content} for m in messages],
         "stream": True, "max_tokens": 4096,
     }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as c:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as c:
         async with c.stream("POST", f"{base.rstrip('/')}/chat/completions",
                             json=payload, headers={"Authorization": f"Bearer {key}"}) as r:
             r.raise_for_status()
@@ -255,7 +255,7 @@ async def _source_to_bytes(url: str) -> tuple[bytes, str]:
         head, _, b64 = url.partition(",")
         mime = head[5:].split(";")[0] or "image/png"
         return base64.b64decode(b64), mime
-    async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10)) as c:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=30)) as c:
         r = await c.get(url)
         r.raise_for_status()
         return r.content, (r.headers.get("content-type") or "image/png").split(";")[0]
@@ -305,7 +305,7 @@ async def _run_edit_job(job_id: str, model: str, prompt: str, size: str, key: st
         last = ""
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(280, connect=10)) as c:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(280, connect=30)) as c:
                     r = await c.post(f"{base}/images/edits", data=data, files=files,
                                      headers={"Authorization": f"Bearer {key}"})
                 if r.status_code < 500:
@@ -368,7 +368,7 @@ async def image_submit(req: ImageReq, _user: str = Depends(require_user)) -> dic
     # platform when Apimart is down.
     payload = {"model": ic["model"], "prompt": req.prompt, "n": min(max(req.n, 1), 4), "size": req.size}
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=30)) as c:
             r = await c.post(f"{ic['base_url']}/images/generations", json=payload,
                              headers={"Authorization": f"Bearer {key}"})
     except Exception as e:
@@ -412,7 +412,7 @@ async def image_status(task_id: str, _user: str = Depends(require_user)) -> dict
     if not key:
         raise HTTPException(400, "生图 key 未配置")
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10)) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=30)) as c:
             r = await c.get(f"{ic['base_url']}/tasks/{task_id}", headers={"Authorization": f"Bearer {key}"})
     except Exception as e:
         raise HTTPException(502, f"查询失败：{e}")

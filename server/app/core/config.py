@@ -24,6 +24,36 @@ _ROOT = _detect_root()
 load_dotenv(_ROOT / "server" / ".env")
 
 
+def _inherit_system_proxy() -> None:
+    """On Windows, Clash/V2Ray often set only the WinINET *system* proxy (which
+    browsers use) and NOT the HTTP_PROXY env vars. Python/httpx then connect via a
+    raw socket that bypasses the proxy — so a host that is only reachable through
+    the proxy (e.g. api.apimart.ai) times out, even though it opens instantly in
+    the browser. Mirror the system proxy into the env so httpx uses the same path
+    the browser does. No-op on Linux/macOS or when a proxy is already configured."""
+    if os.name != "nt":
+        return
+    if any(os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                                       "http_proxy", "https_proxy", "all_proxy")):
+        return  # explicit config wins
+    try:
+        import urllib.parse
+        import urllib.request
+        proxies = urllib.request.getproxies()  # reads the WinINET registry on Windows
+    except Exception:  # noqa: BLE001
+        return
+    raw = proxies.get("https") or proxies.get("http")
+    if not raw:
+        return
+    p = urllib.parse.urlparse(raw if "://" in raw else "http://" + raw)
+    if not p.hostname:
+        return
+    # The proxy is reached over plain http even for https targets (CONNECT tunnel).
+    proxy = f"http://{p.hostname}:{p.port}" if p.port else f"http://{p.hostname}"
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        os.environ[var] = proxy
+
+
 def _ensure_localhost_no_proxy() -> None:
     """Make every localhost HTTP call bypass a system/VPN proxy.
 
@@ -46,7 +76,8 @@ def _ensure_localhost_no_proxy() -> None:
     os.environ["no_proxy"] = merged
 
 
-_ensure_localhost_no_proxy()
+_inherit_system_proxy()      # use the browser's system proxy (Windows/Clash)
+_ensure_localhost_no_proxy()  # …but keep localhost direct
 
 
 class Settings:

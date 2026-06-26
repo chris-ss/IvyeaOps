@@ -782,7 +782,7 @@ async def _stream_apimart(prompt: str) -> AsyncGenerator[str, None]:
         "messages": [{"role": "user", "content": prompt}],
         "stream": True,
     }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=30)) as client:
         async with client.stream(
             "POST",
             f"{_apimart_base()}/messages",
@@ -1029,7 +1029,7 @@ async def stream_assistant_prompt(prompt: str) -> AsyncGenerator[str, None]:
             "messages": [{"role": "user", "content": prompt}],
             "stream": True,
         }
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as c:
             async with c.stream(
                 "POST", f"{base}/messages", json=payload,
                 headers={"Authorization": f"Bearer {key}", "anthropic-version": "2023-06-01"},
@@ -1112,7 +1112,7 @@ async def _stream_ivyea_agent(prompt: str) -> AsyncGenerator[str, None]:
     got_token = False
     final_text = ""
     event = "message"
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as client:
         async with client.stream("POST", f"{ivyea.base_url()}/v1/chat/stream", json=payload, headers=headers) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
@@ -1223,7 +1223,7 @@ async def _stream_apimart_vision(prompt: str, images_b64: list[str]) -> AsyncGen
 
     payload = {"model": "claude-sonnet-4-6", "max_tokens": 8192,
                "messages": [{"role": "user", "content": content}], "stream": True}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=30)) as client:
         async with client.stream(
             "POST", f"{_apimart_base()}/messages", json=payload,
             headers={"Authorization": f"Bearer {_apimart_key()}",
@@ -1262,7 +1262,7 @@ async def _stream_openai_vision(
 
     payload = {"model": model, "max_tokens": 8192,
                "messages": [{"role": "user", "content": content}], "stream": True}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=30)) as client:
         async with client.stream(
             "POST", f"{base_url.rstrip('/')}/v1/chat/completions", json=payload,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -1405,7 +1405,7 @@ async def _stream_openai_compat(
         "messages": [{"role": "user", "content": prompt}],
         "stream": True,
     }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as client:
         async with client.stream(
             "POST",
             f"{base_url}/chat/completions",
