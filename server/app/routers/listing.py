@@ -344,7 +344,7 @@ def _db():
 _db().close()
 
 # Migration: add columns if missing
-for _col in ["image_slots TEXT", "templates TEXT", "copy_result TEXT", "copy_job_id TEXT", "highlights TEXT"]:
+for _col in ["image_slots TEXT", "templates TEXT", "copy_result TEXT", "copy_job_id TEXT", "highlights TEXT", "shot_plan TEXT"]:
     try:
         conn = _db()
         conn.execute(f"ALTER TABLE listing_projects ADD COLUMN {_col}")
@@ -376,6 +376,19 @@ class ImageGenReq(BaseModel):
     slot: str
     size: str = "1024x1024"
     reference_urls: list[str] = []
+
+
+class PlanImageSetReq(BaseModel):
+    target_count: int = 0           # 0 = let the AI pick (5–8); else exact count
+    color_scheme: str = ""
+    language: str = "en"            # callout language hint (for typography)
+
+
+class OverlayCalloutReq(BaseModel):
+    url: str                        # the rendered (text-free) image to typeset onto
+    callout: str
+    text_pos: str = "bottom-center"
+    color: str = "#FFFFFF"
 
 
 # ─── Project CRUD ─────────────────────────────────────────────────────────────
@@ -1249,6 +1262,174 @@ async def generate_copy(project_id: str, body: GenerateCopyReq, _user: str = Dep
     return {"type": body.type, "content": content, "fallback": fallback_used, "warning": warning}
 
 
+# ─── 套图美术指导:结构化、自适应的 shot plan ──────────────────────────────────
+
+_DEFAULT_ROLES = ["主图", "核心卖点", "使用场景", "规格尺寸", "对比/差异化", "细节/信任", "套装/价值", "卖点补充"]
+
+
+def _strip_json(text: str):
+    """Best-effort pull a JSON object out of an LLM reply (strip fences/prose)."""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        if t[:4].lower() == "json":
+            t = t[4:]
+    i, j = t.find("{"), t.rfind("}")
+    if i != -1 and j > i:
+        t = t[i:j + 1]
+    for cand in (t, text):
+        try:
+            obj = json.loads(cand)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+    return None
+
+
+def _normalize_shot_plan(plan: dict, target_count: int) -> dict:
+    """Clamp/repair an LLM shot plan into a safe shape every consumer can rely on:
+    main first + white/no-text, sane count, all fields present."""
+    raw = plan.get("images") if isinstance(plan, dict) else None
+    clean: list[dict] = []
+    for i, it in enumerate(raw or []):
+        if not isinstance(it, dict):
+            continue
+        rp = str(it.get("render_prompt") or "").strip()
+        if not rp:
+            continue
+        callout = str(it.get("callout") or "").strip() or None
+        clean.append({
+            "slot": str(it.get("slot") or ("main" if i == 0 else f"sub{len(clean)}")),
+            "role": str(it.get("role") or (_DEFAULT_ROLES[i] if i < len(_DEFAULT_ROLES) else "细节")),
+            "angle": str(it.get("angle") or ""),
+            "scene": str(it.get("scene") or ""),
+            "selling_point": (str(it.get("selling_point")).strip() or None) if it.get("selling_point") else None,
+            "callout": callout,
+            "text_on_image": bool(it.get("text_on_image")) and bool(callout),
+            "text_pos": str(it.get("text_pos") or "bottom-center"),
+            "composition": str(it.get("composition") or ""),
+            "render_prompt": rp,
+        })
+    if clean:  # main image: white bg, no text, first
+        clean[0].update(slot="main", role="主图", text_on_image=False, callout=None)
+    clean = clean[:target_count] if target_count and target_count > 0 else clean[:8]
+    return {
+        "style": plan.get("style") if isinstance(plan.get("style"), dict) else {},
+        "product_lock": str(plan.get("product_lock") or "").strip(),
+        "images": clean,
+    }
+
+
+def _shot_plan_fallback(row, scrape_data: dict, analysis_data: dict, target_count: int, color_scheme: str) -> dict:
+    """LLM JSON unparsable → build a usable structured plan from the deterministic
+    slot helpers so the user still gets a set (never a hard error)."""
+    n = target_count if target_count and target_count > 0 else 7
+    slot_ids = ["main"] + [f"sub{i}" for i in range(1, n)]
+    details = [{"id": s, "label": s, "size": "1024x1024"} for s in slot_ids]
+    try:
+        prompts = _fallback_prompts_for_slots(row, scrape_data, analysis_data, details, color_scheme=color_scheme)
+    except Exception:
+        prompts = {}
+    bullets = [ln[2:] for ln in _approved_copy(row).splitlines() if ln.startswith("- ")][:n]
+    imgs = []
+    for i, s in enumerate(slot_ids):
+        sp = bullets[i - 1] if i > 0 and i - 1 < len(bullets) else None
+        callout = " ".join(sp.split()[:4]) if sp else None
+        imgs.append({
+            "slot": s, "role": _DEFAULT_ROLES[i] if i < len(_DEFAULT_ROLES) else "细节",
+            "angle": "", "scene": "", "selling_point": sp, "callout": callout,
+            "text_on_image": bool(callout) and i > 0, "text_pos": "bottom-center", "composition": "",
+            "render_prompt": str(prompts.get(s) or f"Professional Amazon product image of the product, {color_scheme} palette."),
+        })
+    return _normalize_shot_plan({"images": imgs, "style": {}, "product_lock": analysis_data.get("product_lock", "")}, n)
+
+
+def _persist_shot_plan(project_id: str, plan: dict) -> None:
+    try:
+        conn = _db()
+        conn.execute("UPDATE listing_projects SET shot_plan = ?, updated_at = ? WHERE id = ?",
+                     (json.dumps(plan, ensure_ascii=False), time.time(), project_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+@router.post("/projects/{project_id}/plan-image-set")
+async def plan_image_set(project_id: str, body: PlanImageSetReq, _user: str = Depends(require_user)):
+    """套图美术指导:一次 AI pass 规划一套主图组(自适应张数,每张角度/卖点/文案/构图)。
+    返回结构化方案供前端展示+编辑;callout 用于后续排版叠加,render_prompt 不含文字。"""
+    conn = _db()
+    row = conn.execute("SELECT * FROM listing_projects WHERE id = ?", (project_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404)
+    scrape_data = json.loads(row["scrape_data"]) if row["scrape_data"] else {}
+    analysis_data = json.loads(row["analysis_data"]) if row["analysis_data"] else {}
+    product_context = _build_product_context(row, scrape_data, analysis_data)
+    ref_images = scrape_data.get("reference_images", []) or scrape_data.get("imageUrls", [])
+    ref_text = "\n".join(ref_images[:3]) if ref_images else "(no reference images)"
+    img_sp = analysis_data.get("image_insights", "")
+    approved = _approved_copy(row)
+    color_directive = _color_directive(body.color_scheme, analysis_data)
+    n = max(0, min(int(body.target_count or 0), 8))
+    count_rule = (f"Produce EXACTLY {n} images." if n
+                  else "Decide the optimal number of images (5–8) for this product and category.")
+
+    prompt = f"""You are a senior Amazon main-image ART DIRECTOR. Plan a COHERENT main-image SET as one strategy, not isolated images. {count_rule}
+
+## PRODUCT INFO
+{product_context}
+
+## APPROVED LISTING COPY (the ONLY source for on-image callout text — use exact words)
+{approved or "(none — derive concise callouts from the bullets/selling points above)"}
+
+## REFERENCE IMAGES (only truth for product appearance)
+{ref_text}
+
+## VISUAL ANALYSIS (selling points / style / scenes from scraped + uploaded images)
+{img_sp or "(not available)"}
+
+## YOUR JOB
+1) Identify the product + top buyer concerns. 2) Decide how many images and what each image's JOB is (a DIFFERENT buyer concern each). 3) For each: pick the best display ANGLE, the SCENE, the COMPOSITION (where the product sits, where empty space for text is), and IF it needs an on-image callout, the exact 2–5 word CALLOUT taken VERBATIM from the approved copy/bullets (never invent claims). 4) Keep ONE shared visual style + ONE product_lock across the whole set.
+
+## OUTPUT — return ONLY this JSON (no markdown, no prose):
+{{"style":{{"palette":"...","mood":"...","lighting":"..."}},
+ "product_lock":"strict appearance description + what must NOT change",
+ "images":[
+   {{"slot":"main","role":"主图","angle":"hero front","scene":"pure white studio","selling_point":null,"callout":null,"text_on_image":false,"text_pos":"bottom-center","composition":"product centered, fills 85%","render_prompt":"<120-180 word cinematic prompt: ONLY product+scene+lighting+composition; NEVER include callout words>"}},
+   {{"slot":"sub1","role":"核心卖点","angle":"...","scene":"...","selling_point":"<one concern>","callout":"<verbatim 2-5 words>","text_on_image":true,"text_pos":"top-right","composition":"product left, negative space top-right for text","render_prompt":"<...must NOT contain the callout words...>"}}
+ ]}}
+
+## HARD RULES
+- First image = white-background MAIN (role 主图, product 85%, NO text).
+- Every other image solves a DIFFERENT concern with a DIFFERENT angle.
+- render_prompt MUST NOT contain the callout text (text is overlaid separately, crisply).
+- callout MUST be verbatim from the copy; do not invent specs/claims.
+{color_directive}
+{_FIDELITY_RULE}
+"""
+    try:
+        raw = await _call_ai(prompt, max_tokens=4000, web_search=False)
+    except HTTPException:
+        raw = ""
+    parsed = _strip_json(raw)
+    if parsed and isinstance(parsed.get("images"), list) and parsed["images"]:
+        plan = _normalize_shot_plan(parsed, n)
+        used_fallback = not plan["images"]
+    else:
+        used_fallback = True
+    if used_fallback:
+        plan = _shot_plan_fallback(row, scrape_data, analysis_data, n, body.color_scheme)
+    _persist_shot_plan(project_id, plan)
+    _persist_visual_anchor(project_id, row, {"product_lock": plan.get("product_lock"),
+                                             "visual_style": (plan.get("style") or {}).get("palette")})
+    return {"ok": True, "plan": plan, "fallback": used_fallback}
+
+
 # ─── Generate ALL Prompts at Once (unified style) ─────────────────────────────
 
 @router.post("/projects/{project_id}/generate-all-prompts")
@@ -2098,6 +2279,42 @@ async def generate_single_image(project_id: str, body: ImageGenReq, _user: str =
         raise
     except Exception as e:
         raise HTTPException(502, f"图片生成失败: {str(e)}")
+
+
+async def _fetch_image_bytes(client: httpx.AsyncClient, url: str) -> bytes:
+    """Load image bytes from a workspace url (file read) or an external url (http)."""
+    from app.routers.image_translate import WORKSPACE_DIR
+    prefix = "/api/image-translate/images/"
+    if prefix in url:
+        fn = url.split(prefix, 1)[1].split("?")[0]
+        p = WORKSPACE_DIR / fn
+        if p.exists():
+            return p.read_bytes()
+    r = await client.get(url)
+    r.raise_for_status()
+    return r.content
+
+
+@router.post("/projects/{project_id}/overlay-callout")
+async def overlay_callout_endpoint(project_id: str, body: OverlayCalloutReq, _user: str = Depends(require_user)):
+    """Typeset a crisp callout onto an already-rendered (text-free) 套图 image and
+    save the result. Separating text from generation keeps callouts legible,
+    correctly spelled and re-editable (just call again with new text)."""
+    if not body.url or not body.callout.strip():
+        raise HTTPException(400, "url 和 callout 必填")
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            raw = await _fetch_image_bytes(client, body.url)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"读取底图失败：{e}")
+    from app.services.listing_typography import overlay_callout
+    try:
+        out = overlay_callout(raw, body.callout, body.text_pos, color=body.color or "#FFFFFF")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"文字叠加失败：{e}")
+    from app.routers.image_translate import save_bytes_to_workspace
+    item = save_bytes_to_workspace(out, source="listing", project_id=project_id)
+    return {"url": item["url"], "id": item.get("id")}
 
 
 async def _poll_task(client: httpx.AsyncClient, task_id: str, max_polls: int = 54, interval: float = 5.0) -> str:

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfirm } from "../../components/ConfirmDialog";
 import SheetSelect from "../../components/SheetSelect";
+import ShotPlanPanel from "./ShotPlanPanel";
 import { marketplaceOptions } from "../../lib/marketplaces";
 import {
   aiAnalyze,
@@ -840,6 +841,13 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
     const slots = isAplus ? aplusSlots : imageSlots;
     return (
       <div className="card" style={{ padding: 12 }}>
+        {!isAplus && (
+          <ShotPlanPanel
+            projectId={activeId}
+            colorScheme={colorScheme === "custom" ? customColor : colorScheme}
+            notify={notify}
+          />
+        )}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
           <span style={{ fontSize: 10, fontWeight: 600 }}>色系</span>
           <SheetSelect value={isAplus ? aplusColorScheme : colorScheme} onChange={(v) => isAplus ? setAplusColorScheme(v) : setColorScheme(v)} style={inputStyle} title="选择色系" options={COLOR_OPTIONS} />
