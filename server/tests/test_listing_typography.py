@@ -30,10 +30,18 @@ def test_overlay_top_right_region():
     assert _dark_pixels(im, (520, 30, 1010, 210)) > 300
 
 
+def test_overlay_headline_and_callout():
+    out = T.overlay_callout(_blank(), "30-Day Battery", "bottom-center", headline="Power That Lasts")
+    im = Image.open(io.BytesIO(out))
+    assert _dark_pixels(im, (100, 30, 924, 190)) > 500      # headline at top
+    assert _dark_pixels(im, (100, 840, 924, 1000)) > 500    # callout at bottom
+
+
 def test_overlay_empty_is_noop():
     b = _blank()
     assert T.overlay_callout(b, "") == b
     assert T.overlay_callout(b, "   ") == b
+    assert T.overlay_callout(b, "", headline="") == b
 
 
 def test_font_loader_never_crashes():

@@ -14,13 +14,14 @@ export const generateImagePrompt = async (id, payload) => {
     const body = typeof payload === "string" ? { slot: payload } : payload;
     return (await api.post(`/projects/${id}/generate-image-prompt`, body)).data;
 };
-export const generateImage = async (id, prompt, slot, size) => (await api.post(`/projects/${id}/generate-image`, { prompt, slot, size })).data;
-// 套图美术指导:一次 AI 规划整套主图(自适应张数,每张角度/卖点/文案/构图)
+export const generateImage = async (id, prompt, slot, size, use_reference = true) =>
+    (await api.post(`/projects/${id}/generate-image`, { prompt, slot, size, use_reference })).data;
+// 套图美术指导:一次 AI 规划整套主图(自适应张数,每张版式原型/角度/卖点/文案/构图)
 export const planImageSet = async (id, { target_count = 0, color_scheme = "" } = {}) =>
     (await api.post(`/projects/${id}/plan-image-set`, { target_count, color_scheme }, { timeout: 300000 })).data;
-// 把卖点文案清晰排版叠加到已渲染(无字)的图上;改文案后可重叠,无需重渲染
-export const overlayCallout = async (id, { url, callout, text_pos = "bottom-center", color = "#FFFFFF" }) =>
-    (await api.post(`/projects/${id}/overlay-callout`, { url, callout, text_pos, color }, { timeout: 120000 })).data;
+// 把大标题/卖点文案清晰排版叠加到已渲染(无字)的图上;改文案后可重叠,无需重渲染
+export const overlayCallout = async (id, { url, callout = "", headline = "", text_pos = "bottom-center", color = "#FFFFFF" }) =>
+    (await api.post(`/projects/${id}/overlay-callout`, { url, callout, headline, text_pos, color }, { timeout: 120000 })).data;
 // New APIs
 export const uploadImage = async (id, file) => {
     const fd = new FormData();

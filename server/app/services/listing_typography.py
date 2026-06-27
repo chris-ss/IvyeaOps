@@ -65,21 +65,18 @@ def _hex(h: str) -> tuple[int, int, int]:
         return (255, 255, 255)
 
 
-def overlay_callout(img_bytes: bytes, text: str, position: str = "bottom-center", *,
-                    color: str = "#FFFFFF", plate: str = "#101418") -> bytes:
-    """Return a copy of img_bytes with `text` typeset at `position` (a crisp,
-    high-contrast block with a translucent plate + stroke). No-op if text empty."""
+def _render_block(im: Image.Image, text: str, position: str, size_frac: float,
+                  color: str, plate: str) -> Image.Image:
+    """Typeset one text block (headline or callout) onto an RGBA image and return it."""
     text = (text or "").strip()
     if not text:
-        return img_bytes
-    im = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+        return im
     W, H = im.size
-    size = max(22, int(H * 0.062))
+    size = max(20, int(H * size_frac))
     font = _load_font(size)
     draw = ImageDraw.Draw(im)
 
-    # wrap to ~70% width
-    max_w = int(W * 0.70)
+    max_w = int(W * 0.82)
     lines: list[str] = []
     cur = ""
     for word in text.split():
@@ -100,10 +97,9 @@ def overlay_callout(img_bytes: bytes, text: str, position: str = "bottom-center"
     cx, cy = xf * W, yf * H
     x0 = cx if align == "left" else (cx - block_w if align == "right" else cx - block_w / 2)
     y0 = cy if yf < 0.2 else (cy - block_h if yf > 0.8 else cy - block_h / 2)
-    x0 = max(pad, min(x0, W - block_w - pad))
-    y0 = max(pad, min(y0, H - block_h - pad))
+    x0 = max(pad, min(x0, max(pad, W - block_w - pad)))
+    y0 = max(pad, min(y0, max(pad, H - block_h - pad)))
 
-    # translucent plate for legibility on any background
     overlay = Image.new("RGBA", im.size, (0, 0, 0, 0))
     pr, pg, pb = _hex(plate)
     ImageDraw.Draw(overlay).rounded_rectangle(
@@ -121,7 +117,24 @@ def overlay_callout(img_bytes: bytes, text: str, position: str = "bottom-center"
         draw.text((lx, sy), ln, font=font, fill=(cr, cg, cb, 255),
                   stroke_width=max(2, int(size * 0.06)), stroke_fill=(0, 0, 0, 210))
         sy += line_h
+    return im
 
+
+def overlay_callout(img_bytes: bytes, callout: str = "", position: str = "bottom-center", *,
+                    headline: str = "", color: str = "#FFFFFF", plate: str = "#101418") -> bytes:
+    """Typeset a big top HEADLINE and/or a CALLOUT onto an image — the way real
+    Amazon 套图 do (headline poster line + short feature label). No-op if both empty."""
+    if not (callout or "").strip() and not (headline or "").strip():
+        return img_bytes
+    im = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+    if (headline or "").strip():
+        im = _render_block(im, headline, "top-center", 0.072, color, plate)   # 大标题
+    if (callout or "").strip():
+        # 有标题时避免叠在顶部:callout 的 top-* 落点改到下方
+        pos = position
+        if (headline or "").strip() and pos.startswith("top"):
+            pos = "bottom-center"
+        im = _render_block(im, callout, pos, 0.052, color, plate)              # 卖点小标
     out = io.BytesIO()
     im.convert("RGB").save(out, format="PNG")
     return out.getvalue()

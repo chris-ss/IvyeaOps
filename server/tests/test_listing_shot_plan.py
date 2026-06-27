@@ -33,6 +33,22 @@ def test_normalize_main_first_no_text_and_clamp():
     assert len(L._normalize_shot_plan(big, 0)["images"]) == 8
 
 
+def test_normalize_archetypes_and_show_product():
+    plan = {"images": [
+        {"slot": "x", "shot_type": "feature", "callout": "A", "render_prompt": "p"},
+        {"shot_type": "scene", "headline": "Beautiful Footage", "render_prompt": "a landscape"},
+        {"shot_type": "bogus", "render_prompt": "q"},   # invalid → defaulted
+    ]}
+    n = L._normalize_shot_plan(plan, 0)["images"]
+    # main forced white_main, shows product, no text
+    assert n[0]["shot_type"] == "white_main" and n[0]["show_product"] is True and n[0]["text_on_image"] is False
+    # scene never carries the product (deterministic, not trusting the LLM)
+    assert n[1]["shot_type"] == "scene" and n[1]["show_product"] is False
+    assert n[1]["headline"] == "Beautiful Footage" and n[1]["text_on_image"] is True
+    # invalid shot_type falls back to a valid one
+    assert n[2]["shot_type"] in L._SHOT_TYPES
+
+
 def _insert_project(pid: str):
     conn = L._db()
     now = time.time()

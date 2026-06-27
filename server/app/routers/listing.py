@@ -376,6 +376,7 @@ class ImageGenReq(BaseModel):
     slot: str
     size: str = "1024x1024"
     reference_urls: list[str] = []
+    use_reference: bool = True       # scene/result 图传 False → 不强塞产品,生成纯场景
 
 
 class PlanImageSetReq(BaseModel):
@@ -386,7 +387,8 @@ class PlanImageSetReq(BaseModel):
 
 class OverlayCalloutReq(BaseModel):
     url: str                        # the rendered (text-free) image to typeset onto
-    callout: str
+    callout: str = ""
+    headline: str = ""              # big top poster line (套图标题)
     text_pos: str = "bottom-center"
     color: str = "#FFFFFF"
 
@@ -1266,6 +1268,12 @@ async def generate_copy(project_id: str, body: GenerateCopyReq, _user: str = Dep
 
 _DEFAULT_ROLES = ["主图", "核心卖点", "使用场景", "规格尺寸", "对比/差异化", "细节/信任", "套装/价值", "卖点补充"]
 
+# 版式原型:每张套图是不同类型的"小海报",而不是同一张产品图加字。
+# scene = 效果/生活场景图(不放产品,根治"张张一样");其余都展示产品。
+_SHOT_TYPES = {"white_main", "feature", "scene", "detail", "specs"}
+_NO_PRODUCT_TYPES = {"scene"}
+_DEFAULT_TYPE_ORDER = ["white_main", "feature", "scene", "detail", "feature", "specs", "scene", "detail"]
+
 
 def _strip_json(text: str):
     """Best-effort pull a JSON object out of an LLM reply (strip fences/prose)."""
@@ -1301,20 +1309,28 @@ def _normalize_shot_plan(plan: dict, target_count: int) -> dict:
         if not rp:
             continue
         callout = str(it.get("callout") or "").strip() or None
+        headline = str(it.get("headline") or "").strip() or None
+        stype = str(it.get("shot_type") or "").strip().lower()
+        if stype not in _SHOT_TYPES:
+            stype = _DEFAULT_TYPE_ORDER[i] if i < len(_DEFAULT_TYPE_ORDER) else "feature"
         clean.append({
             "slot": str(it.get("slot") or ("main" if i == 0 else f"sub{len(clean)}")),
             "role": str(it.get("role") or (_DEFAULT_ROLES[i] if i < len(_DEFAULT_ROLES) else "细节")),
+            "shot_type": stype,
+            "show_product": stype not in _NO_PRODUCT_TYPES,   # 派生,不信 LLM:scene 不挂产品
             "angle": str(it.get("angle") or ""),
             "scene": str(it.get("scene") or ""),
             "selling_point": (str(it.get("selling_point")).strip() or None) if it.get("selling_point") else None,
+            "headline": headline,
             "callout": callout,
-            "text_on_image": bool(it.get("text_on_image")) and bool(callout),
+            "text_on_image": bool(callout or headline),    # 有文字内容就上字(UI 可手动关)
             "text_pos": str(it.get("text_pos") or "bottom-center"),
             "composition": str(it.get("composition") or ""),
             "render_prompt": rp,
         })
-    if clean:  # main image: white bg, no text, first
-        clean[0].update(slot="main", role="主图", text_on_image=False, callout=None)
+    if clean:  # 第一张永远是纯白底主图:展示产品、无任何文字
+        clean[0].update(slot="main", role="主图", shot_type="white_main", show_product=True,
+                        text_on_image=False, callout=None, headline=None)
     clean = clean[:target_count] if target_count and target_count > 0 else clean[:8]
     return {
         "style": plan.get("style") if isinstance(plan.get("style"), dict) else {},
@@ -1337,12 +1353,19 @@ def _shot_plan_fallback(row, scrape_data: dict, analysis_data: dict, target_coun
     imgs = []
     for i, s in enumerate(slot_ids):
         sp = bullets[i - 1] if i > 0 and i - 1 < len(bullets) else None
-        callout = " ".join(sp.split()[:4]) if sp else None
+        stype = _DEFAULT_TYPE_ORDER[i] if i < len(_DEFAULT_TYPE_ORDER) else "feature"
+        headline = " ".join(sp.split()[:6]) if (sp and i > 0) else None
+        callout = " ".join(sp.split()[:4]) if (sp and i > 0 and stype != "scene") else None
+        if stype == "scene":
+            rp = f"A beautiful lifestyle / result scene related to the product's use, {color_scheme or 'natural'} palette, editorial photography, no product shown, no text."
+        else:
+            rp = str(prompts.get(s) or f"Professional Amazon product image of the product, {color_scheme or 'clean'} palette, studio lighting, no text.")
         imgs.append({
             "slot": s, "role": _DEFAULT_ROLES[i] if i < len(_DEFAULT_ROLES) else "细节",
-            "angle": "", "scene": "", "selling_point": sp, "callout": callout,
-            "text_on_image": bool(callout) and i > 0, "text_pos": "bottom-center", "composition": "",
-            "render_prompt": str(prompts.get(s) or f"Professional Amazon product image of the product, {color_scheme} palette."),
+            "shot_type": stype, "angle": "", "scene": "", "selling_point": sp,
+            "headline": headline, "callout": callout,
+            "text_on_image": bool(headline or callout) and i > 0, "text_pos": "top-center", "composition": "",
+            "render_prompt": rp,
         })
     return _normalize_shot_plan({"images": imgs, "style": {}, "product_lock": analysis_data.get("product_lock", "")}, n)
 
@@ -1393,22 +1416,32 @@ async def plan_image_set(project_id: str, body: PlanImageSetReq, _user: str = De
 ## VISUAL ANALYSIS (selling points / style / scenes from scraped + uploaded images)
 {img_sp or "(not available)"}
 
+## HOW REAL AMAZON 套图 WORK (match this)
+A great main-image set is NOT the same product photo repeated with text. Each image is a different MINI-POSTER selling ONE point, using one of these layout archetypes (shot_type):
+- white_main : pure white studio, product is the hero (85%), NO text. (Always image #1, exactly one.)
+- feature    : the product shown in a clean/lifestyle context, with a big HEADLINE + a short CALLOUT for one feature.
+- scene      : a LIFESTYLE / RESULT scene that shows the OUTCOME the product creates (e.g. the beautiful footage a camera takes) — the product is NOT shown; big HEADLINE + optional CALLOUT integrated. Use this to break visual monotony.
+- detail     : extreme close-up / macro of one part, material or texture, with HEADLINE + CALLOUT.
+- specs      : clean layout emphasising size / specs / what's-in-the-box, with HEADLINE + CALLOUT.
+
 ## YOUR JOB
-1) Identify the product + top buyer concerns. 2) Decide how many images and what each image's JOB is (a DIFFERENT buyer concern each). 3) For each: pick the best display ANGLE, the SCENE, the COMPOSITION (where the product sits, where empty space for text is), and IF it needs an on-image callout, the exact 2–5 word CALLOUT taken VERBATIM from the approved copy/bullets (never invent claims). 4) Keep ONE shared visual style + ONE product_lock across the whole set.
+1) From the bullets / title / selling points above, list the top buyer concerns (the copy IS the source of truth — you do not need to see the photos). 2) Assign each image a DIFFERENT shot_type and a DIFFERENT concern — VARY the archetypes (do not make everything "feature"); include at least one "scene". 3) For each non-main image write a punchy HEADLINE (3–6 words) and, if useful, a short CALLOUT (2–5 words) taken VERBATIM from the copy/bullets (never invent claims). 4) Keep ONE shared visual style + ONE product_lock across the set.
 
 ## OUTPUT — return ONLY this JSON (no markdown, no prose):
 {{"style":{{"palette":"...","mood":"...","lighting":"..."}},
  "product_lock":"strict appearance description + what must NOT change",
  "images":[
-   {{"slot":"main","role":"主图","angle":"hero front","scene":"pure white studio","selling_point":null,"callout":null,"text_on_image":false,"text_pos":"bottom-center","composition":"product centered, fills 85%","render_prompt":"<120-180 word cinematic prompt: ONLY product+scene+lighting+composition; NEVER include callout words>"}},
-   {{"slot":"sub1","role":"核心卖点","angle":"...","scene":"...","selling_point":"<one concern>","callout":"<verbatim 2-5 words>","text_on_image":true,"text_pos":"top-right","composition":"product left, negative space top-right for text","render_prompt":"<...must NOT contain the callout words...>"}}
+   {{"slot":"main","role":"主图","shot_type":"white_main","angle":"hero front","scene":"pure white studio","selling_point":null,"headline":null,"callout":null,"text_on_image":false,"text_pos":"bottom-center","composition":"product centered, fills 85%","render_prompt":"<120-180 word cinematic prompt: ONLY product+scene+lighting+composition; NEVER include any words>"}},
+   {{"slot":"sub1","role":"核心卖点","shot_type":"feature","angle":"...","scene":"...","selling_point":"<one concern>","headline":"<3-6 words>","callout":"<verbatim 2-5 words>","text_on_image":true,"text_pos":"top-center","composition":"product right, clear negative space top for the headline","render_prompt":"<...product + scene + lighting; must NOT contain any of the text words...>"}},
+   {{"slot":"sub2","role":"使用场景","shot_type":"scene","angle":"wide","scene":"the gorgeous result the product produces","selling_point":"<one concern>","headline":"<3-6 words>","callout":null,"text_on_image":true,"text_pos":"top-center","composition":"full-bleed scene, product NOT shown, space at top for headline","render_prompt":"<a beautiful result/lifestyle scene WITHOUT the product; do NOT draw the product; no text>"}}
  ]}}
 
 ## HARD RULES
-- First image = white-background MAIN (role 主图, product 85%, NO text).
-- Every other image solves a DIFFERENT concern with a DIFFERENT angle.
-- render_prompt MUST NOT contain the callout text (text is overlaid separately, crisply).
-- callout MUST be verbatim from the copy; do not invent specs/claims.
+- Exactly one white_main, and it is image #1 (product 85%, NO text).
+- VARY shot_type across the set; at least one "scene" image that does NOT show the product.
+- For shot_type "scene", render_prompt must describe the scene/result ONLY and must NOT depict the product.
+- render_prompt MUST NOT contain any headline/callout words (text is typeset separately, crisply).
+- headline/callout MUST come from the copy; do not invent specs/claims.
 {color_directive}
 {_FIDELITY_RULE}
 """
@@ -2188,8 +2221,9 @@ async def generate_single_image(project_id: str, body: ImageGenReq, _user: str =
         raise HTTPException(404)
 
     # Build reference image list: uploaded files (base64) take priority over scraped URLs
-    ref_urls = body.reference_urls
-    if not ref_urls:
+    # scene/result 图(use_reference=False)不挂参考图,生成纯场景 —— 根治"张张都是产品、看起来一样"
+    ref_urls = (body.reference_urls if body.use_reference else [])
+    if body.use_reference and not ref_urls:
         import base64 as _b64
         import mimetypes as _mt
         scrape_data = json.loads(row["scrape_data"]) if row["scrape_data"] else {}
@@ -2300,8 +2334,8 @@ async def overlay_callout_endpoint(project_id: str, body: OverlayCalloutReq, _us
     """Typeset a crisp callout onto an already-rendered (text-free) 套图 image and
     save the result. Separating text from generation keeps callouts legible,
     correctly spelled and re-editable (just call again with new text)."""
-    if not body.url or not body.callout.strip():
-        raise HTTPException(400, "url 和 callout 必填")
+    if not body.url or (not body.callout.strip() and not body.headline.strip()):
+        raise HTTPException(400, "url 必填,且 headline / callout 至少一个")
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             raw = await _fetch_image_bytes(client, body.url)
@@ -2309,7 +2343,8 @@ async def overlay_callout_endpoint(project_id: str, body: OverlayCalloutReq, _us
         raise HTTPException(502, f"读取底图失败：{e}")
     from app.services.listing_typography import overlay_callout
     try:
-        out = overlay_callout(raw, body.callout, body.text_pos, color=body.color or "#FFFFFF")
+        out = overlay_callout(raw, body.callout, body.text_pos,
+                              headline=body.headline, color=body.color or "#FFFFFF")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"文字叠加失败：{e}")
     from app.routers.image_translate import save_bytes_to_workspace
