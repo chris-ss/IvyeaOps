@@ -44,8 +44,8 @@ export const TOURS: Record<string, TourStep[]> = {
 
   // ── Listing 工作台 ───────────────────────────────────────────────────────────
   "/listing": [
-    { title: "Listing 工作台", body: "从竞品 ASIN 到整套文案 + 图片提示词的流水线，按 ① 采集 → ② 文案 → ③ 主图 → ④ A+ → ⑤ 输出 顺序走。" },
-    { sel: '[data-tour="listing-tabs"]', title: "五步流程", body: "顶部这排就是流程步骤。每步完成后点下一步推进；采集会抓竞品文案与图片（有 imgflow 直抓，无则回退 Sorftime）。" },
+    { title: "Listing 工作台", body: "从产品采集到 Listing 文案、图文整套直出和交付的生产流水线，按 ① 素材与洞察 → ② Listing 文案 → ③ 视觉套图 → ④ 交付推进。" },
+    { sel: '[data-tour="listing-tabs"]', title: "四步流程", body: "视觉套图会自动使用前两步内容和白底产品图，并把手动创意需求编译成整套统一的最终生图提示词。" },
     { title: "开始：新建 / 选 ASIN", body: "左侧填竞品 ASIN 新建项目，点「采集 ASIN 数据」开始。之后文案、主图提示词、A+ 都基于采集 + AI 分析逐步生成。" },
   ],
 

@@ -21,6 +21,7 @@ interface LocalHistoryEntry {
   query: string;
   marketplace: string;
   provider: string;
+  data_source: string;
   elapsedS: number;
   ts: number;
   report: string;
@@ -75,11 +76,13 @@ export default function Market() {
   const [marketplace, setMarketplace] = useState("US");
   const [dataSource, setDataSourceState] = useState<DataSourceId>(getDataSource);
   const changeDataSource = (id: DataSourceId) => { setDataSource(id); setDataSourceState(id); };
-  const dsReady = dataSourceMeta(dataSource).ready;
+  const dsReady = dataSourceMeta(dataSource, "market").ready;
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<ProgressItem | null>(null);
   const [provider, setProvider] = useState("");
+  const [actualDataSource, setActualDataSource] = useState<DataSourceId>(dataSource);
+  const [actualSourceLabel, setActualSourceLabel] = useState(dataSourceMeta(dataSource, "market").name);
   // Which provider the backend is currently trying (set by the 'attempt' SSE
   // event, before any token arrives). Used to show "正在尝试 hermes…" in real time.
   const [attemptingProvider, setAttemptingProvider] = useState("");
@@ -154,6 +157,8 @@ export default function Market() {
     setReport("");
     setWarnings([]);
     setProvider("");
+    setActualDataSource(dataSource);
+    setActualSourceLabel(dataSourceMeta(dataSource, "market").name);
     setAttemptingProvider("");
     setElapsedS(null);
     setErrorMsg("");
@@ -168,6 +173,9 @@ export default function Market() {
             setProgress({ step: evt.step, done: evt.done, total: evt.total });
           } else if (evt.type === "attempt") {
             setAttemptingProvider(evt.provider);
+          } else if (evt.type === "source") {
+            setActualDataSource(evt.actual as DataSourceId);
+            setActualSourceLabel(evt.label);
           } else if (evt.type === "token") {
             setProvider(evt.provider);
             setReport((r) => r + evt.text);
@@ -178,6 +186,8 @@ export default function Market() {
             setPhase("error");
           } else if (evt.type === "done") {
             setProvider(evt.provider);
+            if (evt.data_source) setActualDataSource(evt.data_source as DataSourceId);
+            if (evt.data_source_label) setActualSourceLabel(evt.data_source_label);
             setElapsedS(evt.elapsed_s);
             setPhase("done");
           }
@@ -224,7 +234,7 @@ export default function Market() {
   };
 
   const handleDownloadHtml = () => {
-    const html = markdownToHtmlPage(report, query, marketplace, provider, elapsedS);
+    const html = markdownToHtmlPage(report, query, marketplace, provider, elapsedS, actualSourceLabel);
     triggerDownload(html, `${stem}.html`, "text/html;charset=utf-8");
     setDlMenuOpen(false);
   };
@@ -248,6 +258,7 @@ export default function Market() {
               query: e.query,
               marketplace: e.marketplace,
               provider: e.provider ?? "",
+              data_source: e.data_source ?? "sorftime",
               elapsed_s: e.elapsedS ?? e.elapsed_s ?? 0,
               ts: e.ts,
               report: e.report ?? "",
@@ -271,7 +282,7 @@ export default function Market() {
     const apiEntry: import("../../api/market").HistoryEntry = {
       id: ts.toString(),
       mode, query, marketplace,
-      provider, elapsed_s: elapsedS ?? 0,
+      provider, data_source: actualDataSource, elapsed_s: elapsedS ?? 0,
       ts, report,
     };
     saveHistoryEntry(apiEntry).catch(() => {});
@@ -284,6 +295,11 @@ export default function Market() {
     setQuery(entry.query);
     setMarketplace(entry.marketplace);
     setProvider(entry.provider);
+    const loadedSource = (entry.data_source || "sorftime") as DataSourceId;
+    setDataSource(loadedSource);
+    setDataSourceState(loadedSource);
+    setActualDataSource(loadedSource);
+    setActualSourceLabel(dataSourceMeta(loadedSource, "market").name);
     setElapsedS(entry.elapsedS);
     setReport(entry.report);
     setPhase("done");
@@ -362,8 +378,8 @@ export default function Market() {
           className="market-query-input"
         />
 
-        {/* Data source picker (Sorftime active; SIF / 卖家精灵 即将支持) */}
-        <DataSourcePicker value={dataSource} onChange={changeDataSource} disabled={isRunning} />
+        {/* Data source picker — request carries the selected source end to end. */}
+        <DataSourcePicker value={dataSource} onChange={changeDataSource} disabled={isRunning} surface="market" />
 
         {/* Marketplace picker */}
         <div className="market-mkt-wrap" ref={pickerRef}>
@@ -401,7 +417,7 @@ export default function Market() {
           <button
             onClick={handleSubmit}
             disabled={!query.trim() || !dsReady}
-            title={!dsReady ? `数据源「${dataSourceMeta(dataSource).name}」即将支持，请切回 Sorftime` : undefined}
+            title={!dsReady ? `数据源「${dataSourceMeta(dataSource, "market").name}」当前不可用` : undefined}
             className="market-btn market-btn-submit"
           >
             生成报告
@@ -411,7 +427,7 @@ export default function Market() {
 
       {!dsReady && (
         <div className="market-error" style={{ marginTop: 8 }}>
-          数据源「{dataSourceMeta(dataSource).name}」即将支持，市场调研暂仅支持 Sorftime——请在上方切回 <b>Sorftime</b> 后生成报告。
+          数据源「{dataSourceMeta(dataSource, "market").name}」当前不可用于市场调研：{dataSourceMeta(dataSource, "market").note || "请切换数据源"}。
         </div>
       )}
 
@@ -447,7 +463,7 @@ export default function Market() {
               {phase === "collecting"
                 ? progress
                   ? `采集中 · ${progress.step}（${progress.done}/${progress.total}）`
-                  : "连接 Sorftime…"
+                  : `连接 ${actualSourceLabel}…`
                 : `AI 合成中${provider ? `（${provider}）` : ""}…`}
             </span>
             <span className="market-progress-pct">
@@ -499,7 +515,7 @@ export default function Market() {
           <div className="market-report-toolbar">
             <span className="market-report-meta">
               {phase === "done" && elapsedS !== null
-                ? `${provider} · ${elapsedS}s · ${query}`
+                ? `数据：${actualSourceLabel} · AI：${provider} · ${elapsedS}s · ${query}`
                 : phase === "synthesizing"
                   ? `${provider || "AI"} 生成中…`
                   : ""}
@@ -576,7 +592,7 @@ export default function Market() {
             ))}
           </div>
           <div className="market-empty-hint">
-            数据来源：Sorftime MCP &nbsp;·&nbsp; AI：IvyeaAgent → 全局兜底 → DeepSeek → Codex/Claude
+            数据来源：{dataSourceMeta(dataSource, "market").name} MCP &nbsp;·&nbsp; AI：IvyeaAgent → 全局兜底 → DeepSeek → Codex/Claude
           </div>
         </div>
       )}
@@ -634,6 +650,7 @@ export default function Market() {
                   <div className="market-history-item-meta">
                     <span><img src={FLAG_URL(mkt?.code || "US")} alt="" style={{width:16,height:12,verticalAlign:"middle"}} /> {entry.marketplace}</span>
                     {entry.provider && <span>{entry.provider}</span>}
+                    <span>数据：{dataSourceMeta((entry.data_source || "sorftime") as DataSourceId, "market").name}</span>
                     {entry.elapsedS > 0 && <span>{entry.elapsedS}s</span>}
                     <span className="market-history-item-time">{relativeTime(entry.ts)}</span>
                   </div>
@@ -876,6 +893,7 @@ function markdownToHtmlPage(
   marketplace: string,
   provider: string,
   elapsedS: number | null,
+  dataSource: string,
 ): string {
   const chartSpecs: HtmlChartSpec[] = [];
   const body = buildHtmlWithCharts(text, chartSpecs);
@@ -931,7 +949,7 @@ function markdownToHtmlPage(
   <div class="rpt-meta">
     <span>🔍 ${esc(query)}</span>
     <span>🌍 ${esc(marketplace)}</span>
-    <span>📅 ${date}</span>${provider ? `\n    <span>🤖 ${esc(provider)}</span>` : ""}${elapsedS !== null ? `\n    <span>⏱ ${elapsedS}s</span>` : ""}
+    <span>📅 ${date}</span><span>📊 ${esc(dataSource)}</span>${provider ? `\n    <span>🤖 ${esc(provider)}</span>` : ""}${elapsedS !== null ? `\n    <span>⏱ ${elapsedS}s</span>` : ""}
   </div>
 </div>
 ${body}

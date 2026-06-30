@@ -4,6 +4,7 @@ import {
   type WatchItem, type WatchKind, type AsinPulse,
 } from "../../../api/home";
 import AsinCard, { type AsinState } from "./AsinCard";
+import type { DataSourceId } from "../../../lib/dataSource";
 
 const ASIN_RE = /^[A-Z0-9]{10}$/;
 
@@ -19,9 +20,10 @@ function metricsToPulse(asin: string, marketplace: string, m: Record<string, any
   };
 }
 
-export default function AsinMonitor({ kind, marketplace, onChanged }: {
+export default function AsinMonitor({ kind, marketplace, dataSource, onChanged }: {
   kind: WatchKind;
   marketplace: string;
+  dataSource: DataSourceId;
   onChanged?: () => void;
 }) {
   const [items, setItems] = useState<WatchItem[]>([]);
@@ -30,10 +32,12 @@ export default function AsinMonitor({ kind, marketplace, onChanged }: {
   const [refreshing, setRefreshing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Cache-first load: read stored snapshots, NO Sorftime call.
+  const sourceName = dataSource === "sellersprite" ? "卖家精灵" : "Sorftime";
+
+  // Cache-first load: source-isolated snapshots, no provider call.
   const loadCache = async () => {
     try {
-      const [all, snaps] = await Promise.all([listWatch(), fetchWatchSnapshots()]);
+      const [all, snaps] = await Promise.all([listWatch(dataSource), fetchWatchSnapshots(dataSource)]);
       const mine = all.filter(w => w.kind === kind && w.marketplace === marketplace);
       setItems(mine);
       const snapByAsin = new Map(
@@ -52,13 +56,13 @@ export default function AsinMonitor({ kind, marketplace, onChanged }: {
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { loadCache(); /* eslint-disable-next-line */ }, [kind, marketplace]);
+  useEffect(() => { loadCache(); /* eslint-disable-next-line */ }, [kind, marketplace, dataSource]);
 
   // Live pulse one ASIN (spends quota) — explicit user action only.
   const fetchOne = async (asin: string) => {
     setStates(p => ({ ...p, [asin]: { kind: "loading" } }));
     try {
-      const res = await pulseAsin(asin, marketplace);
+      const res = await pulseAsin(asin, marketplace, dataSource);
       setStates(p => ({ ...p, [asin]: { kind: "ok", pulse: res.current, delta: res.delta, ts: Date.now(), cached: false } }));
     } catch (e: any) {
       setStates(p => ({ ...p, [asin]: { kind: "err", msg: e?.message || "请求失败" } }));
@@ -78,8 +82,8 @@ export default function AsinMonitor({ kind, marketplace, onChanged }: {
     if (!ASIN_RE.test(asin)) return;
     if (items.some(it => it.asin === asin)) { setInput(""); return; }
     try {
-      await addWatch({ asin, marketplace, kind });
-      setItems(p => [...p, { id: `${kind}:${marketplace}:${asin}`, asin, marketplace, kind, label: "", ts: Date.now() }]);
+      const created = await addWatch({ asin, marketplace, data_source: dataSource, kind });
+      setItems(p => [...p, { id: created.id, asin, marketplace, data_source: dataSource, kind, label: "", ts: Date.now() }]);
       setInput("");
       inputRef.current?.focus();
       fetchOne(asin); // one live fetch for the newly added ASIN
@@ -119,7 +123,7 @@ export default function AsinMonitor({ kind, marketplace, onChanged }: {
         <button className="tbtn tbtn-acc"
           onClick={refreshAll}
           disabled={refreshing || items.length === 0}
-          title="实时刷新全部（每个 ASIN 消耗 Sorftime 调用）">
+          title={`实时刷新全部（每个 ASIN 消耗 ${sourceName} 调用）`}>
           {refreshing ? <><span className="spin" style={{ marginRight: 6 }} />刷新中…</> : "↻ 全部刷新"}
         </button>
       </div>

@@ -44,11 +44,15 @@ def _history_connect() -> sqlite3.Connection:
                 query       TEXT NOT NULL,
                 marketplace TEXT NOT NULL,
                 provider    TEXT NOT NULL DEFAULT '',
+                data_source TEXT NOT NULL DEFAULT 'sorftime',
                 elapsed_s   REAL NOT NULL DEFAULT 0,
                 ts          INTEGER NOT NULL,
                 report      TEXT NOT NULL DEFAULT ''
             )
         """)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(market_history)").fetchall()}
+        if "data_source" not in columns:
+            conn.execute("ALTER TABLE market_history ADD COLUMN data_source TEXT NOT NULL DEFAULT 'sorftime'")
         _INITED.add(path)
     return conn
 
@@ -65,6 +69,7 @@ class HistoryEntryIn(BaseModel):
     query: str
     marketplace: str
     provider: str = ""
+    data_source: str = "sorftime"
     elapsed_s: float = 0.0
     ts: int
     report: str = ""
@@ -74,7 +79,7 @@ class HistoryEntryIn(BaseModel):
 def get_history(_user: str = Depends(require_user)) -> List[dict]:
     with _history_connect() as conn:
         rows = conn.execute(
-            "SELECT id,mode,query,marketplace,provider,elapsed_s,ts,report "
+            "SELECT id,mode,query,marketplace,provider,data_source,elapsed_s,ts,report "
             "FROM market_history ORDER BY ts DESC LIMIT ?",
             (_HISTORY_MAX,),
         ).fetchall()
@@ -82,6 +87,7 @@ def get_history(_user: str = Depends(require_user)) -> List[dict]:
 
 
 def save_history(*, mode: str, query: str, marketplace: str, provider: str = "",
+                 data_source: str = "sorftime",
                  elapsed_s: float = 0.0, ts: int | None = None, report: str = "",
                  entry_id: str = "") -> str:
     """Persist one market report row; returns its id.
@@ -91,9 +97,9 @@ def save_history(*, mode: str, query: str, marketplace: str, provider: str = "",
     with _history_connect() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO market_history "
-            "(id,mode,query,marketplace,provider,elapsed_s,ts,report) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (entry_id, mode, query, marketplace, provider, elapsed_s, ts, report),
+            "(id,mode,query,marketplace,provider,data_source,elapsed_s,ts,report) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (entry_id, mode, query, marketplace, provider, _normalize_data_source(data_source), elapsed_s, ts, report),
         )
         conn.execute(   # keep most recent only
             "DELETE FROM market_history WHERE id NOT IN "
@@ -107,7 +113,7 @@ def save_history(*, mode: str, query: str, marketplace: str, provider: str = "",
 def add_history(entry: HistoryEntryIn, _user: str = Depends(require_user)) -> dict:
     return {"id": save_history(
         mode=entry.mode, query=entry.query, marketplace=entry.marketplace,
-        provider=entry.provider, elapsed_s=entry.elapsed_s, ts=entry.ts,
+        provider=entry.provider, data_source=entry.data_source, elapsed_s=entry.elapsed_s, ts=entry.ts,
         report=entry.report, entry_id=entry.id)}
 
 
@@ -119,6 +125,7 @@ async def generate_report(mode: str, query: str, marketplace: str,
     nesting (the caller is already IvyeaAgent)."""
     mode = mode if mode in ("keyword", "asin") else "keyword"
     marketplace = (marketplace or "US").strip().upper()
+    data_source = _normalize_data_source(data_source)
 
     async def _noop(*_a) -> None:
         return None
@@ -129,6 +136,9 @@ async def generate_report(mode: str, query: str, marketplace: str,
         data, errors = await _svc.keyword_pipeline(query, marketplace, _noop)
     else:
         data, errors = await _svc.asin_pipeline(query, marketplace, _noop)
+    if not _has_collected_data(data):
+        detail = "; ".join(errors[:3]) or "未返回任何数据"
+        raise RuntimeError(f"{_source_label(data_source)} 数据采集失败：{detail}")
     parts: list[str] = []
     provider = "unknown"
     async for prov, chunk in ai_synthesis_service.synthesize(mode, query, marketplace, data, skip_agent=True, source=_source_label(data_source)):
@@ -143,10 +153,12 @@ async def generate_report(mode: str, query: str, marketplace: str,
         raise RuntimeError("AI 合成返回空")
     elapsed = round(time.time() - start, 1)
     entry_id = save_history(mode=mode, query=query, marketplace=marketplace, provider=provider,
+                            data_source=data_source,
                             elapsed_s=elapsed, ts=int(time.time() * 1000), report=report,
                             entry_id=uuid.uuid4().hex)
     return {"id": entry_id, "mode": mode, "query": query, "marketplace": marketplace,
-            "provider": provider, "elapsed_s": elapsed, "warnings": errors, "report": report}
+            "provider": provider, "data_source": data_source, "data_source_label": _source_label(data_source),
+            "elapsed_s": elapsed, "warnings": errors, "report": report}
 
 
 @router.delete("/history/{entry_id}")
@@ -170,10 +182,20 @@ class ResearchReq(BaseModel):
     data_source: str = "sorftime"   # "sorftime" | "sellersprite"
 
 
+_DATA_SOURCES = {"sorftime", "sellersprite"}
+
+
+def _normalize_data_source(data_source: str) -> str:
+    value = (data_source or "sorftime").strip().lower()
+    if value not in _DATA_SOURCES:
+        raise ValueError(f"unsupported data source: {value}")
+    return value
+
+
 def _pipeline_for(data_source: str):
     """Data-collection service for the selected source. Both expose
     keyword_pipeline / asin_pipeline(query, marketplace, on_progress) -> (data, errors)."""
-    if (data_source or "").strip().lower() == "sellersprite":
+    if _normalize_data_source(data_source) == "sellersprite":
         from app.services import sellersprite_service
         return sellersprite_service
     return sorftime_service
@@ -181,7 +203,15 @@ def _pipeline_for(data_source: str):
 
 def _source_label(data_source: str) -> str:
     """Human name of the data source for the report's 数据声明."""
-    return "卖家精灵" if (data_source or "").strip().lower() == "sellersprite" else "Sorftime"
+    return "卖家精灵" if _normalize_data_source(data_source) == "sellersprite" else "Sorftime"
+
+
+def _has_collected_data(data: object) -> bool:
+    if isinstance(data, dict):
+        return any(_has_collected_data(value) for value in data.values())
+    if isinstance(data, (list, tuple)):
+        return any(_has_collected_data(value) for value in data)
+    return data not in (None, "")
 
 
 def _sse(event: dict) -> str:
@@ -236,16 +266,19 @@ async def _stream_synthesis(
 
 async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
     start = time.time()
-    chain = ai_synthesis_service._text_provider_chain()
-    # hermes-native (Path A) only knows the Sorftime MCP; non-sorftime sources
-    # must pre-fetch (Path B).
-    is_sorftime = (req.data_source or "sorftime").strip().lower() != "sellersprite"
-    hermes_first = bool(chain) and chain[0] == "hermes" and is_sorftime
+    data_source = _normalize_data_source(req.data_source)
+    source_label = _source_label(data_source)
+    yield _sse({"type": "source", "requested": data_source, "actual": data_source, "label": source_label})
+    # Always collect market data through the server-side MCP client. It reads the
+    # single IvyeaOps system setting and works for every signed-in user. Depending
+    # on a per-OS/per-user Hermes config caused first-run Windows sessions to call
+    # Sorftime without a key even though the key was present in System Settings.
+    hermes_first = False
 
     # ── Path A: hermes-native ─────────────────────────────────────────────────
     # hermes has sorftime MCP configured; give it tool-calling instructions so
     # it collects and synthesises in one pass — no sorftime pre-fetch needed.
-    if hermes_first:
+    if hermes_first and data_source == "sorftime":
         yield _sse({"type": "phase", "phase": "synthesizing"})
         provider = "unknown"
         hermes_ok = False
@@ -270,7 +303,8 @@ async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
                     yield _sse({"type": "token", "text": chunk, "provider": prov})
         if hermes_ok:
             elapsed = round(time.time() - start, 1)
-            yield _sse({"type": "done", "provider": provider, "elapsed_s": elapsed})
+            yield _sse({"type": "done", "provider": provider, "elapsed_s": elapsed,
+                        "data_source": data_source, "data_source_label": source_label})
             return
         # hermes failed → fall back to Path B (sorftime pre-fetch + other providers)
         yield _sse({"type": "warn", "detail": "hermes 原生调用失败，回退到数据预采集模式"})
@@ -288,7 +322,7 @@ async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
 
     yield _sse({"type": "phase", "phase": "collecting"})
 
-    _svc = _pipeline_for(req.data_source)
+    _svc = _pipeline_for(data_source)
     if req.mode == "keyword":
         pipeline_task = asyncio.create_task(
             _svc.keyword_pipeline(req.query, req.marketplace, on_progress)
@@ -319,6 +353,11 @@ async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
         yield _sse({"type": "error", "detail": f"数据采集失败: {exc}"})
         return
 
+    if not _has_collected_data(data):
+        detail = "; ".join(pipe_errors[:3]) or "未返回任何数据"
+        yield _sse({"type": "error", "detail": f"{source_label} 数据采集失败：{detail}"})
+        return
+
     for err in pipe_errors:
         yield _sse({"type": "warn", "detail": err})
 
@@ -329,7 +368,7 @@ async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
     # it would just receive a 40KB dump without MCP benefit).
     provider = "unknown"
     async for kind, a, b in _stream_synthesis(
-        lambda: ai_synthesis_service.synthesize(req.mode, req.query, req.marketplace, data, source=_source_label(req.data_source))
+        lambda: ai_synthesis_service.synthesize(req.mode, req.query, req.marketplace, data, source=source_label)
     ):
         if kind == "hb":
             yield _SSE_HEARTBEAT
@@ -348,7 +387,8 @@ async def _run_research(req: ResearchReq) -> AsyncGenerator[str, None]:
             yield _sse({"type": "token", "text": chunk, "provider": prov})
 
     elapsed = round(time.time() - start, 1)
-    yield _sse({"type": "done", "provider": provider, "elapsed_s": elapsed})
+    yield _sse({"type": "done", "provider": provider, "elapsed_s": elapsed,
+                "data_source": data_source, "data_source_label": source_label})
 
 
 @router.post("/research")
@@ -362,6 +402,10 @@ async def market_research(
     if req.mode not in ("keyword", "asin"):
         from fastapi import HTTPException
         raise HTTPException(400, "mode must be keyword or asin")
+    try:
+        req.data_source = _normalize_data_source(req.data_source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     async def generator():
         async for chunk in _run_research(req):

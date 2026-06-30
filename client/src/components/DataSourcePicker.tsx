@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { DATA_SOURCES, dataSourceMeta, type DataSourceId } from "../lib/dataSource";
+import { DATA_SOURCES, dataSourceMeta, type DataSourceId, type DataSourceSurface } from "../lib/dataSource";
 
 // Shared market-data source dropdown for 首页 / 市场调研 / 打法推荐.
-// Reuses the existing `market-mkt-*` topbar dropdown styles. Only Sorftime is
-// wired today; the others render a 「即将支持」 badge (see lib/dataSource).
+// Availability is evaluated per surface so a source can never appear active on
+// a page whose backend would silently use a different provider.
 export default function DataSourcePicker({
   value,
   onChange,
   disabled,
+  surface = "market",
 }: {
   value: DataSourceId;
   onChange: (id: DataSourceId) => void;
   disabled?: boolean;
+  surface?: DataSourceSurface;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -25,7 +27,7 @@ export default function DataSourcePicker({
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  const cur = dataSourceMeta(value);
+  const cur = dataSourceMeta(value, surface);
 
   return (
     <div className="market-mkt-wrap" ref={ref}>
@@ -40,20 +42,24 @@ export default function DataSourcePicker({
       </button>
       {open && (
         <div className="market-mkt-dropdown">
-          {DATA_SOURCES.map((s) => (
-            <button
-              key={s.id}
-              className={"market-mkt-option" + (value === s.id ? " active" : "")}
-              onClick={() => { onChange(s.id); setOpen(false); }}
-            >
-              <span className="market-mkt-option-name">{s.name}</span>
-              {!s.ready && (
-                <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--amber, #fbbf24)" }}>
-                  {s.note}
-                </span>
-              )}
-            </button>
-          ))}
+          {DATA_SOURCES.map((source) => {
+            const s = dataSourceMeta(source.id, surface);
+            return (
+              <button
+                key={s.id}
+                className={"market-mkt-option" + (value === s.id ? " active" : "")}
+                disabled={!s.ready}
+                onClick={() => { onChange(s.id); setOpen(false); }}
+              >
+                <span className="market-mkt-option-name">{s.name}</span>
+                {!s.ready && (
+                  <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--amber, #fbbf24)" }}>
+                    {s.note || "当前页面暂不支持"}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

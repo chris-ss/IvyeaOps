@@ -1,9 +1,12 @@
+import type { DataSourceId } from "../lib/dataSource";
+
 export type WatchKind = "competitor" | "own";
 
 export interface WatchItem {
   id: string;
   asin: string;
   marketplace: string;
+  data_source?: DataSourceId;
   kind: WatchKind;
   label: string;
   ts: number;
@@ -54,14 +57,14 @@ export interface AlertItem {
   ts: number;
 }
 
-export async function listWatch(): Promise<WatchItem[]> {
-  const r = await fetch("/api/home/watch", { credentials: "include" });
+export async function listWatch(dataSource: DataSourceId = "sorftime"): Promise<WatchItem[]> {
+  const r = await fetch(`/api/home/watch?data_source=${encodeURIComponent(dataSource)}`, { credentials: "include" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
 export async function addWatch(item: {
-  asin: string; marketplace: string; kind: WatchKind; label?: string;
+  asin: string; marketplace: string; data_source: DataSourceId; kind: WatchKind; label?: string;
 }): Promise<{ id: string }> {
   const r = await fetch("/api/home/watch", {
     method: "POST",
@@ -84,6 +87,7 @@ export interface WatchSnapshot {
   id: string;
   asin: string;
   marketplace: string;
+  data_source?: DataSourceId;
   kind: WatchKind;
   label: string;
   ts: number | null;
@@ -91,25 +95,25 @@ export interface WatchSnapshot {
 }
 
 /** Latest stored snapshot per watched ASIN — NO Sorftime call (cache-first). */
-export async function fetchWatchSnapshots(): Promise<WatchSnapshot[]> {
-  const r = await fetch("/api/home/watch-snapshots", { credentials: "include" });
+export async function fetchWatchSnapshots(dataSource: DataSourceId = "sorftime"): Promise<WatchSnapshot[]> {
+  const r = await fetch(`/api/home/watch-snapshots?data_source=${encodeURIComponent(dataSource)}`, { credentials: "include" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function pulseAsin(asin: string, marketplace: string): Promise<PulseResult> {
+export async function pulseAsin(asin: string, marketplace: string, dataSource: DataSourceId = "sorftime"): Promise<PulseResult> {
   const r = await fetch("/api/home/pulse", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ asin, marketplace }),
+    body: JSON.stringify({ asin, marketplace, data_source: dataSource }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function fetchAlerts(): Promise<AlertItem[]> {
-  const r = await fetch("/api/home/alerts", { credentials: "include" });
+export async function fetchAlerts(dataSource: DataSourceId = "sorftime"): Promise<AlertItem[]> {
+  const r = await fetch(`/api/home/alerts?data_source=${encodeURIComponent(dataSource)}`, { credentials: "include" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
@@ -155,6 +159,8 @@ export interface CategoryResult {
   node_id: string;
   category_name: string | null;       // resolved category (for verification)
   source: string;                     // "nodeId" | "asin" | "name" | "keyword"
+  data_source?: DataSourceId;
+  summary_kind?: string;
   error: string | null;
   summary: CategorySummary | null;
   bands: CategoryBand[];
@@ -163,20 +169,20 @@ export interface CategoryResult {
 }
 
 /** Last cached category analysis — NO Sorftime call. */
-export async function fetchCategoryCached(query: string, marketplace: string, mode = "category"): Promise<{ cached: CategoryResult | null; ts: number | null }> {
-  const r = await fetch(`/api/home/category-result?query=${encodeURIComponent(query)}&marketplace=${encodeURIComponent(marketplace)}&mode=${mode}`, {
+export async function fetchCategoryCached(query: string, marketplace: string, mode = "category", dataSource: DataSourceId = "sorftime"): Promise<{ cached: CategoryResult | null; ts: number | null }> {
+  const r = await fetch(`/api/home/category-result?query=${encodeURIComponent(query)}&marketplace=${encodeURIComponent(marketplace)}&mode=${mode}&data_source=${encodeURIComponent(dataSource)}`, {
     credentials: "include",
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function fetchCategory(query: string, marketplace: string, mode = "category"): Promise<CategoryResult> {
+export async function fetchCategory(query: string, marketplace: string, mode = "category", dataSource: DataSourceId = "sorftime"): Promise<CategoryResult> {
   const r = await fetch("/api/home/category", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ query, marketplace, mode }),
+    body: JSON.stringify({ query, marketplace, mode, data_source: dataSource }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -188,6 +194,7 @@ export interface MarketWatchItem {
   id: string;
   query: string;
   marketplace: string;
+  data_source?: DataSourceId;
   label: string;
   ts: number;
 }
@@ -204,18 +211,19 @@ export interface SeriesPoint { day: string; value: number }
 export interface MarketSeries {
   query: string;
   marketplace: string;
+  data_source?: DataSourceId;
   market: MarketPoint[];
   own: SeriesPoint[];
   competitor: SeriesPoint[];
 }
 
-export async function listMarketWatch(): Promise<MarketWatchItem[]> {
-  const r = await fetch("/api/home/market-watch", { credentials: "include" });
+export async function listMarketWatch(dataSource: DataSourceId = "sorftime"): Promise<MarketWatchItem[]> {
+  const r = await fetch(`/api/home/market-watch?data_source=${encodeURIComponent(dataSource)}`, { credentials: "include" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function addMarketWatch(item: { query: string; marketplace: string; label?: string }): Promise<{ id: string }> {
+export async function addMarketWatch(item: { query: string; marketplace: string; data_source: DataSourceId; label?: string }): Promise<{ id: string }> {
   const r = await fetch("/api/home/market-watch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -233,39 +241,39 @@ export async function deleteMarketWatch(id: string): Promise<void> {
   });
 }
 
-export async function fetchMarketSeries(query: string, marketplace: string): Promise<MarketSeries> {
-  const r = await fetch(`/api/home/market-series?query=${encodeURIComponent(query)}&marketplace=${encodeURIComponent(marketplace)}`, {
+export async function fetchMarketSeries(query: string, marketplace: string, dataSource: DataSourceId = "sorftime"): Promise<MarketSeries> {
+  const r = await fetch(`/api/home/market-series?query=${encodeURIComponent(query)}&marketplace=${encodeURIComponent(marketplace)}&data_source=${encodeURIComponent(dataSource)}`, {
     credentials: "include",
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function recordMarketNow(): Promise<{ day: string; recorded_market: number; recorded_asin: number }> {
-  const r = await fetch("/api/home/market-record", { method: "POST", credentials: "include" });
+export async function recordMarketNow(dataSource: DataSourceId = "sorftime"): Promise<{ day: string; recorded_market: number; recorded_asin: number }> {
+  const r = await fetch(`/api/home/market-record?data_source=${encodeURIComponent(dataSource)}`, { method: "POST", credentials: "include" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function marketDailyBackfill(query: string, marketplace: string, category: string, days = 31): Promise<{
+export async function marketDailyBackfill(query: string, marketplace: string, category: string, days = 31, dataSource: DataSourceId = "sorftime"): Promise<{
   error: string | null; filled: number; node_id: string; category_name: string | null; days?: number;
 }> {
   const r = await fetch("/api/home/market-daily-backfill", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-    body: JSON.stringify({ query, marketplace, category, days }),
+    body: JSON.stringify({ query, marketplace, category, days, data_source: dataSource }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function backfillMarket(query: string, marketplace: string): Promise<{
+export async function backfillMarket(query: string, marketplace: string, dataSource: DataSourceId = "sorftime"): Promise<{
   market_points: number; asin_points: number; asin_errors: number; sv_error: string | null;
 }> {
   const r = await fetch("/api/home/market-backfill", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ query, marketplace }),
+    body: JSON.stringify({ query, marketplace, data_source: dataSource }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -276,6 +284,7 @@ export async function backfillMarket(query: string, marketplace: string): Promis
 export interface KeywordData {
   keyword: string;
   marketplace: string;
+  data_source?: DataSourceId;
   detail: Record<string, any> | null;
   detail_error: string | null;
   trend: Record<string, any> | null;
@@ -286,24 +295,25 @@ export interface KeywordItem {
   id: string;
   keyword: string;
   marketplace: string;
+  data_source?: DataSourceId;
   label: string;
   ts: number;
   data: KeywordData | null;
   data_ts: number | null;
 }
 
-export async function listKeywords(): Promise<KeywordItem[]> {
-  const r = await fetch("/api/home/keywords", { credentials: "include" });
+export async function listKeywords(dataSource: DataSourceId = "sorftime"): Promise<KeywordItem[]> {
+  const r = await fetch(`/api/home/keywords?data_source=${encodeURIComponent(dataSource)}`, { credentials: "include" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function addKeyword(keyword: string, marketplace: string): Promise<{ id: string }> {
+export async function addKeyword(keyword: string, marketplace: string, dataSource: DataSourceId = "sorftime"): Promise<{ id: string }> {
   const r = await fetch("/api/home/keyword", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ keyword, marketplace }),
+    body: JSON.stringify({ keyword, marketplace, data_source: dataSource }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -325,36 +335,36 @@ export interface KeywordExtendItem {
   evidence_sales: number | null;
 }
 
-export async function fetchKeywordExtendsCached(keyword: string, marketplace: string): Promise<{ items: KeywordExtendItem[]; ts: number | null }> {
-  const r = await fetch(`/api/home/keyword-extends?keyword=${encodeURIComponent(keyword)}&marketplace=${encodeURIComponent(marketplace)}`, { credentials: "include" });
+export async function fetchKeywordExtendsCached(keyword: string, marketplace: string, dataSource: DataSourceId = "sorftime"): Promise<{ items: KeywordExtendItem[]; ts: number | null }> {
+  const r = await fetch(`/api/home/keyword-extends?keyword=${encodeURIComponent(keyword)}&marketplace=${encodeURIComponent(marketplace)}&data_source=${encodeURIComponent(dataSource)}`, { credentials: "include" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function pulseKeywordExtends(keyword: string, marketplace: string): Promise<{ items: KeywordExtendItem[]; ts: number | null; error: string | null }> {
+export async function pulseKeywordExtends(keyword: string, marketplace: string, dataSource: DataSourceId = "sorftime"): Promise<{ items: KeywordExtendItem[]; ts: number | null; error: string | null }> {
   const r = await fetch("/api/home/keyword-extends", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-    body: JSON.stringify({ keyword, marketplace }),
+    body: JSON.stringify({ keyword, marketplace, data_source: dataSource }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function deepKeywordExtendSales(keyword: string, marketplace: string): Promise<{ items: KeywordExtendItem[]; ts: number | null }> {
+export async function deepKeywordExtendSales(keyword: string, marketplace: string, dataSource: DataSourceId = "sorftime"): Promise<{ items: KeywordExtendItem[]; ts: number | null }> {
   const r = await fetch("/api/home/keyword-extends-sales", {
     method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-    body: JSON.stringify({ keyword, marketplace }),
+    body: JSON.stringify({ keyword, marketplace, data_source: dataSource }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function pulseKeyword(keyword: string, marketplace: string): Promise<KeywordData> {
+export async function pulseKeyword(keyword: string, marketplace: string, dataSource: DataSourceId = "sorftime"): Promise<KeywordData> {
   const r = await fetch("/api/home/keyword-pulse", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ keyword, marketplace }),
+    body: JSON.stringify({ keyword, marketplace, data_source: dataSource }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const data: KeywordData = await r.json();

@@ -11,7 +11,7 @@ public generators are new.
 Two entry points, mirroring the market module:
   • ``synthesize_native``  — Hermes calls the Sorftime MCP tools itself, then
                               writes the playbook in one pass (preferred).
-  • ``synthesize``         — fallback: caller pre-fetches Sorftime data, we feed
+  • ``synthesize``         — fallback: caller pre-fetches the selected source, we feed
                               it to the provider chain (deepseek / apimart / CLI).
 """
 from __future__ import annotations
@@ -265,17 +265,18 @@ def _native_prompt(mode: str, query: str, marketplace: str, price: str, cost: st
 
 
 def _fallback_prompt(
-    mode: str, query: str, marketplace: str, price: str, cost: str, data: Dict[str, Any]
+    mode: str, query: str, marketplace: str, price: str, cost: str, data: Dict[str, Any],
+    source: str = "Sorftime",
 ) -> str:
     data_summary = json.dumps(data, ensure_ascii=False, indent=2)
     if len(data_summary) > 40000:
         data_summary = data_summary[:40000] + "\n...(数据已截断)"
     head = (
         "你是亚马逊跨境电商运营操盘专家，只用纯白帽、站内合规手段把新品推起来。"
-        "请根据下方 Sorftime 原始数据，生成完整的白帽站内打法手册。\n\n"
+        f"请根据下方 {source} 原始数据，生成完整的白帽站内打法手册。\n\n"
     )
     body = _fill(_PLAYBOOK_TEMPLATE, query, marketplace, price, cost)
-    return f"{head}{body}\n\n---\n原始数据（来自Sorftime MCP）：\n{data_summary}"
+    return f"{head}{body}\n\n---\n原始数据（来自{source}）：\n{data_summary}"
 
 
 async def synthesize_native(
@@ -306,13 +307,14 @@ async def synthesize(
     cost: str,
     data: Dict[str, Any],
     skip_agent: bool = False,
+    source: str = "Sorftime",
 ) -> AsyncGenerator[tuple[str, str], None]:
-    """Fallback path: feed pre-fetched Sorftime data to the provider chain
+    """Fallback path: feed pre-fetched selected-source data to the provider chain
     (ivyea-agent / deepseek / assistant / codex / claude). Yields (provider, chunk); on total
     failure yields ('error', diagnostic).
 
     skip_agent=True drops ivyea-agent (caller is already the agent — the panel bridge)."""
-    prompt = _fallback_prompt(mode, query, marketplace, price, cost, data)
+    prompt = _fallback_prompt(mode, query, marketplace, price, cost, data, source=source)
     failures: list[str] = []
     # Skip hermes here: in the fallback path it either already failed (native)
     # or has no pre-fetched-data advantage over the streaming HTTP providers.

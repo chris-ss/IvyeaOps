@@ -5,6 +5,7 @@ import {
   type MarketWatchItem, type MarketSeries,
 } from "../../../api/home";
 import TrendChart, { type TrendSeries } from "./TrendChart";
+import type { DataSourceId } from "../../../lib/dataSource";
 
 function fmtVol(v: number): string {
   if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + "M";
@@ -37,7 +38,7 @@ function bucketPoints(points: { day: string; value: number }[], view: View): { d
     .map(([day, e]) => ({ day, value: Math.round((e.sum / e.n) * 100) / 100 }));
 }
 
-export default function MarketTraffic({ marketplace }: { marketplace: string }) {
+export default function MarketTraffic({ marketplace, dataSource }: { marketplace: string; dataSource: DataSourceId }) {
   const [items, setItems] = useState<MarketWatchItem[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [series, setSeries] = useState<MarketSeries | null>(null);
@@ -50,6 +51,7 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
   const [dailyBusy, setDailyBusy] = useState(false);
   const [dailyMsg, setDailyMsg] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const sourceName = dataSource === "sellersprite" ? "卖家精灵" : "Sorftime";
 
   useEffect(() => { localStorage.setItem("ivyea-ops-mkt-view", view); }, [view]);
 
@@ -57,7 +59,7 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
 
   const loadList = async (pickQuery?: string) => {
     try {
-      const all = await listMarketWatch();
+      const all = await listMarketWatch(dataSource);
       setItems(all);
       const forMkt = all.filter(it => it.marketplace === marketplace);
       const next = pickQuery ?? (forMkt.some(it => it.query === selected) ? selected : forMkt[0]?.query ?? "");
@@ -65,32 +67,32 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { loadList(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { loadList(); /* eslint-disable-next-line */ }, [dataSource]);
   // Marketplace changed → re-pick a baseline for that site.
   useEffect(() => {
     const forMkt = items.filter(it => it.marketplace === marketplace);
     setSelected(forMkt[0]?.query ?? "");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marketplace]);
+  }, [marketplace, dataSource]);
 
   // Load series when selection changes.
   useEffect(() => {
     if (!selected) { setSeries(null); return; }
     let alive = true;
     setLoading(true);
-    fetchMarketSeries(selected, marketplace)
+    fetchMarketSeries(selected, marketplace, dataSource)
       .then(s => { if (alive) setSeries(s); })
       .catch(() => { if (alive) setSeries(null); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [selected, marketplace]);
+  }, [selected, marketplace, dataSource]);
 
   const handleAdd = async () => {
     const q = input.trim();
     if (!q) return;
     setInput("");
     try {
-      await addMarketWatch({ query: q, marketplace });
+      await addMarketWatch({ query: q, marketplace, data_source: dataSource });
       await loadList(q);
     } catch { /* ignore */ }
     inputRef.current?.focus();
@@ -104,9 +106,9 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
   const handleRecordNow = async () => {
     setRecording(true);
     try {
-      await recordMarketNow();
+      await recordMarketNow(dataSource);
       if (selected) {
-        const s = await fetchMarketSeries(selected, marketplace);
+        const s = await fetchMarketSeries(selected, marketplace, dataSource);
         setSeries(s);
       }
     } catch { /* ignore */ } finally { setRecording(false); }
@@ -116,8 +118,8 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
     if (!selected) return;
     setBackfilling(true);
     try {
-      await backfillMarket(selected, marketplace);
-      const s = await fetchMarketSeries(selected, marketplace);
+      await backfillMarket(selected, marketplace, dataSource);
+      const s = await fetchMarketSeries(selected, marketplace, dataSource);
       setSeries(s);
     } catch { /* ignore */ } finally { setBackfilling(false); }
   };
@@ -127,11 +129,11 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
     setDailyBusy(true);
     setDailyMsg("");
     try {
-      const r = await marketDailyBackfill(selected, marketplace, catInput.trim(), 31);
+      const r = await marketDailyBackfill(selected, marketplace, catInput.trim(), 31, dataSource);
       setDailyMsg(r.error
         ? `失败：${r.error}`
         : `已拉 ${r.filled} 天日数据 · 类目：${r.category_name || r.node_id}`);
-      const s = await fetchMarketSeries(selected, marketplace);
+      const s = await fetchMarketSeries(selected, marketplace, dataSource);
       setSeries(s);
     } catch (e: any) {
       setDailyMsg(e?.message || "请求失败");
@@ -179,7 +181,7 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
           <button className="tbtn" onClick={handleAdd} disabled={!input.trim()}>+ 添加基线</button>
         </div>
         <button className="tbtn" onClick={handleBackfill} disabled={backfilling || !selected}
-          title="用 Sorftime 趋势数据回填最近~24个月的历史月度点">
+          title={`用 ${sourceName} 趋势数据回填历史月度点`}>
           {backfilling ? <><span className="spin" style={{ marginRight: 6 }} />导入中…</> : "⇣ 导入历史"}
         </button>
         <button className="tbtn tbtn-acc" onClick={handleRecordNow} disabled={recording || mine.length === 0}>
@@ -234,9 +236,13 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
                   ? <TrendChart series={metricTrend} />
                   : <div className="lc-empty">暂无数据点 · 点「立即记录」或等每日自动记录</div>}
                 <div className="cat-hint" style={{ marginTop: 4 }}>
-                  搜索量仅<b>月度</b>（Sorftime 无日粒度）；类目总销量可拉<b>近31天日数据</b>（按日历史，需正确类目）——它也是下方归因图的大盘基线，且会顺带补上你的自有/竞对日销量。
+                  {dataSource === "sellersprite" ? (
+                    <>搜索量、类目销量与 ASIN 销量使用<b>卖家精灵月度趋势</b>；卖家精灵暂不提供近 31 天类目日历史。</>
+                  ) : (
+                    <>搜索量仅<b>月度</b>（Sorftime 无日粒度）；类目总销量可拉<b>近31天日数据</b>（按日历史，需正确类目）——它也是下方归因图的大盘基线，且会顺带补上你的自有/竞对日销量。</>
+                  )}
                 </div>
-                <div className="mkt-daily">
+                {dataSource === "sorftime" ? <div className="mkt-daily">
                   <input className="pulse-input" style={{ width: "auto", flex: "1 1 180px", minWidth: 120 }}
                     value={catInput} onChange={e => setCatInput(e.target.value)}
                     placeholder="该品类真实 ASIN / nodeId（用于按日拉类目销量）" />
@@ -245,7 +251,7 @@ export default function MarketTraffic({ marketplace }: { marketplace: string }) 
                     {dailyBusy ? <><span className="spin" style={{ marginRight: 5 }} />拉取中…</> : "拉近31天日数据"}
                   </button>
                   {dailyMsg && <span className="cat-hint">{dailyMsg}</span>}
-                </div>
+                </div> : null}
               </div>
 
               <div className="cat-block">

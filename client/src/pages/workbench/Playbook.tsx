@@ -29,6 +29,7 @@ interface LocalHistoryEntry {
   price: string;
   cost: string;
   provider: string;
+  data_source: string;
   elapsedS: number;
   ts: number;
   report: string;
@@ -98,11 +99,13 @@ export default function Playbook() {
   const [marketplace, setMarketplace] = useState("US");
   const [dataSource, setDataSourceState] = useState<DataSourceId>(getDataSource);
   const changeDataSource = (id: DataSourceId) => { setDataSource(id); setDataSourceState(id); };
-  const dsReady = dataSourceMeta(dataSource).ready;
+  const dsReady = dataSourceMeta(dataSource, "playbook").ready;
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<ProgressItem | null>(null);
   const [provider, setProvider] = useState("");
+  const [actualDataSource, setActualDataSource] = useState<DataSourceId>(dataSource);
+  const [actualSourceLabel, setActualSourceLabel] = useState(dataSourceMeta(dataSource, "playbook").name);
   const [attemptingProvider, setAttemptingProvider] = useState("");
   const [report, setReport] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -169,13 +172,15 @@ export default function Playbook() {
     setReport("");
     setWarnings([]);
     setProvider("");
+    setActualDataSource(dataSource);
+    setActualSourceLabel(dataSourceMeta(dataSource, "playbook").name);
     setAttemptingProvider("");
     setElapsedS(null);
     setErrorMsg("");
 
     try {
       await streamPlaybook(
-        { mode, query: query.trim(), marketplace, price: price.trim(), cost: cost.trim() },
+        { mode, query: query.trim(), marketplace, price: price.trim(), cost: cost.trim(), data_source: dataSource },
         (evt: SseEvent) => {
           if (evt.type === "phase") {
             setPhase(evt.phase as Phase);
@@ -183,6 +188,9 @@ export default function Playbook() {
             setProgress({ step: evt.step, done: evt.done, total: evt.total });
           } else if (evt.type === "attempt") {
             setAttemptingProvider(evt.provider);
+          } else if (evt.type === "source") {
+            setActualDataSource(evt.actual as DataSourceId);
+            setActualSourceLabel(evt.label);
           } else if (evt.type === "token") {
             setProvider(evt.provider);
             setReport((r) => r + evt.text);
@@ -193,6 +201,8 @@ export default function Playbook() {
             setPhase("error");
           } else if (evt.type === "done") {
             setProvider(evt.provider);
+            if (evt.data_source) setActualDataSource(evt.data_source as DataSourceId);
+            if (evt.data_source_label) setActualSourceLabel(evt.data_source_label);
             setElapsedS(evt.elapsed_s);
             setPhase("done");
           }
@@ -203,7 +213,7 @@ export default function Playbook() {
       if (err?.name !== "AbortError") {
         const raw = String(err?.message || err);
         const friendly = /network error|Failed to fetch|TypeError/i.test(raw)
-          ? "与服务器的连接中断。常见原因：(1) AI 合成耗时过长被反代掐断；(2) Sorftime 暂不可用导致采集失败；(3) 服务端 502/503。请检查 IvyeaOps 服务日志，或稍后重试。"
+          ? `与服务器的连接中断。常见原因：(1) AI 合成耗时过长被反代掐断；(2) ${actualSourceLabel} 暂不可用导致采集失败；(3) 服务端 502/503。请检查 IvyeaOps 服务日志，或稍后重试。`
           : raw;
         setErrorMsg(friendly);
         setPhase("error");
@@ -244,6 +254,7 @@ export default function Playbook() {
       meta: [
         `🛠 ${query}`,
         `🌍 ${marketplace}`,
+        `📊 ${actualSourceLabel}`,
         `💲 目标价 ${price}`,
         ...(provider ? [`🤖 ${provider}`] : []),
         ...(elapsedS !== null ? [`⏱ ${elapsedS}s`] : []),
@@ -264,7 +275,7 @@ export default function Playbook() {
     const apiEntry: HistoryEntry = {
       id: ts.toString(),
       mode, query, marketplace, price, cost,
-      provider, elapsed_s: elapsedS ?? 0,
+      provider, data_source: actualDataSource, elapsed_s: elapsedS ?? 0,
       ts, report,
     };
     saveHistoryEntry(apiEntry).catch(() => {});
@@ -279,6 +290,11 @@ export default function Playbook() {
     setPrice(entry.price);
     setCost(entry.cost);
     setProvider(entry.provider);
+    const loadedSource = (entry.data_source || "sorftime") as DataSourceId;
+    setDataSource(loadedSource);
+    setDataSourceState(loadedSource);
+    setActualDataSource(loadedSource);
+    setActualSourceLabel(dataSourceMeta(loadedSource, "playbook").name);
     setElapsedS(entry.elapsedS);
     setReport(entry.report);
     setPhase("done");
@@ -374,8 +390,8 @@ export default function Playbook() {
           title="单件成本估算（选填：采购+头程+FBA，用于利润/ACOS 测算）"
         />
 
-        {/* Data source picker (Sorftime active; SIF / 卖家精灵 即将支持) */}
-        <DataSourcePicker value={dataSource} onChange={changeDataSource} disabled={isRunning} />
+        {/* Data source picker — request carries the selected source end to end. */}
+        <DataSourcePicker value={dataSource} onChange={changeDataSource} disabled={isRunning} surface="playbook" />
 
         {/* Marketplace picker */}
         <div className="market-mkt-wrap" ref={pickerRef}>
@@ -412,7 +428,7 @@ export default function Playbook() {
           <button
             onClick={handleSubmit}
             disabled={!query.trim() || !price.trim() || !dsReady}
-            title={!dsReady ? `数据源「${dataSourceMeta(dataSource).name}」即将支持，请切回 Sorftime` : undefined}
+            title={!dsReady ? `数据源「${dataSourceMeta(dataSource, "playbook").name}」当前不可用` : undefined}
             className="market-btn market-btn-submit"
           >
             生成打法
@@ -422,7 +438,7 @@ export default function Playbook() {
 
       {!dsReady && (
         <div className="market-error" style={{ marginTop: 8 }}>
-          数据源「{dataSourceMeta(dataSource).name}」即将支持，打法推荐暂仅支持 Sorftime——请在上方切回 <b>Sorftime</b> 后生成。
+          数据源「{dataSourceMeta(dataSource, "playbook").name}」当前不可用于打法推荐：{dataSourceMeta(dataSource, "playbook").note || "请切换数据源"}。
         </div>
       )}
 
@@ -458,7 +474,7 @@ export default function Playbook() {
               {phase === "collecting"
                 ? progress
                   ? `采集中 · ${progress.step}（${progress.done}/${progress.total}）`
-                  : "连接 Sorftime…"
+                  : `连接 ${actualSourceLabel}…`
                 : `AI 合成中${provider ? `（${provider}）` : ""}…`}
             </span>
             <span className="market-progress-pct">
@@ -501,7 +517,7 @@ export default function Playbook() {
           <div className="market-report-toolbar">
             <span className="market-report-meta">
               {phase === "done" && elapsedS !== null
-                ? `${provider} · ${elapsedS}s · ${query} · $${price}`
+                ? `数据：${actualSourceLabel} · AI：${provider} · ${elapsedS}s · ${query} · $${price}`
                 : phase === "synthesizing"
                   ? `${provider || "AI"} 生成中…`
                   : ""}
@@ -584,7 +600,7 @@ export default function Playbook() {
             ))}
           </div>
           <div className="market-empty-hint">
-            数据来源：Sorftime MCP &nbsp;·&nbsp; AI：应用模型优先 &nbsp;·&nbsp; 仅站内流量 · 纯白帽
+            数据来源：{dataSourceMeta(dataSource, "playbook").name} MCP &nbsp;·&nbsp; AI：应用模型优先 &nbsp;·&nbsp; 仅站内流量 · 纯白帽
           </div>
         </div>
       )}
@@ -628,6 +644,7 @@ export default function Playbook() {
                     <span><img src={FLAG_URL(mkt?.code || "US")} alt="" style={{width:16,height:12,verticalAlign:"middle"}} /> {entry.marketplace}</span>
                     {entry.price && <span>${entry.price}</span>}
                     {entry.provider && <span>{entry.provider}</span>}
+                    <span>数据：{dataSourceMeta((entry.data_source || "sorftime") as DataSourceId, "playbook").name}</span>
                     <span className="market-history-item-time">{relativeTime(entry.ts)}</span>
                   </div>
                 </div>

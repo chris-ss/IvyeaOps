@@ -14,14 +14,59 @@ export const generateImagePrompt = async (id, payload) => {
     const body = typeof payload === "string" ? { slot: payload } : payload;
     return (await api.post(`/projects/${id}/generate-image-prompt`, body)).data;
 };
-export const generateImage = async (id, prompt, slot, size, use_reference = true) =>
-    (await api.post(`/projects/${id}/generate-image`, { prompt, slot, size, use_reference })).data;
+export const generateImage = async (
+    id, prompt, slot, size, use_reference = true, reference_urls = [], reference_mode = "product",
+) => {
+    const submitted = (await api.post(`/projects/${id}/generate-image`, {
+        prompt, slot, size, use_reference, reference_urls, reference_mode,
+    }, { timeout: 90000 })).data;
+    // Backward compatibility with servers that still wait and return the image.
+    if (submitted.url || submitted.imageUrl) return submitted;
+    if (!submitted.task_id) throw new Error("生图服务未返回任务 ID");
+
+    // Keep every HTTP request below the proxy timeout. Apimart often needs more
+    // than 100 seconds when a product reference is attached.
+    const deadline = Date.now() + 8 * 60 * 1000;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        try {
+            const state = (await api.post(`/projects/${id}/image-task-status`, {
+                task_id: submitted.task_id, slot, size,
+            }, { timeout: 90000 })).data;
+            if (state.status === "completed" && (state.url || state.imageUrl)) return state;
+            if (state.status === "failed") throw new Error(state.error || "上游生图任务失败");
+        } catch (error) {
+            // A declared provider failure is terminal. Network/5xx failures of a
+            // single status request are transient; retry without resubmitting and
+            // charging for another image.
+            if (!error?.response && error?.message && !/Network Error|timeout/i.test(error.message)) throw error;
+            if (error?.response?.status && error.response.status < 500) throw error;
+        }
+    }
+    throw new Error("生图任务等待超过 8 分钟，任务未重复提交，可稍后再试");
+};
 // 套图美术指导:一次 AI 规划整套主图(自适应张数,每张版式原型/角度/卖点/文案/构图)
-export const planImageSet = async (id, { target_count = 0, color_scheme = "" } = {}) =>
-    (await api.post(`/projects/${id}/plan-image-set`, { target_count, color_scheme }, { timeout: 300000 })).data;
-// 把大标题/卖点文案清晰排版叠加到已渲染(无字)的图上;改文案后可重叠,无需重渲染
-export const overlayCallout = async (id, { url, callout = "", headline = "", text_pos = "bottom-center", color = "#FFFFFF" }) =>
-    (await api.post(`/projects/${id}/overlay-callout`, { url, callout, headline, text_pos, color }, { timeout: 120000 })).data;
+export const planImageSet = async (id, {
+    target_count = 0, color_scheme = "", deliverable = "gallery",
+    visual_tone = "natural", language = "en", brief = "",
+} = {}) => (await api.post(`/projects/${id}/plan-image-set`, {
+    target_count, color_scheme, deliverable, visual_tone, language, brief,
+}, { timeout: 600000 })).data;
+export const saveCreativeSet = async (id, deliverable, plan) =>
+    (await api.post(`/projects/${id}/creative-set`, { deliverable, plan }, { timeout: 120000 })).data;
+// 历史兼容接口：新视觉工作台由图片模型图文整图直出，不再调用本地叠字。
+export const overlayCallout = async (id, payload) =>
+    (await api.post(`/projects/${id}/overlay-callout`, payload, { timeout: 120000 })).data;
+export const prepareAsset = async (id, payload) =>
+    (await api.post(`/projects/${id}/prepare-asset`, payload, { timeout: 120000 })).data;
+export const compositeProduct = async (id, payload) =>
+    (await api.post(`/projects/${id}/composite-product`, payload, { timeout: 120000 })).data;
+export const renderBlueprint = async (id, payload) =>
+    (await api.post(`/projects/${id}/render-blueprint`, payload, { timeout: 180000 })).data;
+export const reviewRender = async (id, payload) =>
+    (await api.post(`/projects/${id}/review-render`, payload, { timeout: 180000 })).data;
+export const reviewImageSet = async (id, deliverable) =>
+    (await api.post(`/projects/${id}/review-image-set`, { deliverable }, { timeout: 180000 })).data;
 // New APIs
 export const uploadImage = async (id, file) => {
     const fd = new FormData();

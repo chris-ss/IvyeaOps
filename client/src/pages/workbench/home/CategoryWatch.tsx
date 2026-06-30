@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchCategory, fetchCategoryCached, type CategoryResult } from "../../../api/home";
+import type { DataSourceId } from "../../../lib/dataSource";
 
 const STORAGE_CAT = "ivyea-ops-home-category-q";
 
@@ -15,7 +16,7 @@ type Status = "idle" | "loading" | "ok" | "err";
 
 type Mode = "category" | "keyword";
 
-export default function CategoryWatch({ marketplace }: { marketplace: string }) {
+export default function CategoryWatch({ marketplace, dataSource }: { marketplace: string; dataSource: DataSourceId }) {
   const [mode, setMode] = useState<Mode>(() => (localStorage.getItem(STORAGE_CAT + "-mode") as Mode) || "category");
   const [input, setInput] = useState(() => localStorage.getItem(STORAGE_CAT) || "");
   const [status, setStatus] = useState<Status>("idle");
@@ -23,15 +24,16 @@ export default function CategoryWatch({ marketplace }: { marketplace: string }) 
   const [cachedTs, setCachedTs] = useState<number | null>(null);
   const [errMsg, setErrMsg] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const sourceName = dataSource === "sellersprite" ? "卖家精灵" : "Sorftime";
 
-  // Live analysis (spends Sorftime quota) — explicit only.
+  // Live analysis (spends the selected provider quota) — explicit only.
   const run = async (q: string) => {
     const query = q.trim();
     if (!query) return;
     setStatus("loading");
     setErrMsg("");
     try {
-      const res = await fetchCategory(query, marketplace, mode);
+      const res = await fetchCategory(query, marketplace, mode, dataSource);
       setResult(res);
       setCachedTs(Date.now());
       setStatus(res.error ? "err" : "ok");
@@ -43,12 +45,12 @@ export default function CategoryWatch({ marketplace }: { marketplace: string }) 
     }
   };
 
-  // Cache-first: load last analysis for the remembered query — NO Sorftime call.
+  // Cache-first: cache is isolated by provider and costs no provider quota.
   const loadCache = async (q: string) => {
     const query = q.trim();
     if (!query) { setStatus("idle"); setResult(null); return; }
     try {
-      const { cached, ts } = await fetchCategoryCached(query, marketplace, mode);
+      const { cached, ts } = await fetchCategoryCached(query, marketplace, mode, dataSource);
       if (cached) {
         setResult(cached);
         setCachedTs(ts);
@@ -61,7 +63,7 @@ export default function CategoryWatch({ marketplace }: { marketplace: string }) 
   };
 
   useEffect(() => { localStorage.setItem(STORAGE_CAT + "-mode", mode); }, [mode]);
-  useEffect(() => { loadCache(input); /* eslint-disable-next-line */ }, [marketplace, mode]);
+  useEffect(() => { loadCache(input); /* eslint-disable-next-line */ }, [marketplace, mode, dataSource]);
 
   const maxBand = result ? Math.max(1, ...result.bands.map(b => b.count)) : 1;
   const changes = result?.changes;
@@ -94,7 +96,7 @@ export default function CategoryWatch({ marketplace }: { marketplace: string }) 
               : "关键词(看真实搜索排行) + Enter"}
           />
           <button className="tbtn tbtn-acc" onClick={() => run(input)} disabled={status === "loading" || !input.trim()}
-            title="实时分析（消耗 Sorftime 调用）">
+            title={`实时分析（消耗 ${sourceName} 调用）`}>
             {status === "loading"
               ? <><span className="spin" style={{ marginRight: 6 }} />分析中…</>
               : (result && status === "ok" ? "↻ 刷新分析" : "分析")}
@@ -108,7 +110,7 @@ export default function CategoryWatch({ marketplace }: { marketplace: string }) 
           <div className="pulse-onboard-title">{mode === "category" ? "类目榜（真实类目排行）" : "关键词搜索排行"}</div>
           <div className="pulse-onboard-sub">
             {mode === "category"
-              ? "推荐用该品类的真实 ASIN 反查（自动定位它所属类目）或粘贴 nodeId；类目词匹配 Sorftime 常猜错，会显示解析到的类目名供你核对。"
+              ? `推荐用该品类的真实 ASIN 反查（自动定位它所属类目）或粘贴 nodeId；类目词匹配 ${sourceName} 可能有偏差，会显示解析到的类目名供你核对。`
               : "显示该关键词在亚马逊的真实搜索结果排行（所见即所得，但含广告位与周边配件，天然偏杂）。"}
           </div>
         </div>
@@ -127,7 +129,7 @@ export default function CategoryWatch({ marketplace }: { marketplace: string }) 
                 <span className="cat-hint"> · {result.source === "asin" ? "ASIN反查" : result.source === "nodeId" ? "nodeId" : "类目词匹配"}</span>
                 {result.source === "name" && (
                   <div className="cat-hint" style={{ color: "var(--amber)" }}>
-                    ⚠ 类目词匹配 Sorftime 常猜错——若上面类目名不对，请用该品类真实 ASIN 反查或粘贴正确 nodeId
+                    ⚠ 类目词匹配 {sourceName} 可能有偏差——若上面类目名不对，请用该品类真实 ASIN 反查或粘贴正确 nodeId
                   </div>
                 )}
               </span>
@@ -144,7 +146,7 @@ export default function CategoryWatch({ marketplace }: { marketplace: string }) 
           <div className="cat-summary">
             <div className="cat-sum-item"><div className="cat-sum-val">{result.summary?.count ?? "—"}</div><div className="cat-sum-label">在榜产品</div></div>
             <div className="cat-sum-item"><div className="cat-sum-val">{fmtPrice(result.summary?.avg_price)}</div><div className="cat-sum-label">平均价</div></div>
-            <div className="cat-sum-item"><div className="cat-sum-val">{fmtVol(result.summary?.total_sales)}</div><div className="cat-sum-label">合计月销</div></div>
+            <div className="cat-sum-item"><div className="cat-sum-val">{fmtVol(result.summary?.total_sales)}</div><div className="cat-sum-label">{result.summary_kind === "keyword_purchases" ? "关键词月购买" : "合计月销"}</div></div>
             <div className="cat-sum-item"><div className="cat-sum-val cat-node">{result.node_id}</div><div className="cat-sum-label">节点</div></div>
           </div>
 

@@ -39,8 +39,9 @@ def test_playbook_generate_report_persists_to_history(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sorftime_service, "keyword_pipeline", fake_kw)
 
-    async def fake_synth(mode, q, m, price, cost, data, skip_agent=False):
+    async def fake_synth(mode, q, m, price, cost, data, skip_agent=False, source="Sorftime"):
         assert skip_agent is True
+        assert source == "Sorftime"
         yield ("_attempt", "deepseek")
         yield ("deepseek", "# 打法推荐\n正文")
 
@@ -49,7 +50,8 @@ def test_playbook_generate_report_persists_to_history(tmp_path, monkeypatch):
     res = asyncio.run(ivyea_ops_tools.call_tool("playbook_generate_report", {"query": "yoga mat"}))
     assert res["ok"] is True
     assert res["result"]["saved_to"] == "playbook_history"
-    assert len(playbook.get_history(_user="bridge")) == 1
+    hist = playbook.get_history(_user="bridge")
+    assert len(hist) == 1 and hist[0]["data_source"] == "sorftime"
 
 
 def test_deep_generate_report_persists_to_history(tmp_path, monkeypatch):
@@ -129,8 +131,113 @@ def test_market_data_source_dispatch(monkeypatch, tmp_path):
 
     asyncio.run(market.generate_report("keyword", "yoga mat", "US", "sellersprite"))
     assert seen["src"] == "sellersprite"
+    assert market.get_history(_user="bridge")[0]["data_source"] == "sellersprite"
     asyncio.run(market.generate_report("keyword", "yoga mat", "US", "sorftime"))
     assert seen["src"] == "sorftime"
+
+
+def test_playbook_data_source_dispatch_and_prompt_label(monkeypatch, tmp_path):
+    monkeypatch.setattr(playbook, "_history_db_path", lambda: str(tmp_path / "pb-source.sqlite3"))
+    from app.services import sellersprite_service
+    seen = {"pipeline": None, "source": None}
+
+    async def ss_kw(q, m, prog):
+        seen["pipeline"] = "sellersprite"
+        return ({"ABA 排名趋势": {"rank": 12}}, [])
+
+    async def sf_kw(q, m, prog):
+        seen["pipeline"] = "sorftime"
+        return ({"keyword_detail": {"volume": 100}}, [])
+
+    async def fake_synth(mode, q, m, price, cost, data, skip_agent=False, source="Sorftime"):
+        seen["source"] = source
+        yield ("deepseek", "# playbook")
+
+    monkeypatch.setattr(sellersprite_service, "keyword_pipeline", ss_kw)
+    monkeypatch.setattr(sorftime_service, "keyword_pipeline", sf_kw)
+    monkeypatch.setattr(playbook_synthesis_service, "synthesize", fake_synth)
+
+    result = asyncio.run(playbook.generate_report(
+        "keyword", "yoga mat", "US", "29.99", "8", "sellersprite",
+    ))
+    assert seen == {"pipeline": "sellersprite", "source": "卖家精灵"}
+    assert result["data_source"] == "sellersprite"
+    assert playbook.get_history(_user="bridge")[0]["data_source"] == "sellersprite"
+
+
+def test_streams_report_actual_selected_data_source(monkeypatch):
+    from app.services import sellersprite_service
+
+    async def ss_kw(q, m, prog):
+        return ({"keyword": {"rank": 1}}, [])
+
+    async def fake_synth(*args, **kwargs):
+        yield ("deepseek", "# report")
+
+    monkeypatch.setattr(sellersprite_service, "keyword_pipeline", ss_kw)
+    monkeypatch.setattr(ai_synthesis_service, "synthesize", fake_synth)
+
+    async def collect():
+        req = market.ResearchReq(mode="keyword", query="mat", marketplace="US", data_source="sellersprite")
+        return "".join([chunk async for chunk in market._run_research(req)])
+
+    output = asyncio.run(collect())
+    assert '"type": "source"' in output
+    assert '"actual": "sellersprite"' in output
+    assert '"data_source_label": "卖家精灵"' in output
+
+
+def test_selected_source_failure_never_silently_falls_back(monkeypatch):
+    from app.services import sellersprite_service
+    called = {"synth": False}
+
+    async def failed_ss(q, m, prog):
+        return ({}, ["卖家精灵 key 未配置"])
+
+    async def forbidden_synth(*args, **kwargs):
+        called["synth"] = True
+        yield ("deepseek", "must not run")
+
+    monkeypatch.setattr(sellersprite_service, "keyword_pipeline", failed_ss)
+    monkeypatch.setattr(ai_synthesis_service, "synthesize", forbidden_synth)
+
+    async def collect():
+        req = market.ResearchReq(mode="keyword", query="mat", marketplace="US", data_source="sellersprite")
+        return "".join([chunk async for chunk in market._run_research(req)])
+
+    output = asyncio.run(collect())
+    assert called["synth"] is False
+    assert "卖家精灵 数据采集失败" in output
+    assert "Sorftime" not in output
+
+
+def test_market_ui_uses_server_side_sorftime_key_even_when_hermes_is_first(monkeypatch):
+    calls = {"pipeline": 0, "native": 0}
+
+    monkeypatch.setattr(ai_synthesis_service, "_text_provider_chain", lambda: ["hermes", "deepseek"])
+
+    async def fake_pipeline(query, marketplace, progress):
+        calls["pipeline"] += 1
+        return {"product_report": {"asin": query}}, []
+
+    async def forbidden_native(*args, **kwargs):
+        calls["native"] += 1
+        yield "hermes", "should not run"
+
+    async def fake_synth(*args, **kwargs):
+        yield "deepseek", "# report"
+
+    monkeypatch.setattr(sorftime_service, "asin_pipeline", fake_pipeline)
+    monkeypatch.setattr(ai_synthesis_service, "synthesize_native", forbidden_native)
+    monkeypatch.setattr(ai_synthesis_service, "synthesize", fake_synth)
+
+    async def collect():
+        req = market.ResearchReq(mode="asin", query="B0TEST", marketplace="US")
+        return "".join([chunk async for chunk in market._run_research(req)])
+
+    output = asyncio.run(collect())
+    assert calls == {"pipeline": 1, "native": 0}
+    assert "# report" in output
 
 
 def test_new_generate_tools_registered_and_listed():

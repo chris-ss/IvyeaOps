@@ -57,7 +57,7 @@ export default function Home() {
     setDataSourceState(id);
     setAlertReloadKey(k => k + 1);
   };
-  const dsReady = dataSourceMeta(dataSource).ready;
+  const dsReady = dataSourceMeta(dataSource, "home").ready;
 
   useEffect(() => { localStorage.setItem(STORAGE_MKT, marketplace); }, [marketplace]);
   useEffect(() => { localStorage.setItem(STORAGE_TAB, tab); }, [tab]);
@@ -83,7 +83,7 @@ export default function Home() {
           <span className="home-date">{today}</span>
         </span>
         <div data-tour="home-source" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <DataSourcePicker value={dataSource} onChange={changeDataSource} />
+          <DataSourcePicker value={dataSource} onChange={changeDataSource} surface="home" />
           <div className="market-mkt-wrap" ref={pickerRef}>
           <button className="market-mkt-btn" onClick={() => setPickerOpen(o => !o)} title="选择站点">
             <span className="market-mkt-flag"><img src={FLAG_URL(currentMkt.code)} alt={currentMkt.code} style={{width:16,height:12,verticalAlign:"middle"}} /></span>
@@ -110,7 +110,7 @@ export default function Home() {
       </div>
 
       {/* ── Alert strip ── */}
-      <AlertStrip reloadKey={alertReloadKey} onJump={(kind) => setTab(kind)} />
+      {dsReady && <AlertStrip reloadKey={alertReloadKey} dataSource={dataSource} onJump={(kind) => setTab(kind)} />}
 
       {/* ── Tabs ── */}
       <div className="home-tabs">
@@ -129,18 +129,18 @@ export default function Home() {
       {/* ── Tab body (remounts on data-source change → reloads all data) ── */}
       <div className="home-tab-body wb-enter" key={tab + ":" + dataSource}>
         {!dsReady ? (
-          <DataSourcePlaceholder name={dataSourceMeta(dataSource).name} />
+          <DataSourcePlaceholder name={dataSourceMeta(dataSource, "home").name} />
         ) : (
           <>
-            {tab === "keyword" && <KeywordMonitor marketplace={marketplace} />}
+            {tab === "keyword" && <KeywordMonitor marketplace={marketplace} dataSource={dataSource} />}
             {tab === "competitor" && (
-              <AsinMonitor kind="competitor" marketplace={marketplace} onChanged={() => setAlertReloadKey(k => k + 1)} />
+              <AsinMonitor kind="competitor" marketplace={marketplace} dataSource={dataSource} onChanged={() => setAlertReloadKey(k => k + 1)} />
             )}
             {tab === "own" && (
-              <AsinMonitor kind="own" marketplace={marketplace} onChanged={() => setAlertReloadKey(k => k + 1)} />
+              <AsinMonitor kind="own" marketplace={marketplace} dataSource={dataSource} onChanged={() => setAlertReloadKey(k => k + 1)} />
             )}
-            {tab === "category" && <CategoryWatch marketplace={marketplace} />}
-            {tab === "market" && <MarketTraffic marketplace={marketplace} />}
+            {tab === "category" && <CategoryWatch marketplace={marketplace} dataSource={dataSource} />}
+            {tab === "market" && <MarketTraffic marketplace={marketplace} dataSource={dataSource} />}
           </>
         )}
       </div>

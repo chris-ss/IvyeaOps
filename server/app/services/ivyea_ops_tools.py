@@ -184,22 +184,26 @@ async def _market_history(args: dict[str, Any]) -> Any:
 
 
 async def _market_collect(args: dict[str, Any]) -> Any:
-    from app.services import sorftime_service
+    from app.routers import market
     mode = str(args.get("mode") or "keyword").strip().lower()
     query = str(args.get("query") or "").strip()
     marketplace = str(args.get("marketplace") or "US").strip().upper()
+    data_source = str(args.get("data_source") or "sorftime").strip().lower()
     if not query:
         raise ValueError("query is required")
 
     async def _progress(_step: str, _done: int, _total: int) -> None:
         return None
 
+    service = market._pipeline_for(data_source)
     if mode == "asin":
-        data, errors = await sorftime_service.asin_pipeline(query, marketplace, _progress)
+        data, errors = await service.asin_pipeline(query, marketplace, _progress)
     else:
         mode = "keyword"
-        data, errors = await sorftime_service.keyword_pipeline(query, marketplace, _progress)
-    return {"mode": mode, "query": query, "marketplace": marketplace, "data": _limit(data), "warnings": errors}
+        data, errors = await service.keyword_pipeline(query, marketplace, _progress)
+    return {"mode": mode, "query": query, "marketplace": marketplace,
+            "data_source": data_source, "data_source_label": market._source_label(data_source),
+            "data": _limit(data), "warnings": errors}
 
 
 async def _market_generate_report(args: dict[str, Any]) -> Any:
@@ -214,6 +218,7 @@ async def _market_generate_report(args: dict[str, Any]) -> Any:
     # 报告已落库到市场调研历史；正文截断，避免回灌爆上下文（agent 可再 read 历史拿全文）。
     return {"id": res["id"], "mode": res["mode"], "query": res["query"],
             "marketplace": res["marketplace"], "provider": res["provider"],
+            "data_source": res["data_source"], "data_source_label": res["data_source_label"],
             "elapsed_s": res["elapsed_s"], "warnings": res.get("warnings") or [],
             "saved_to": "market_history",
             "report": _limit(res["report"], 12000)}
@@ -232,9 +237,11 @@ async def _playbook_generate_report(args: dict[str, Any]) -> Any:
     res = await playbook.generate_report(
         str(args.get("mode") or "keyword").strip().lower(),
         query, str(args.get("marketplace") or "US").strip().upper(),
-        str(args.get("price") or ""), str(args.get("cost") or ""))
+        str(args.get("price") or ""), str(args.get("cost") or ""),
+        str(args.get("data_source") or "sorftime").strip().lower())
     return {"id": res["id"], "mode": res["mode"], "query": res["query"],
             "marketplace": res["marketplace"], "provider": res["provider"],
+            "data_source": res["data_source"], "data_source_label": res["data_source_label"],
             "elapsed_s": res["elapsed_s"], "warnings": res.get("warnings") or [],
             "saved_to": "playbook_history", "report": _limit(res["report"], 12000)}
 
@@ -457,24 +464,27 @@ TOOLS: tuple[OpsTool, ...] = (
     ), _home_pulse, destructive=True, long_running=True),
     OpsTool("market_history", "market", "市场调研历史", "读取市场调研板块历史报告。", _obj(), _market_history),
     OpsTool("market_generate_report", "market", "生成市场调研报告",
-            "对关键词或 ASIN 跑完整市场调研：采集 Sorftime 数据 + AI 合成完整报告，"
+            "对关键词或 ASIN 跑完整市场调研：按 data_source 采集 Sorftime 或卖家精灵数据 + AI 合成完整报告，"
             "并保存到「市场调研」板块历史（用户在该板块即可看到）。用户要做市场调研/出报告时用它，"
             "不要用 market_collect_data（那只采数据不出报告）。", _obj(
                 mode=_str("keyword 或 asin", default="keyword"),
                 query=_str("关键词或 ASIN"),
-                marketplace=_str("站点，如 US/UK/DE", default="US")),
+                marketplace=_str("站点，如 US/UK/DE", default="US"),
+                data_source=_str("sorftime 或 sellersprite", default="sorftime")),
             _market_generate_report, long_running=True),
-    OpsTool("market_collect_data", "market", "市场数据采集", "按关键词或 ASIN 采集 Sorftime 原始市场数据，不调用二次 AI 合成。", _obj(
+    OpsTool("market_collect_data", "market", "市场数据采集", "按关键词或 ASIN 从指定数据源采集原始市场数据，不调用二次 AI 合成。", _obj(
         mode=_str("keyword 或 asin", "keyword"), query=_str("关键词或 ASIN"), marketplace=_str(default="US"),
+        data_source=_str("sorftime 或 sellersprite", default="sorftime"),
     ), _market_collect, long_running=True),
     OpsTool("playbook_history", "playbook", "打法历史", "读取打法/Launch Playbook 历史报告。", _obj(), _playbook_history),
     OpsTool("playbook_generate_report", "playbook", "生成打法推荐",
-            "对关键词或 ASIN 跑完整打法/Launch 推荐：采集 Sorftime 数据 + AI 合成,"
+            "对关键词或 ASIN 跑完整打法/Launch 推荐：按 data_source 采集 Sorftime 或卖家精灵数据 + AI 合成,"
             "并保存到「打法推荐」板块历史。用户要打法/Launch 方案时用它。", _obj(
                 mode=_str("keyword 或 asin", default="keyword"),
                 query=_str("关键词或 ASIN"),
                 marketplace=_str("站点，如 US/UK/DE", default="US"),
-                price=_str("售价，可空"), cost=_str("成本，可空")),
+                price=_str("售价，可空"), cost=_str("成本，可空"),
+                data_source=_str("sorftime 或 sellersprite", default="sorftime")),
             _playbook_generate_report, long_running=True),
     OpsTool("asin_audit_start", "tools", "启动 ASIN 深度审计", "启动分析工具中的 ASIN 深度审计任务，返回 job_id。", _obj(
         asin=_str("10 位 ASIN"), marketplace=_str(default="US"), mode=_str("full 或 rewrite_only", "full"), runner=_str("auto/ivyea-agent/hermes/codex/claude", "auto"),

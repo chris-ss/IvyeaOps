@@ -47,3 +47,51 @@ def test_overlay_empty_is_noop():
 def test_font_loader_never_crashes():
     # NotoCJK exists on this box; even on a font-less host _load_font must return something
     assert T._load_font(40) is not None
+
+
+def test_editorial_layout_keeps_canvas_edges_clean_instead_of_full_sticker():
+    out = T.overlay_callout(
+        _blank(),
+        headline="Natural light. Real detail.",
+        supporting_text="Designed for daily use",
+        position="top-left",
+        layout_style="editorial",
+        theme="auto",
+    )
+    im = Image.open(io.BytesIO(out)).convert("RGB")
+    # The old compositor put a large rounded dark plate behind every headline.
+    # Editorial type may add a local soft scrim, but the page corner stays clean.
+    assert im.getpixel((2, 2)) == (255, 255, 255)
+    assert _dark_pixels(im, (40, 40, 850, 390)) > 300
+
+
+def test_cjk_copy_wraps_and_proof_style_renders():
+    out = T.overlay_callout(
+        _blank(color=(25, 28, 32)),
+        headline="真实场景自然融入",
+        supporting_text="产品比例、光线和接触阴影保持可信",
+        proof="24小时",
+        position="top-left",
+        layout_style="proof",
+        accent_color="#6EE7A2",
+    )
+    im = Image.open(io.BytesIO(out))
+    assert im.size == (1024, 1024)
+    assert im.getbbox() is not None
+
+
+def test_internal_review_sentence_is_never_rendered_as_public_proof():
+    kwargs = dict(
+        headline="Big Views",
+        supporting_text="Native 8K video",
+        position="top-left",
+        layout_style="editorial",
+    )
+    clean = T.overlay_callout(_blank(color=(35, 38, 42)), proof="", **kwargs)
+    internal = T.overlay_callout(
+        _blank(color=(35, 38, 42)),
+        proof="Approved copy supports the sensor and video-resolution claims; image should not simulate evidence",
+        **kwargs,
+    )
+    assert internal == clean
+    assert T.public_proof("8K/30fps") == "8K/30fps"
