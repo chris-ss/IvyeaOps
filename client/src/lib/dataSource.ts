@@ -1,24 +1,22 @@
 // Shared market-data source selection, used by 首页 / 市场调研 / 打法推荐.
-//
-// Only Sorftime is wired to a real backend today; SIF and 卖家精灵 are shown as
-// "即将支持" placeholders (they have config slots in 系统配置 but no data client
-// yet). Boards read `getDataSource()` to decide whether to fetch or show the
-// placeholder, and re-fetch when it changes. Promote to a backend hub_settings
-// key once the other clients land.
+// Availability is surface-specific so unsupported providers can never fall
+// through to a different backend silently.
 
 export type DataSourceId = "sorftime" | "sif" | "sellersprite";
+export type DataSourceSurface = "market" | "playbook" | "home";
 
 export type DataSourceMeta = {
   id: DataSourceId;
   name: string;
   ready: boolean;
   note?: string;
+  surfaces: DataSourceSurface[];
 };
 
 export const DATA_SOURCES: DataSourceMeta[] = [
-  { id: "sorftime", name: "Sorftime", ready: true },
-  { id: "sellersprite", name: "卖家精灵", ready: true, note: "需在系统配置填卖家精灵 Key" },
-  { id: "sif", name: "SIF", ready: false, note: "即将支持" },
+  { id: "sorftime", name: "Sorftime", ready: true, surfaces: ["market", "playbook", "home"] },
+  { id: "sellersprite", name: "卖家精灵", ready: true, surfaces: ["market", "playbook", "home"] },
+  { id: "sif", name: "SIF", ready: false, surfaces: [], note: "即将支持" },
 ];
 
 const KEY = "ivyea-ops-data-source";
@@ -32,6 +30,13 @@ export function setDataSource(id: DataSourceId): void {
   localStorage.setItem(KEY, id);
 }
 
-export function dataSourceMeta(id: DataSourceId): DataSourceMeta {
-  return DATA_SOURCES.find((s) => s.id === id) ?? DATA_SOURCES[0];
+export function dataSourceMeta(id: DataSourceId, surface?: DataSourceSurface): DataSourceMeta {
+  const source = DATA_SOURCES.find((s) => s.id === id) ?? DATA_SOURCES[0];
+  if (!surface) return source;
+  const ready = source.ready && source.surfaces.includes(surface);
+  return {
+    ...source,
+    ready,
+    note: source.note,
+  };
 }

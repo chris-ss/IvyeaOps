@@ -4,6 +4,7 @@ import {
   fetchKeywordExtendsCached, pulseKeywordExtends, deepKeywordExtendSales,
   type KeywordItem, type KeywordData, type KeywordExtendItem,
 } from "../../../api/home";
+import type { DataSourceId } from "../../../lib/dataSource";
 
 const STORAGE_KEY = "ivyea-ops-pulse-keywords-v1";
 
@@ -282,8 +283,9 @@ function ScatterPlot({ points }: { points: PlotPoint[] }) {
 
 // ── Keyword card ──────────────────────────────────────────────────────────────
 
-function KeywordCard({ keyword, state, marketplace, onRemove, onRefresh, onAdd, isMonitored }: {
+function KeywordCard({ keyword, state, marketplace, dataSource, onRemove, onRefresh, onAdd, isMonitored }: {
   keyword: string; state: CardState; marketplace: string;
+  dataSource: DataSourceId;
   onRemove: () => void; onRefresh?: () => void;
   onAdd?: (kw: string) => void; isMonitored?: (kw: string) => boolean;
 }) {
@@ -293,6 +295,7 @@ function KeywordCard({ keyword, state, marketplace, onRemove, onRefresh, onAdd, 
   const dir    = trendDir(trend);
   const accent = comp === "high" ? "var(--red)" : comp === "mid" ? "var(--amber)" : comp === "low" ? "var(--acc)" : "var(--b)";
   const busy   = state.kind === "loading";
+  const sourceName = dataSource === "sellersprite" ? "卖家精灵" : "Sorftime";
 
   const [open, setOpen] = useState(false);
   const [ext, setExt] = useState<KeywordExtendItem[] | null>(null);
@@ -303,18 +306,18 @@ function KeywordCard({ keyword, state, marketplace, onRemove, onRefresh, onAdd, 
     const next = !open;
     setOpen(next);
     if (next && ext === null) {
-      try { const c = await fetchKeywordExtendsCached(keyword, marketplace); setExt(c.items); }
+      try { const c = await fetchKeywordExtendsCached(keyword, marketplace, dataSource); setExt(c.items); }
       catch { setExt([]); }
     }
   };
   const pullExt = async () => {
     setExtBusy(true);
-    try { const r = await pulseKeywordExtends(keyword, marketplace); setExt(r.items); }
+    try { const r = await pulseKeywordExtends(keyword, marketplace, dataSource); setExt(r.items); }
     catch { /* ignore */ } finally { setExtBusy(false); }
   };
   const deepExt = async () => {
     setDeepBusy(true);
-    try { const r = await deepKeywordExtendSales(keyword, marketplace); setExt(r.items); }
+    try { const r = await deepKeywordExtendSales(keyword, marketplace, dataSource); setExt(r.items); }
     catch { /* ignore */ } finally { setDeepBusy(false); }
   };
 
@@ -326,7 +329,7 @@ function KeywordCard({ keyword, state, marketplace, onRemove, onRefresh, onAdd, 
         <div className="asin-card-actions" style={{ marginLeft: "auto" }}>
           <button className={"asin-icon-btn" + (open ? " active" : "")} onClick={toggleExt} title="拓展词">⊕</button>
           {onRefresh && (
-            <button className="asin-icon-btn" onClick={onRefresh} disabled={busy} title="实时刷新（消耗 1 次 Sorftime）">
+            <button className="asin-icon-btn" onClick={onRefresh} disabled={busy} title={`实时刷新（消耗 1 次 ${sourceName} 调用）`}>
               {busy ? <span className="spin" /> : "↻"}
             </button>
           )}
@@ -381,14 +384,16 @@ function KeywordCard({ keyword, state, marketplace, onRemove, onRefresh, onAdd, 
               {extBusy ? <><span className="spin" style={{ marginRight: 5 }} />拉取中…</> : (ext && ext.length ? "↻ 刷新拓展词" : "拉取拓展词")}
             </button>
             <button className="tbtn" onClick={deepExt} disabled={deepBusy || !ext || !ext.length}
-              title="对前若干拓展词查 TOP 产品月销量作为出单佐证（每词消耗 1 次 Sorftime）">
+              title={dataSource === "sellersprite"
+                ? "用卖家精灵月购买量补充出单佐证"
+                : "对前若干拓展词查 TOP 产品月销量作为出单佐证（每词消耗 1 次 Sorftime）"}>
               {deepBusy ? <><span className="spin" style={{ marginRight: 5 }} />评估中…</> : "深度出单佐证"}
             </button>
           </div>
           {ext === null ? (
             <div className="kx-hint">加载中…</div>
           ) : ext.length === 0 ? (
-            <div className="kx-hint">暂无拓展词 · 点「拉取拓展词」（消耗 1 次 Sorftime）</div>
+            <div className="kx-hint">暂无拓展词 · 点「拉取拓展词」（消耗 1 次 {sourceName} 调用）</div>
           ) : (
             <div className="kx-list">
               <div className="kx-row kx-head">
@@ -426,31 +431,32 @@ function KeywordCard({ keyword, state, marketplace, onRemove, onRefresh, onAdd, 
 
 const SUGGESTED = ["wireless earbuds", "yoga mat", "phone stand", "led strip lights", "air fryer", "ring light"];
 
-export default function KeywordMonitor({ marketplace }: { marketplace: string }) {
+export default function KeywordMonitor({ marketplace, dataSource }: { marketplace: string; dataSource: DataSourceId }) {
   const [items, setItems] = useState<KeywordItem[]>([]);
   const [states, setStates] = useState<Record<string, CardState>>({});
   const [input, setInput] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const sourceName = dataSource === "sellersprite" ? "卖家精灵" : "Sorftime";
 
   const keywords = items.filter(it => it.marketplace === marketplace).map(it => it.keyword);
   const idByKw = (kw: string) => items.find(it => it.keyword === kw && it.marketplace === marketplace)?.id;
 
   // Cache-first load (+ one-time migration of legacy localStorage list). No
-  // Sorftime call on open — cards render from server-cached data.
+  // Provider call on open — cards render from source-isolated server cache.
   const loadCache = async () => {
     try {
       // Migrate any legacy localStorage keywords to the server (list only).
       const legacy = loadLegacyKeywords();
       if (legacy.length > 0) {
-        const existing = await listKeywords();
+        const existing = await listKeywords(dataSource);
         const have = new Set(existing.filter(e => e.marketplace === marketplace).map(e => e.keyword));
         for (const kw of legacy) {
-          if (!have.has(kw)) await apiAddKeyword(kw, marketplace).catch(() => {});
+          if (!have.has(kw)) await apiAddKeyword(kw, marketplace, dataSource).catch(() => {});
         }
         try { localStorage.removeItem(STORAGE_KEY); } catch {}
       }
-      const list = await listKeywords();
+      const list = await listKeywords(dataSource);
       setItems(list);
       const next: Record<string, CardState> = {};
       for (const it of list.filter(e => e.marketplace === marketplace)) {
@@ -462,13 +468,13 @@ export default function KeywordMonitor({ marketplace }: { marketplace: string })
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { loadCache(); /* eslint-disable-next-line */ }, [marketplace]);
+  useEffect(() => { loadCache(); /* eslint-disable-next-line */ }, [marketplace, dataSource]);
 
   // Live pulse one keyword (spends quota) — explicit only.
   const fetchOne = async (kw: string) => {
     setStates(p => ({ ...p, [kw]: { kind: "loading" } }));
     try {
-      const data = await pulseKeyword(kw, marketplace);
+      const data = await pulseKeyword(kw, marketplace, dataSource);
       setStates(p => ({ ...p, [kw]: { kind: "ok", data, ts: Date.now(), cached: false } }));
     } catch (e: any) {
       setStates(p => ({ ...p, [kw]: { kind: "err", msg: e?.message || "请求失败" } }));
@@ -486,8 +492,8 @@ export default function KeywordMonitor({ marketplace }: { marketplace: string })
     const kw = raw.trim().toLowerCase();
     if (!kw || keywords.includes(kw)) return;
     try {
-      await apiAddKeyword(kw, marketplace);
-      setItems(p => [...p, { id: `${marketplace}:${kw}`, keyword: kw, marketplace, label: "", ts: Date.now(), data: null, data_ts: null }]);
+      const created = await apiAddKeyword(kw, marketplace, dataSource);
+      setItems(p => [...p, { id: created.id, keyword: kw, marketplace, data_source: dataSource, label: "", ts: Date.now(), data: null, data_ts: null }]);
       fetchOne(kw); // one live fetch for the newly added keyword
     } catch { /* ignore */ }
   };
@@ -548,7 +554,7 @@ export default function KeywordMonitor({ marketplace }: { marketplace: string })
         <button className="tbtn tbtn-acc"
           onClick={refreshAll}
           disabled={refreshing || keywords.length === 0}
-          title="实时刷新全部（每个词消耗 Sorftime 调用）">
+          title={`实时刷新全部（每个词消耗 ${sourceName} 调用）`}>
           {refreshing ? <><span className="spin" style={{ marginRight: 6 }} />查询中…</> : "↻ 全部刷新"}
         </button>
       </div>
@@ -583,7 +589,7 @@ export default function KeywordMonitor({ marketplace }: { marketplace: string })
           <div className="pulse-section-label">◈ 关键词详情</div>
           <div className="pulse-grid">
             {sorted.map(kw => (
-              <KeywordCard key={kw} keyword={kw} state={states[kw] ?? { kind: "idle" }} marketplace={marketplace}
+              <KeywordCard key={kw} keyword={kw} state={states[kw] ?? { kind: "idle" }} marketplace={marketplace} dataSource={dataSource}
                 onRemove={() => removeKeyword(kw)} onRefresh={() => fetchOne(kw)}
                 onAdd={addOne} isMonitored={(w) => keywords.includes(w.toLowerCase())} />
             ))}

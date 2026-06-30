@@ -1,7 +1,7 @@
 """Launch-playbook router — SSE streaming endpoint + history persistence.
 
 Mirrors the market-research router: a two-path SSE generator (Hermes-native MCP
-first, then Sorftime pre-fetch + provider-chain fallback) plus a small history
+for Sorftime, then selected-source pre-fetch + provider-chain fallback) plus a small history
 store. The deliverable is a white-hat, on-site-only Amazon launch playbook.
 """
 from __future__ import annotations
@@ -49,11 +49,15 @@ def _history_connect() -> sqlite3.Connection:
                 price       TEXT NOT NULL DEFAULT '',
                 cost        TEXT NOT NULL DEFAULT '',
                 provider    TEXT NOT NULL DEFAULT '',
+                data_source TEXT NOT NULL DEFAULT 'sorftime',
                 elapsed_s   REAL NOT NULL DEFAULT 0,
                 ts          INTEGER NOT NULL,
                 report      TEXT NOT NULL DEFAULT ''
             )
         """)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(playbook_history)").fetchall()}
+        if "data_source" not in columns:
+            conn.execute("ALTER TABLE playbook_history ADD COLUMN data_source TEXT NOT NULL DEFAULT 'sorftime'")
         _INITED.add(path)
     return conn
 
@@ -70,6 +74,7 @@ class HistoryEntryIn(BaseModel):
     price: str = ""
     cost: str = ""
     provider: str = ""
+    data_source: str = "sorftime"
     elapsed_s: float = 0.0
     ts: int
     report: str = ""
@@ -79,7 +84,7 @@ class HistoryEntryIn(BaseModel):
 def get_history(_user: str = Depends(require_user)) -> List[dict]:
     with _history_connect() as conn:
         rows = conn.execute(
-            "SELECT id,mode,query,marketplace,price,cost,provider,elapsed_s,ts,report "
+            "SELECT id,mode,query,marketplace,price,cost,provider,data_source,elapsed_s,ts,report "
             "FROM playbook_history ORDER BY ts DESC LIMIT ?",
             (_HISTORY_MAX,),
         ).fetchall()
@@ -87,7 +92,7 @@ def get_history(_user: str = Depends(require_user)) -> List[dict]:
 
 
 def save_history(*, mode: str, query: str, marketplace: str, price: str = "", cost: str = "",
-                 provider: str = "", elapsed_s: float = 0.0, ts: int | None = None,
+                 provider: str = "", data_source: str = "sorftime", elapsed_s: float = 0.0, ts: int | None = None,
                  report: str = "", entry_id: str = "") -> str:
     """Persist one playbook report row; returns its id.
     Shared by POST /history (frontend) and the IvyeaAgent panel bridge."""
@@ -96,9 +101,10 @@ def save_history(*, mode: str, query: str, marketplace: str, price: str = "", co
     with _history_connect() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO playbook_history "
-            "(id,mode,query,marketplace,price,cost,provider,elapsed_s,ts,report) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (entry_id, mode, query, marketplace, price, cost, provider, elapsed_s, ts, report),
+            "(id,mode,query,marketplace,price,cost,provider,data_source,elapsed_s,ts,report) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (entry_id, mode, query, marketplace, price, cost, provider,
+             _normalize_data_source(data_source), elapsed_s, ts, report),
         )
         conn.execute(
             "DELETE FROM playbook_history WHERE id NOT IN "
@@ -112,30 +118,37 @@ def save_history(*, mode: str, query: str, marketplace: str, price: str = "", co
 def add_history(entry: HistoryEntryIn, _user: str = Depends(require_user)) -> dict:
     return {"id": save_history(
         mode=entry.mode, query=entry.query, marketplace=entry.marketplace, price=entry.price,
-        cost=entry.cost, provider=entry.provider, elapsed_s=entry.elapsed_s, ts=entry.ts,
+        cost=entry.cost, provider=entry.provider, data_source=entry.data_source,
+        elapsed_s=entry.elapsed_s, ts=entry.ts,
         report=entry.report, entry_id=entry.id)}
 
 
 async def generate_report(mode: str, query: str, marketplace: str,
-                          price: str = "", cost: str = "") -> dict:
+                          price: str = "", cost: str = "", data_source: str = "sorftime") -> dict:
     """Collect + synthesize + persist one launch-playbook (no SSE), then return it.
     Used by the IvyeaAgent bridge so an agent-driven 打法 lands in the panel 历史.
     Synthesis skips ivyea-agent to avoid agent→ops→agent nesting."""
     mode = mode if mode in ("keyword", "asin") else "keyword"
     marketplace = (marketplace or "US").strip().upper()
+    data_source = _normalize_data_source(data_source)
 
     async def _noop(*_a) -> None:
         return None
 
     start = time.time()
+    service = _pipeline_for(data_source)
     if mode == "keyword":
-        data, errors = await sorftime_service.keyword_pipeline(query, marketplace, _noop)
+        data, errors = await service.keyword_pipeline(query, marketplace, _noop)
     else:
-        data, errors = await sorftime_service.asin_pipeline(query, marketplace, _noop)
+        data, errors = await service.asin_pipeline(query, marketplace, _noop)
+    if not _has_collected_data(data):
+        detail = "; ".join(errors[:3]) or "未返回任何数据"
+        raise RuntimeError(f"{_source_label(data_source)} 数据采集失败：{detail}")
     parts: list[str] = []
     provider = "unknown"
     async for prov, chunk in playbook_synthesis_service.synthesize(
-            mode, query, marketplace, price, cost, data, skip_agent=True):
+            mode, query, marketplace, price, cost, data, skip_agent=True,
+            source=_source_label(data_source)):
         if prov == "_attempt":
             continue
         if prov == "error":
@@ -147,10 +160,12 @@ async def generate_report(mode: str, query: str, marketplace: str,
         raise RuntimeError("AI 合成返回空")
     elapsed = round(time.time() - start, 1)
     entry_id = save_history(mode=mode, query=query, marketplace=marketplace, price=price, cost=cost,
-                            provider=provider, elapsed_s=elapsed, ts=int(time.time() * 1000),
+                            provider=provider, data_source=data_source, elapsed_s=elapsed,
+                            ts=int(time.time() * 1000),
                             report=report, entry_id=uuid.uuid4().hex)
     return {"id": entry_id, "mode": mode, "query": query, "marketplace": marketplace,
             "price": price, "cost": cost, "provider": provider, "elapsed_s": elapsed,
+            "data_source": data_source, "data_source_label": _source_label(data_source),
             "warnings": errors, "report": report}
 
 
@@ -176,6 +191,36 @@ class PlaybookReq(BaseModel):
     marketplace: str = "US"
     price: str = ""             # target sale price (required by validation below)
     cost: str = ""              # optional unit cost estimate
+    data_source: str = "sorftime"   # "sorftime" | "sellersprite"
+
+
+_DATA_SOURCES = {"sorftime", "sellersprite"}
+
+
+def _normalize_data_source(data_source: str) -> str:
+    value = (data_source or "sorftime").strip().lower()
+    if value not in _DATA_SOURCES:
+        raise ValueError(f"unsupported data source: {value}")
+    return value
+
+
+def _pipeline_for(data_source: str):
+    if _normalize_data_source(data_source) == "sellersprite":
+        from app.services import sellersprite_service
+        return sellersprite_service
+    return sorftime_service
+
+
+def _source_label(data_source: str) -> str:
+    return "卖家精灵" if _normalize_data_source(data_source) == "sellersprite" else "Sorftime"
+
+
+def _has_collected_data(data: object) -> bool:
+    if isinstance(data, dict):
+        return any(_has_collected_data(value) for value in data.values())
+    if isinstance(data, (list, tuple)):
+        return any(_has_collected_data(value) for value in data)
+    return data not in (None, "")
 
 
 def _sse(event: dict) -> str:
@@ -227,11 +272,16 @@ async def _stream_synthesis(
 
 async def _run(req: PlaybookReq) -> AsyncGenerator[str, None]:
     start = time.time()
-    chain = playbook_synthesis_service._text_provider_chain()
-    hermes_first = bool(chain) and chain[0] == "hermes"
+    data_source = _normalize_data_source(req.data_source)
+    source_label = _source_label(data_source)
+    yield _sse({"type": "source", "requested": data_source, "actual": data_source, "label": source_label})
+    # Data credentials belong to IvyeaOps, not to each user's Hermes home.
+    # Server-side MCP prefetch guarantees the saved Sorftime key is injected on
+    # Windows first run and for every account.
+    hermes_first = False
 
     # ── Path A: hermes-native (sorftime MCP collected by hermes itself) ────────
-    if hermes_first:
+    if hermes_first and data_source == "sorftime":
         yield _sse({"type": "phase", "phase": "synthesizing"})
         provider = "unknown"
         hermes_ok = False
@@ -256,11 +306,12 @@ async def _run(req: PlaybookReq) -> AsyncGenerator[str, None]:
                     hermes_ok = True
                     yield _sse({"type": "token", "text": chunk, "provider": prov})
         if hermes_ok:
-            yield _sse({"type": "done", "provider": provider, "elapsed_s": round(time.time() - start, 1)})
+            yield _sse({"type": "done", "provider": provider, "elapsed_s": round(time.time() - start, 1),
+                        "data_source": data_source, "data_source_label": source_label})
             return
         yield _sse({"type": "warn", "detail": "hermes 原生调用失败，回退到数据预采集模式"})
 
-    # ── Path B: pre-fetch Sorftime data, then synthesise ──────────────────────
+    # ── Path B: pre-fetch the selected data source, then synthesise ───────────
     progress_queue: asyncio.Queue = asyncio.Queue()
 
     async def on_progress(step: str, done: int, total: int) -> None:
@@ -272,13 +323,14 @@ async def _run(req: PlaybookReq) -> AsyncGenerator[str, None]:
 
     yield _sse({"type": "phase", "phase": "collecting"})
 
+    service = _pipeline_for(data_source)
     if req.mode == "keyword":
         pipeline_task = asyncio.create_task(
-            sorftime_service.keyword_pipeline(req.query, req.marketplace, on_progress)
+            service.keyword_pipeline(req.query, req.marketplace, on_progress)
         )
     else:
         pipeline_task = asyncio.create_task(
-            sorftime_service.asin_pipeline(req.query, req.marketplace, on_progress)
+            service.asin_pipeline(req.query, req.marketplace, on_progress)
         )
 
     last_yield = time.time()
@@ -302,6 +354,11 @@ async def _run(req: PlaybookReq) -> AsyncGenerator[str, None]:
         yield _sse({"type": "error", "detail": f"数据采集失败: {exc}"})
         return
 
+    if not _has_collected_data(data):
+        detail = "; ".join(pipe_errors[:3]) or "未返回任何数据"
+        yield _sse({"type": "error", "detail": f"{source_label} 数据采集失败：{detail}"})
+        return
+
     for err in pipe_errors:
         yield _sse({"type": "warn", "detail": err})
 
@@ -310,7 +367,8 @@ async def _run(req: PlaybookReq) -> AsyncGenerator[str, None]:
     provider = "unknown"
     async for kind, a, b in _stream_synthesis(
         lambda: playbook_synthesis_service.synthesize(
-            req.mode, req.query, req.marketplace, req.price, req.cost, data
+            req.mode, req.query, req.marketplace, req.price, req.cost, data,
+            source=source_label,
         )
     ):
         if kind == "hb":
@@ -329,7 +387,8 @@ async def _run(req: PlaybookReq) -> AsyncGenerator[str, None]:
                 return
             yield _sse({"type": "token", "text": chunk, "provider": prov})
 
-    yield _sse({"type": "done", "provider": provider, "elapsed_s": round(time.time() - start, 1)})
+    yield _sse({"type": "done", "provider": provider, "elapsed_s": round(time.time() - start, 1),
+                "data_source": data_source, "data_source_label": source_label})
 
 
 @router.post("/generate")
@@ -343,6 +402,10 @@ async def generate_playbook(
         raise HTTPException(400, "mode must be keyword or asin")
     if not req.price.strip():
         raise HTTPException(400, "price cannot be empty")
+    try:
+        req.data_source = _normalize_data_source(req.data_source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     async def generator():
         async for chunk in _run(req):

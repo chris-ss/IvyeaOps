@@ -57,6 +57,17 @@ _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 async def lifespan(app: FastAPI):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
 
+    # Rebuild runner-side config from the authoritative IvyeaOps settings on
+    # every boot. This is required on a fresh Windows installation where the
+    # key may already exist in hub settings but ~/.hermes/config.yaml has not
+    # yet been created for that OS user.
+    try:
+        from app.core import hub_settings as _hub_settings
+        from app.services.hermes_config_sync import on_settings_saved as _sync_runner_settings
+        _sync_runner_settings(_hub_settings.load())
+    except Exception as e:
+        print(f"[IvyeaOps] runner settings sync skipped: {e}")
+
     # Skill Studio directories: we provision our own state dir
     # (~/.hermes/skill-studio/) but intentionally NEVER touch SKILLS_ROOT —
     # that's Hermes' territory. If it doesn't exist we just warn; the Skill

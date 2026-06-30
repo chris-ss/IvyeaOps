@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchAlerts, type AlertItem } from "../../../api/home";
+import type { DataSourceId } from "../../../lib/dataSource";
 
 const METRIC_LABEL: Record<string, string> = {
   price: "价格", bsr: "BSR", est_sales: "月销", rating: "评分",
@@ -28,19 +29,20 @@ function describe(a: AlertItem): { text: string; up: boolean } {
   };
 }
 
-export default function AlertStrip({ reloadKey, onJump }: {
+export default function AlertStrip({ reloadKey, dataSource, onJump }: {
   reloadKey: number;
+  dataSource: DataSourceId;
   onJump?: (kind: "competitor" | "own") => void;
 }) {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    fetchAlerts()
+    fetchAlerts(dataSource)
       .then(setAlerts)
       .catch(() => setAlerts([]))
       .finally(() => setLoaded(true));
-  }, [reloadKey]);
+  }, [reloadKey, dataSource]);
 
   if (!loaded) return null;
 

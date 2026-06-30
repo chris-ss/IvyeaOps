@@ -38,7 +38,9 @@ _CONN_TIMEOUT = 10.0
 
 def _url() -> str:
     from app.core import hub_settings
-    key = hub_settings.get("sorftime_key") or os.getenv("SORFTIME_KEY", "")
+    key = str(hub_settings.get("sorftime_key") or os.getenv("SORFTIME_KEY", "")).strip()
+    if not key:
+        raise RuntimeError("Sorftime Key 未配置，请在系统配置 → 市场数据中保存后重试")
     return f"{_SORFTIME_BASE}?key={key}"
 
 

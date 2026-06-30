@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfirm } from "../../components/ConfirmDialog";
 import SheetSelect from "../../components/SheetSelect";
+import VisualStudio from "./VisualStudio";
 import { marketplaceOptions } from "../../lib/marketplaces";
 import {
   aiAnalyze,
@@ -179,9 +180,10 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
   const [templatePanel, setTemplatePanel] = useState({ main: false, aplus: false });
   const [previewUrl, setPreviewUrl] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [creativeSets, setCreativeSets] = useState({});
 
   // Reference / source images
-  const [refImages, setRefImages] = useState({ scraped: [], uploaded: [] });
+  const [refImages, setRefImages] = useState({ scraped: [], uploaded: [], white_product_source: "" });
   const [refUploading, setRefUploading] = useState(false);
   const [refDragOver, setRefDragOver] = useState(false);
   const refInputRef = useRef(null);
@@ -211,13 +213,14 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
     setProject(p);
     setFeedback(null);
     setProductInfo(EMPTY_PRODUCT_INFO);
-    setRefImages({ scraped: [], uploaded: [] });
+    setRefImages({ scraped: [], uploaded: [], white_product_source: "" });
+    setCreativeSets({});
     setAdvCopyJob(null);
     if (advCopyPollRef.current) { clearTimeout(advCopyPollRef.current); advCopyPollRef.current = null; }
     // Load reference images for this project
     try {
       const ri = await getReferenceImages(id);
-      setRefImages({ scraped: ri.scraped || [], uploaded: ri.uploaded || [] });
+      setRefImages({ scraped: ri.scraped || [], uploaded: ri.uploaded || [], white_product_source: ri.white_product_source || "" });
     } catch { /* ignore */ }
     setImageSlots(makeSlots(MAIN_DEFAULTS));
     setAplusSlots(makeSlots(APLUS_DEFAULTS));
@@ -261,6 +264,14 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
       } catch {}
     }
 
+    // The new visual studio keeps gallery and A+ in one versioned project state.
+    // Import the latest legacy shot plan once so existing work is not lost.
+    if (p.creative_sets) {
+      try { setCreativeSets(JSON.parse(p.creative_sets)); } catch { setCreativeSets({}); }
+    } else if (p.shot_plan) {
+      try { setCreativeSets({ gallery: JSON.parse(p.shot_plan) }); } catch { setCreativeSets({}); }
+    }
+
     // Restore the most recent advanced-copy result saved on this project,
     // so generated copy survives a page refresh / project re-selection.
     if (p.copy_result) {
@@ -279,18 +290,18 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
   const flowStatus = useMemo(() => {
     const hasProductInfo = Object.values(productInfo).some((v) => String(v || "").trim());
     const hasCopy = advCopyJob?.status === "done" || ["title", "bullets", "search_terms", "aplus"].some((k) => copyResult[k]);
-    const mainPromptCount = imageSlots.filter((s) => s.prompt).length;
-    const aplusPromptCount = aplusSlots.filter((s) => s.prompt).length;
-    const imageCount = [...imageSlots, ...aplusSlots].filter((s) => s.url).length;
+    const visualItems = Object.values(creativeSets || {}).flatMap((set) => set?.images || []);
+    const imageCount = visualItems.filter((item) => item.final_url).length;
+    const reviewedCount = visualItems.filter((item) => item.final_url && item.human_reviewed).length;
     return [
       { label: "产品信息", ok: Boolean(scraped.title || hasProductInfo) },
       { label: "AI分析", ok: Boolean(analysisResult) },
       { label: "文案", ok: hasCopy },
-      { label: `主图提示词 ${mainPromptCount}/${imageSlots.length}`, ok: mainPromptCount > 0 },
-      { label: `A+提示词 ${aplusPromptCount}/${aplusSlots.length}`, ok: aplusPromptCount > 0 },
-      { label: `图片 ${imageCount}`, ok: imageCount > 0 },
+      { label: `视觉方案 ${visualItems.length}`, ok: visualItems.length > 0 },
+      { label: `成图 ${imageCount}`, ok: imageCount > 0 },
+      { label: `商用复核 ${reviewedCount}/${imageCount}`, ok: imageCount > 0 && reviewedCount === imageCount },
     ];
-  }, [advCopyJob, analysisResult, aplusSlots, copyResult, imageSlots, productInfo, scraped.title]);
+  }, [advCopyJob, analysisResult, copyResult, creativeSets, productInfo, scraped.title]);
 
   function messageOf(e) {
     return e?.response?.data?.detail || e?.message || String(e);
@@ -373,7 +384,7 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
         await uploadImage(activeId, file);
       }
       const ri = await getReferenceImages(activeId);
-      setRefImages({ scraped: ri.scraped || [], uploaded: ri.uploaded || [] });
+      setRefImages({ scraped: ri.scraped || [], uploaded: ri.uploaded || [], white_product_source: ri.white_product_source || "" });
       notify("success", `上传了 ${Math.min(files.length, 8)} 张素材图`);
     } catch (e) {
       notify("error", "上传失败: " + (e.message || "未知错误"));
@@ -386,7 +397,8 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
     if (!activeId) return;
     try {
       await deleteUploadedImage(activeId, filename);
-      setRefImages(prev => ({ ...prev, uploaded: prev.uploaded.filter(u => u.filename !== filename) }));
+      const ri = await getReferenceImages(activeId);
+      setRefImages({ scraped: ri.scraped || [], uploaded: ri.uploaded || [], white_product_source: ri.white_product_source || "" });
     } catch (e) {
       notify("error", "删除失败: " + (e.message || ""));
     }
@@ -836,31 +848,28 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
     );
   }
 
-  function renderImageTab(isAplus) {
-    const slots = isAplus ? aplusSlots : imageSlots;
+  function renderImageTab() {
     return (
-      <div className="card" style={{ padding: 12 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 600 }}>色系</span>
-          <SheetSelect value={isAplus ? aplusColorScheme : colorScheme} onChange={(v) => isAplus ? setAplusColorScheme(v) : setColorScheme(v)} style={inputStyle} title="选择色系" options={COLOR_OPTIONS} />
-          {(isAplus ? aplusColorScheme : colorScheme) === "custom" && (
-            <input value={isAplus ? aplusCustomColor : customColor} onChange={(e) => isAplus ? setAplusCustomColor(e.target.value) : setCustomColor(e.target.value)} placeholder="输入自定义色系..." style={{ ...inputStyle, width: 180 }} />
-          )}
-          <Btn onClick={() => addSlot(isAplus ? "aplus" : "main")} disabled={busy}>新增图片位</Btn>
-          <Btn onClick={handleSaveSlotConfig} disabled={busy}>保存图片配置</Btn>
-          <Btn onClick={() => handleGenGroupPrompts(isAplus)} primary disabled={busy}>
-            {loading === (isAplus ? "gen-aplus-prompts" : "gen-main-prompts")
-              ? "生成&自检中..."
-              : (isAplus ? "按当前配置生成A+提示词" : "按当前配置生成主图提示词")}
-          </Btn>
-          <Btn onClick={() => handleGenGroupImages(isAplus)} primary disabled={busy}>{isAplus ? "生成A+图片" : "生成主图图片"}</Btn>
-        </div>
-        <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 8 }}>
-          {isAplus ? "A+ 支持自定义数量。默认包含桌面端 1464x600 与手机端 600x450。" : "主图/副图支持自定义数量。默认 1600x1600，适合 1400x1400 以上交付。"}
-        </div>
-        {renderSlotGrid(slots, isAplus)}
-        {renderTemplates(isAplus)}
-      </div>
+      <VisualStudio
+        projectId={activeId}
+        initialSets={creativeSets}
+        sourceAssets={[
+          ...(refImages.uploaded || []).map((item) => ({ ...item, kind: "uploaded" })),
+          ...(refImages.scraped || []).map((url, index) => ({
+            url, kind: "scraped", filename: `Amazon ${index + 1}`,
+            white_ready: url === refImages.white_product_source,
+          })),
+        ]}
+        contextStatus={{
+          whiteReady: Boolean(refImages.white_product_source || (refImages.uploaded || []).some((item) => item.white_ready)),
+          scrapedReady: Boolean(scraped.title || (refImages.scraped || []).length),
+          analysisReady: Boolean(analysisResult),
+          copyReady: advCopyJob?.status === "done" || ["title", "bullets", "search_terms", "aplus"].some((key) => copyResult[key]),
+        }}
+        colorScheme={colorScheme === "custom" ? customColor : colorScheme}
+        notify={notify}
+        onSetsChange={setCreativeSets}
+      />
     );
   }
 
@@ -964,7 +973,13 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
           <img src={previewUrl} alt="" style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 6, boxShadow: "0 8px 40px rgba(0,0,0,0.6)" }} onClick={(e) => e.stopPropagation()} />
         </div>
       )}
-      <div className="ptitle">/ Listing 生成器</div>
+      <div className="listing-page-head">
+        <div>
+          <div className="ptitle">/ Listing 工作台</div>
+          <p>从产品事实到文案、视觉套图和最终交付的完整生产流程</p>
+        </div>
+        {project && <div className="listing-page-context"><span>{project.marketplace || "US"}</span><strong>{project.asin}</strong></div>}
+      </div>
       {renderFeedback()}
       <div className="listing-layout" style={{ display: "flex", gap: 12 }}>
         <div className="listing-sidebar" style={{ width: 210, flexShrink: 0 }}>
@@ -975,7 +990,7 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
                 options={marketplaceOptions(["US", "UK", "DE", "JP", "FR", "IT", "ES", "CA", "AU"])} />
             </div>
             <Btn onClick={handleCreate} primary disabled={busy || !newAsin.trim()}>+ 新建</Btn>
-            <div style={{ marginTop: 8 }}>
+            <div className="listing-project-list" style={{ marginTop: 8 }}>
               {projects.length === 0 && <div style={{ color: "var(--t3)", fontSize: 10, lineHeight: 1.6, padding: "6px 0" }}>暂无项目，输入 ASIN 后新建。</div>}
               {projects.map((p) => (
                 <div key={p.id} onClick={() => setActiveId(p.id)} style={{ padding: "6px 7px", borderRadius: 3, marginBottom: 3, cursor: "pointer", background: activeId === p.id ? "var(--bg2)" : "transparent", border: activeId === p.id ? "1px solid var(--acc)" : "1px solid transparent" }}>
@@ -990,7 +1005,7 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
           </div>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="listing-main" style={{ flex: 1, minWidth: 0 }}>
           {!project ? (
             activeId ? (
               <div className="card wb-enter" style={{ padding: 12 }} aria-busy="true" aria-live="polite">
@@ -1005,9 +1020,9 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
             )
           ) : (
             <div className="wb-enter" key={activeId}>
-              <div data-tour="listing-tabs" style={{ display: "flex", gap: 2, marginBottom: 8 }}>
-                {[["scrape", "① 采集"], ["copy", "② 文案"], ["images", "③ 主图"], ["aplus", "④ A+"], ["output", "⑤ 输出"]].map(([t, l]) => (
-                  <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: "7px 0", fontSize: 10, border: "none", borderRadius: 3, cursor: "pointer", background: tab === t ? "var(--acc)" : "var(--bg2)", color: tab === t ? "#000" : "var(--t2)", fontWeight: tab === t ? 600 : 400 }}>{l}</button>
+              <div data-tour="listing-tabs" className="listing-workflow-tabs">
+                {[["scrape", "① 素材与洞察"], ["copy", "② Listing 文案"], ["images", "③ 视觉套图"], ["output", "④ 交付"]].map(([t, l]) => (
+                  <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{l}</button>
                 ))}
               </div>
               {renderFlowStatus()}
@@ -1261,8 +1276,7 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
                 </div>
               )}
 
-              {tab === "images" && renderImageTab(false)}
-              {tab === "aplus" && renderImageTab(true)}
+              {tab === "images" && renderImageTab()}
 
               {tab === "output" && (
                 <div className="card" style={{ padding: 12 }}>
@@ -1287,8 +1301,11 @@ export default function ListingGenerator({ onProjectAsin } = {}) {
                   ) : (
                     <pre style={{ whiteSpace: "pre-wrap", color: "var(--t2)", fontSize: 10, background: "var(--bg2)", padding: 10, borderRadius: 4 }}>{`TITLE:\n${copyResult.title || ""}\n\nBULLETS:\n${copyResult.bullets || ""}\n\nSEARCH TERMS:\n${copyResult.search_terms || ""}\n\nA+ COPY:\n${copyResult.aplus || ""}`}</pre>
                   )}
-                  <div style={{ display: "flex", gap: 4, overflowX: "auto", marginTop: 8 }}>
-                    {[...imageSlots, ...aplusSlots].filter((s) => s.url).map((s) => <img key={s.id} src={s.url} title={s.label} style={{ height: 80, borderRadius: 3 }} />)}
+                  <div style={{ display: "flex", gap: 6, overflowX: "auto", marginTop: 10 }}>
+                    {Object.values(creativeSets || {}).flatMap((set) => set?.images || []).filter((item) => item.final_url).map((item) => (
+                      <img key={`${item.slot}-${item.final_url}`} src={item.final_url} title={item.role} onClick={() => setPreviewUrl(item.final_url)}
+                        style={{ height: 92, borderRadius: 5, cursor: "zoom-in", border: "1px solid var(--b)" }} />
+                    ))}
                   </div>
                 </div>
               )}

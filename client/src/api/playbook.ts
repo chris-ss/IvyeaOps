@@ -8,6 +8,7 @@ export interface HistoryEntry {
   price: string;
   cost: string;
   provider: string;
+  data_source: string;
   elapsed_s: number;
   ts: number;
   report: string;
@@ -45,16 +46,18 @@ export interface PlaybookReq {
   marketplace: string;
   price: string;
   cost: string;
+  data_source: string;
 }
 
 export type SseEvent =
   | { type: "phase"; phase: string }
   | { type: "progress"; step: string; done: number; total: number }
   | { type: "attempt"; provider: string }
+  | { type: "source"; requested: string; actual: string; label: string }
   | { type: "token"; text: string; provider: string }
   | { type: "warn"; detail: string }
   | { type: "error"; detail: string }
-  | { type: "done"; provider: string; elapsed_s: number };
+  | { type: "done"; provider: string; elapsed_s: number; data_source?: string; data_source_label?: string };
 
 export function streamPlaybook(
   req: PlaybookReq,

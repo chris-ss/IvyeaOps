@@ -60,7 +60,7 @@ export default function AsinCard({ asin, label, state, onRemove, onRefresh }: {
         </div>
         <div className="asin-card-actions">
           {onRefresh && (
-            <button className="asin-icon-btn" onClick={onRefresh} disabled={busy} title="实时刷新（消耗 1 次 Sorftime）">
+            <button className="asin-icon-btn" onClick={onRefresh} disabled={busy} title="实时刷新（消耗 1 次当前数据源调用）">
               {busy ? <span className="spin" /> : "↻"}
             </button>
           )}
