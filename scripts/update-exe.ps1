@@ -110,6 +110,21 @@ try {
         Start-Sleep -Milliseconds 500
     }
 
+    # 若旧后端仍在运行 / IvyeaOpsServer.exe 仍被锁，则在动任何文件之前中止。
+    # 否则 robocopy 会更新前端（client\dist，后端从磁盘读取）却无法覆盖被锁的
+    # exe，留下“新前端 + 旧后端进程”的错配 —— 新功能的路由在旧后端不存在，
+    # POST 落到 SPA 兜底（仅 GET）返回 405 Method Not Allowed。中止时不改动任何文件。
+    $stillBusy = $null
+    try { $stillBusy = Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue } catch {}
+    $stillLocked = $false
+    if (Test-Path $ServerExePath) {
+        try { $fs = [System.IO.File]::Open($ServerExePath, 'Open', 'ReadWrite', 'None'); $fs.Close() }
+        catch { $stillLocked = $true }
+    }
+    if ($stillBusy -or $stillLocked) {
+        Write-Fail "无法停止正在运行的 IvyeaOps（端口 8001 仍被占用或 IvyeaOpsServer.exe 被锁）。为避免只更新了前端、后端仍是旧版导致功能报错（405 Method Not Allowed），已中止更新，未改动任何文件。请彻底关闭 IvyeaOps（含托盘图标与后台进程）后重试。"
+    }
+
     if ($ZipPathParam) {
         Write-Info "Using pre-downloaded package: $ZipPathParam"
         Copy-Item $ZipPathParam $ZipPath -Force
@@ -154,8 +169,21 @@ try {
 
     Write-Info "Starting IvyeaOps..."
     Start-Process -FilePath $ServerExe -WorkingDirectory $RepoRoot | Out-Null
+
+    # 确认新后端真的起来了（否则会出现“前端已更新、后端没起/还是旧的”错配）。
+    $up = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        try {
+            if (Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue) { $up = $true; break }
+        } catch {}
+        Start-Sleep -Milliseconds 500
+    }
     Write-Host ""
-    Write-Info "Update complete. Data and config were preserved."
+    if ($up) {
+        Write-Info "Update complete. Backend restarted (port 8001 listening). Data and config were preserved."
+    } else {
+        Write-Warn "文件已更新，但后端未在 15s 内监听 8001。请手动双击 IvyeaOpsServer.exe 启动；若仍异常，查看 logs\update.log 与后端日志。"
+    }
 } catch {
     Write-Fail $_
 } finally {
