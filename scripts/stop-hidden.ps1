@@ -30,6 +30,17 @@ if (-not $Stopped) {
     }
 }
 
+# 兜底扫杀：IvyeaOpsServer.exe(PyInstaller onedir)会有子进程/worker(终端会话、
+# ivyea-agent 等)也加载 _internal\*.pyd —— 只按 PID/端口杀会漏掉它们，导致更新时
+# robocopy 复制 DLL 报错误 32(文件占用)。按进程名把残留的全部结束。
+try {
+    $all = Get-Process -Name IvyeaOpsServer -ErrorAction SilentlyContinue
+    if ($all) {
+        $all | Stop-Process -Force -ErrorAction SilentlyContinue
+        $Stopped = $true
+    }
+} catch {}
+
 if ($Stopped) {
     Write-Host "[IvyeaOps] Background service stopped." -ForegroundColor Green
 } else {
