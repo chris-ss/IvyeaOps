@@ -93,36 +93,43 @@ try {
     Write-Info "Stopping background service..."
     Stop-IvyeaOps
 
-    # Wait for the old server to actually exit AND release IvyeaOpsServer.exe — a
-    # force-killed process keeps the .exe file locked for a moment, and robocopy
-    # then can't overwrite it (→ "no restart"). Poll port 8001 + try to open the
-    # exe for write until both are free (up to ~15s).
+    # Wait for the old server to FULLY exit. IvyeaOpsServer.exe (PyInstaller onedir)
+    # spawns child/worker processes (terminal sessions, ivyea-agent, ...) that keep
+    # _internal\*.pyd DLLs open — killing only the port-8001 process leaves those,
+    # and robocopy then fails with "error 32 (file in use)" on the DLLs. So each
+    # iteration also force-kills ANY remaining IvyeaOpsServer process by name.
     $ServerExePath = Join-Path $RepoRoot "IvyeaOpsServer.exe"
     for ($i = 0; $i -lt 30; $i++) {
         $portBusy = $null
         try { $portBusy = Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue } catch {}
+        $procRunning = $null
+        try { $procRunning = Get-Process -Name IvyeaOpsServer -ErrorAction SilentlyContinue } catch {}
         $locked = $false
         if (Test-Path $ServerExePath) {
             try { $fs = [System.IO.File]::Open($ServerExePath, 'Open', 'ReadWrite', 'None'); $fs.Close() }
             catch { $locked = $true }
         }
-        if (-not $portBusy -and -not $locked) { break }
+        if (-not $portBusy -and -not $procRunning -and -not $locked) { break }
+        # 残留子进程/worker 仍锁着 _internal\*.pyd —— 再扫一遍全部杀掉。
+        if ($procRunning) { try { $procRunning | Stop-Process -Force -ErrorAction SilentlyContinue } catch {} }
         Start-Sleep -Milliseconds 500
     }
 
-    # 若旧后端仍在运行 / IvyeaOpsServer.exe 仍被锁，则在动任何文件之前中止。
-    # 否则 robocopy 会更新前端（client\dist，后端从磁盘读取）却无法覆盖被锁的
-    # exe，留下“新前端 + 旧后端进程”的错配 —— 新功能的路由在旧后端不存在，
-    # POST 落到 SPA 兜底（仅 GET）返回 405 Method Not Allowed。中止时不改动任何文件。
+    # 仍有 IvyeaOpsServer 进程 / 端口占用 / exe 被锁，则在动任何文件之前中止。
+    # 否则 robocopy 会在被锁的 _internal\*.pyd 上失败（错误 32），且可能已更新前端
+    # （client\dist，后端从磁盘读取）却没换后端 —— 留下前端新/后端旧的错配，新路由
+    # 缺失，POST 落到 SPA 兜底（仅 GET）→ 405 Method Not Allowed。中止时不改动任何文件。
     $stillBusy = $null
     try { $stillBusy = Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue } catch {}
+    $stillRunning = $null
+    try { $stillRunning = Get-Process -Name IvyeaOpsServer -ErrorAction SilentlyContinue } catch {}
     $stillLocked = $false
     if (Test-Path $ServerExePath) {
         try { $fs = [System.IO.File]::Open($ServerExePath, 'Open', 'ReadWrite', 'None'); $fs.Close() }
         catch { $stillLocked = $true }
     }
-    if ($stillBusy -or $stillLocked) {
-        Write-Fail "无法停止正在运行的 IvyeaOps（端口 8001 仍被占用或 IvyeaOpsServer.exe 被锁）。为避免只更新了前端、后端仍是旧版导致功能报错（405 Method Not Allowed），已中止更新，未改动任何文件。请彻底关闭 IvyeaOps（含托盘图标与后台进程）后重试。"
+    if ($stillBusy -or $stillRunning -or $stillLocked) {
+        Write-Fail "无法彻底停止 IvyeaOps（仍有 IvyeaOpsServer 进程 / 端口 8001 占用 / exe 或 _internal 被锁）。这会让 robocopy 在 _internal\*.pyd 上报错误 32（文件占用），并可能留下前端新/后端旧的错配（405）。已中止，未改动任何文件。请在任务管理器结束所有 IvyeaOpsServer.exe（可能有多个子进程）后重试，或先运行：Get-Process IvyeaOpsServer | Stop-Process -Force"
     }
 
     if ($ZipPathParam) {
