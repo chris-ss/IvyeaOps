@@ -22,7 +22,7 @@ import { patchSettings } from "../api/settings";
 
 const S = {
   page: {
-    minHeight: "100vh",
+    minHeight: "100%",
     background: "var(--bg)",
     display: "flex",
     alignItems: "center",
