@@ -793,6 +793,11 @@ export default function IvyeaAgentDock() {
                     {sending && <div className="ivyea-agent-msg assistant"><Loader2 size={14} className="spin" /> 处理中...</div>}
                   </div>
                   <div className="ivyea-agent-composer">
+                    <input ref={composerFileRef} type="file" style={{ display: "none" }} onChange={attachFileToChat} />
+                    <button title="添加文件（上传到知识库，可直接问它的内容）"
+                            onClick={() => composerFileRef.current?.click()} disabled={attaching || sending}>
+                      <Upload size={16} />
+                    </button>
                     <textarea
                       rows={1}
                       value={input}
@@ -805,11 +810,6 @@ export default function IvyeaAgentDock() {
                       }}
                       placeholder="问 Ivyea Agent..."
                     />
-                    <input ref={composerFileRef} type="file" style={{ display: "none" }} onChange={attachFileToChat} />
-                    <button title="添加文件（上传到知识库，可直接问它的内容）"
-                            onClick={() => composerFileRef.current?.click()} disabled={attaching || sending}>
-                      <Upload size={16} />
-                    </button>
                     <button onClick={sendMessage} disabled={!input.trim() || sending}><Send size={16} /></button>
                   </div>
                 </>
