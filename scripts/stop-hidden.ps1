@@ -30,18 +30,15 @@ if (-not $Stopped) {
     }
 }
 
-# 兜底扫杀：IvyeaOpsServer.exe(PyInstaller onedir)会 spawn `IvyeaOpsServer.exe agent-serve`
-# (:8765) 及终端/agent 子进程，都加载 _internal\*.pyd —— 只按 PID/端口/进程名 Stop-Process
-# 会漏掉子进程树(Stop-Process 不杀子进程)，导致更新时 robocopy 复制 DLL 报错误 32(文件占用)。
-# 用 taskkill /F /T 按映像名杀整棵树(含非同名子进程)，再显式杀 :8765 owner。
-try { & taskkill /F /T /IM IvyeaOpsServer.exe 2>$null | Out-Null; $Stopped = $true } catch {}
+# 兜底扫杀：IvyeaOpsServer.exe 会 spawn `IvyeaOpsServer.exe agent-serve`(:8765) 也加载
+# _internal\*.pyd。用 `taskkill /F /IM`(**不加 /T**！)按映像名杀掉所有 IvyeaOpsServer.exe——
+# 本停止脚本的 PowerShell 是后端 spawn 的子进程，`/T`(整树)会把正在跑的 PowerShell 及其
+# taskkill 子进程一起杀掉→杀进程中途中断→agent-serve 反而残留(用户看到的"停止后还有一个
+# ivyeaopsserver.exe")。/IM 只按映像名(IvyeaOpsServer.exe)杀，powershell.exe 不匹配→脚本存活跑完。
+try { & taskkill /F /IM IvyeaOpsServer.exe 2>$null | Out-Null; $Stopped = $true } catch {}
 try {
     $all = Get-Process -Name IvyeaOpsServer -ErrorAction SilentlyContinue
     if ($all) { $all | Stop-Process -Force -ErrorAction SilentlyContinue; $Stopped = $true }
-} catch {}
-try {
-    $agent = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($agent) { & taskkill /F /T /PID $agent.OwningProcess 2>$null | Out-Null; $Stopped = $true }
 } catch {}
 
 if ($Stopped) {
