@@ -110,14 +110,16 @@ try {
             catch { $locked = $true }
         }
         if (-not $portBusy -and -not $procRunning -and -not $locked) { break }
-        # 残留子进程/worker 仍锁着 _internal\*.pyd —— 强杀。Stop-Process -Force **不杀子进程树**，
-        # 而 IvyeaOpsServer.exe 会 spawn `IvyeaOpsServer.exe agent-serve`(:8765) 及终端/agent
-        # 子进程；用 taskkill /F /T 按映像名杀掉整棵树(含非同名子进程)，再显式杀 :8765 owner。
-        try { & taskkill /F /T /IM IvyeaOpsServer.exe 2>$null | Out-Null } catch {}
+        # 残留 IvyeaOpsServer.exe 进程(主 + `IvyeaOpsServer.exe agent-serve` :8765)锁着
+        # _internal\*.pyd。用 `taskkill /F /IM`(**不加 /T**！)按映像名杀掉所有 IvyeaOpsServer.exe：
+        # 本更新脚本的 PowerShell 是后端 spawn 的子进程，`/T`(整树)会把正在跑的 PowerShell 自己
+        # 也杀掉→更新器中途死(窗口消失/超时)，且 taskkill 被连带杀掉→agent-serve 反而残留。
+        # /IM 只按映像名(IvyeaOpsServer.exe)杀，powershell.exe 不匹配→更新器存活。
+        try { & taskkill /F /IM IvyeaOpsServer.exe 2>$null | Out-Null } catch {}
         if ($procRunning) { try { $procRunning | Stop-Process -Force -ErrorAction SilentlyContinue } catch {} }
         try {
             $agent = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($agent) { & taskkill /F /T /PID $agent.OwningProcess 2>$null | Out-Null }
+            if ($agent) { & taskkill /F /PID $agent.OwningProcess 2>$null | Out-Null }
         } catch {}
         Start-Sleep -Milliseconds 500
     }
