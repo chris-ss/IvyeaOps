@@ -1,4 +1,4 @@
-# IvyeaOps Windows x64 one-click updater.
+﻿# IvyeaOps Windows x64 one-click updater.
 #
 # Safe update for GitHub Release ZIP installs:
 #   1. stop the background server
@@ -10,7 +10,7 @@
 param(
     [string]$DownloadUrl = "https://github.com/Hector-xue/IvyeaOps/releases/latest/download/IvyeaOps-Windows-x64.zip",
     # Pre-downloaded bundle (the in-app updater downloads with live progress and
-    # hands the file here) — skips the Invoke-WebRequest step entirely.
+    # hands the file here) -- skips the Invoke-WebRequest step entirely.
     [string]$ZipPath = "",
     [switch]$NonInteractive
 )
@@ -94,13 +94,18 @@ try {
     Stop-IvyeaOps
 
     # Wait for the old server to FULLY exit AND release IvyeaOpsServer.exe. Two
-    # process types must die: the main (port 8001) AND `IvyeaOpsServer.exe agent-serve`
-    # (:8765). agent-serve 不占 8001、也不锁主 exe——它只锁 _internal\*.pyd，若像原来那样
-    # "端口空+主exe解锁就 break" 会在杀掉 agent-serve *之前* 退出→漏杀→robocopy 复制 DLL 报
-    # 错误32→更新失败(用户得手动杀那个残留)。所以：每轮**先**按映像名 taskkill /F /IM 杀掉所有
-    # IvyeaOpsServer.exe(**不加 /T**,/T 会连带杀掉本更新脚本自己),**再**判退出——退出条件也纳入
-    # "还有没有 IvyeaOpsServer 进程"。**绝不因残留而中止**(那是 v1.1.79 的回归,会杀死后端又不
-    # 重启→"等待服务重启超时");等满 15s 仍有残留也照常继续复制+重启(v1.1.78 本就这么干)。
+    # process types must die: the main one (port 8001) AND `IvyeaOpsServer.exe
+    # agent-serve` (:8765). The agent-serve does NOT hold port 8001 and does NOT
+    # lock the main exe -- it only locks _internal\*.pyd. If we broke out as soon as
+    # "port free + main exe unlocked", we'd exit BEFORE killing agent-serve, leaving
+    # it alive to lock a DLL -> robocopy fails (error 32) -> update fails and the
+    # user has to kill it by hand. So each iteration force-kills ALL IvyeaOpsServer
+    # processes by image name FIRST (taskkill /F /IM, WITHOUT /T -- /T would tree-kill
+    # this updater script itself), THEN checks the exit condition, which also
+    # requires zero remaining IvyeaOpsServer processes. NEVER abort on a leftover
+    # (that abort was the v1.1.79 regression: it killed the backend without
+    # restarting -> "waiting for restart timed out"). After 15s we copy+restart
+    # regardless, exactly like the proven v1.1.78 flow.
     $ServerExePath = Join-Path $RepoRoot "IvyeaOpsServer.exe"
     for ($i = 0; $i -lt 30; $i++) {
         try { & taskkill /F /IM IvyeaOpsServer.exe 2>$null | Out-Null } catch {}
@@ -129,7 +134,7 @@ try {
     Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
     # Strip the Mark-of-the-Web (Zone.Identifier) the download carries, so Windows
     # SmartScreen / antivirus do not block the freshly-copied exe or the _internal\
-    # DLLs at launch. Best-effort — never let it abort the update.
+    # DLLs at launch. Best-effort -- never let it abort the update.
     try { Get-ChildItem $ExtractDir -Recurse -File | Unblock-File -ErrorAction SilentlyContinue } catch {}
     $PackageRoot = Find-PackageRoot $ExtractDir
     if (-not $PackageRoot) { Write-Fail "Invalid update package: IvyeaOpsServer.exe not found." }

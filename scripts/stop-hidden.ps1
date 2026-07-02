@@ -1,4 +1,4 @@
-# Stop the hidden/background IvyeaOps Windows backend.
+﻿# Stop the hidden/background IvyeaOps Windows backend.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "SilentlyContinue"
@@ -30,9 +30,10 @@ if (-not $Stopped) {
     }
 }
 
-# 兜底：`IvyeaOpsServer.exe agent-serve`(:8765) 也是 IvyeaOpsServer.exe——只按 PID/端口8001 杀会
-# 漏掉它，导致"停止并退出"后仍残留一个 IvyeaOpsServer.exe 进程。按映像名(/IM)补杀所有实例
-# （不加 /T，避免连带杀掉本停止脚本自己）。
+# Also kill `IvyeaOpsServer.exe agent-serve` (:8765) -- it is an IvyeaOpsServer.exe
+# too, so a PID/port-8001-only stop misses it, leaving one IvyeaOpsServer.exe behind
+# after "stop and exit". Kill every instance by image name (/IM, WITHOUT /T so we
+# don't tree-kill this stop script itself).
 try { & taskkill /F /IM IvyeaOpsServer.exe 2>$null | Out-Null; $Stopped = $true } catch {}
 
 if ($Stopped) {
