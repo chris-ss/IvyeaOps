@@ -93,52 +93,26 @@ try {
     Write-Info "Stopping background service..."
     Stop-IvyeaOps
 
-    # Wait for the old server to FULLY exit. IvyeaOpsServer.exe (PyInstaller onedir)
-    # spawns child/worker processes (terminal sessions, ivyea-agent, ...) that keep
-    # _internal\*.pyd DLLs open — killing only the port-8001 process leaves those,
-    # and robocopy then fails with "error 32 (file in use)" on the DLLs. So each
-    # iteration also force-kills ANY remaining IvyeaOpsServer process by name.
+    # Wait for the old server to actually exit AND release IvyeaOpsServer.exe — a
+    # force-killed process keeps the .exe file locked for a moment, and robocopy
+    # then can't overwrite it (→ "no restart"). Poll port 8001 + try to open the
+    # exe for write until both are free (up to ~15s).
     $ServerExePath = Join-Path $RepoRoot "IvyeaOpsServer.exe"
     for ($i = 0; $i -lt 30; $i++) {
         $portBusy = $null
         try { $portBusy = Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue } catch {}
-        $procRunning = $null
-        try { $procRunning = Get-Process -Name IvyeaOpsServer -ErrorAction SilentlyContinue } catch {}
         $locked = $false
         if (Test-Path $ServerExePath) {
             try { $fs = [System.IO.File]::Open($ServerExePath, 'Open', 'ReadWrite', 'None'); $fs.Close() }
             catch { $locked = $true }
         }
-        if (-not $portBusy -and -not $procRunning -and -not $locked) { break }
-        # 残留 IvyeaOpsServer.exe 进程(主 + `IvyeaOpsServer.exe agent-serve` :8765)锁着
-        # _internal\*.pyd。用 `taskkill /F /IM`(**不加 /T**！)按映像名杀掉所有 IvyeaOpsServer.exe：
-        # 本更新脚本的 PowerShell 是后端 spawn 的子进程，`/T`(整树)会把正在跑的 PowerShell 自己
-        # 也杀掉→更新器中途死(窗口消失/超时)，且 taskkill 被连带杀掉→agent-serve 反而残留。
-        # /IM 只按映像名(IvyeaOpsServer.exe)杀，powershell.exe 不匹配→更新器存活。
+        if (-not $portBusy -and -not $locked) { break }
+        # 顺带杀掉残留的 IvyeaOpsServer.exe（主进程 + `IvyeaOpsServer.exe agent-serve` :8765）——
+        # agent-serve 会锁着 _internal\*.pyd，robocopy 复制 DLL 会因文件占用失败。按映像名(/IM)杀，
+        # **不加 /T**（/T 杀整树会连带杀掉本更新脚本自己），**也不因残留而中止**（v1.1.78 简单流程
+        # 本就能更新；那个"无法彻底停止就中止"会把后端杀死又不重启→"等待服务重启超时"，是回归，已去）。
         try { & taskkill /F /IM IvyeaOpsServer.exe 2>$null | Out-Null } catch {}
-        if ($procRunning) { try { $procRunning | Stop-Process -Force -ErrorAction SilentlyContinue } catch {} }
-        try {
-            $agent = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($agent) { & taskkill /F /PID $agent.OwningProcess 2>$null | Out-Null }
-        } catch {}
         Start-Sleep -Milliseconds 500
-    }
-
-    # 仍有 IvyeaOpsServer 进程 / 端口占用 / exe 被锁，则在动任何文件之前中止。
-    # 否则 robocopy 会在被锁的 _internal\*.pyd 上失败（错误 32），且可能已更新前端
-    # （client\dist，后端从磁盘读取）却没换后端 —— 留下前端新/后端旧的错配，新路由
-    # 缺失，POST 落到 SPA 兜底（仅 GET）→ 405 Method Not Allowed。中止时不改动任何文件。
-    $stillBusy = $null
-    try { $stillBusy = Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue } catch {}
-    $stillRunning = $null
-    try { $stillRunning = Get-Process -Name IvyeaOpsServer -ErrorAction SilentlyContinue } catch {}
-    $stillLocked = $false
-    if (Test-Path $ServerExePath) {
-        try { $fs = [System.IO.File]::Open($ServerExePath, 'Open', 'ReadWrite', 'None'); $fs.Close() }
-        catch { $stillLocked = $true }
-    }
-    if ($stillBusy -or $stillRunning -or $stillLocked) {
-        Write-Fail "无法彻底停止 IvyeaOps（仍有 IvyeaOpsServer 进程 / 端口 8001 占用 / exe 或 _internal 被锁）。这会让 robocopy 在 _internal\*.pyd 上报错误 32（文件占用），并可能留下前端新/后端旧的错配（405）。已中止，未改动任何文件。请在任务管理器结束所有 IvyeaOpsServer.exe（可能有多个子进程）后重试，或先运行：Get-Process IvyeaOpsServer | Stop-Process -Force"
     }
 
     if ($ZipPathParam) {
@@ -185,21 +159,8 @@ try {
 
     Write-Info "Starting IvyeaOps..."
     Start-Process -FilePath $ServerExe -WorkingDirectory $RepoRoot | Out-Null
-
-    # 确认新后端真的起来了（否则会出现“前端已更新、后端没起/还是旧的”错配）。
-    $up = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        try {
-            if (Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue) { $up = $true; break }
-        } catch {}
-        Start-Sleep -Milliseconds 500
-    }
     Write-Host ""
-    if ($up) {
-        Write-Info "Update complete. Backend restarted (port 8001 listening). Data and config were preserved."
-    } else {
-        Write-Warn "文件已更新，但后端未在 15s 内监听 8001。请手动双击 IvyeaOpsServer.exe 启动；若仍异常，查看 logs\update.log 与后端日志。"
-    }
+    Write-Info "Update complete. Data and config were preserved."
 } catch {
     Write-Fail $_
 } finally {
