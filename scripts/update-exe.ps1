@@ -93,25 +93,27 @@ try {
     Write-Info "Stopping background service..."
     Stop-IvyeaOps
 
-    # Wait for the old server to actually exit AND release IvyeaOpsServer.exe — a
-    # force-killed process keeps the .exe file locked for a moment, and robocopy
-    # then can't overwrite it (→ "no restart"). Poll port 8001 + try to open the
-    # exe for write until both are free (up to ~15s).
+    # Wait for the old server to FULLY exit AND release IvyeaOpsServer.exe. Two
+    # process types must die: the main (port 8001) AND `IvyeaOpsServer.exe agent-serve`
+    # (:8765). agent-serve 不占 8001、也不锁主 exe——它只锁 _internal\*.pyd，若像原来那样
+    # "端口空+主exe解锁就 break" 会在杀掉 agent-serve *之前* 退出→漏杀→robocopy 复制 DLL 报
+    # 错误32→更新失败(用户得手动杀那个残留)。所以：每轮**先**按映像名 taskkill /F /IM 杀掉所有
+    # IvyeaOpsServer.exe(**不加 /T**,/T 会连带杀掉本更新脚本自己),**再**判退出——退出条件也纳入
+    # "还有没有 IvyeaOpsServer 进程"。**绝不因残留而中止**(那是 v1.1.79 的回归,会杀死后端又不
+    # 重启→"等待服务重启超时");等满 15s 仍有残留也照常继续复制+重启(v1.1.78 本就这么干)。
     $ServerExePath = Join-Path $RepoRoot "IvyeaOpsServer.exe"
     for ($i = 0; $i -lt 30; $i++) {
+        try { & taskkill /F /IM IvyeaOpsServer.exe 2>$null | Out-Null } catch {}
         $portBusy = $null
         try { $portBusy = Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue } catch {}
+        $procLeft = $null
+        try { $procLeft = Get-Process -Name IvyeaOpsServer -ErrorAction SilentlyContinue } catch {}
         $locked = $false
         if (Test-Path $ServerExePath) {
             try { $fs = [System.IO.File]::Open($ServerExePath, 'Open', 'ReadWrite', 'None'); $fs.Close() }
             catch { $locked = $true }
         }
-        if (-not $portBusy -and -not $locked) { break }
-        # 顺带杀掉残留的 IvyeaOpsServer.exe（主进程 + `IvyeaOpsServer.exe agent-serve` :8765）——
-        # agent-serve 会锁着 _internal\*.pyd，robocopy 复制 DLL 会因文件占用失败。按映像名(/IM)杀，
-        # **不加 /T**（/T 杀整树会连带杀掉本更新脚本自己），**也不因残留而中止**（v1.1.78 简单流程
-        # 本就能更新；那个"无法彻底停止就中止"会把后端杀死又不重启→"等待服务重启超时"，是回归，已去）。
-        try { & taskkill /F /IM IvyeaOpsServer.exe 2>$null | Out-Null } catch {}
+        if (-not $portBusy -and -not $procLeft -and -not $locked) { break }
         Start-Sleep -Milliseconds 500
     }
 
