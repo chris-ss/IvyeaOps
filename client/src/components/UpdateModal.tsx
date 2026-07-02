@@ -84,8 +84,20 @@ export default function UpdateModal({
           if (p.phase === "downloaded") break;
         }
         if (stopped.current) return;
-        await api.post("/setup/update/install");
+        // 触发安装：更新器会立刻杀掉后端，很可能在 /install 的 HTTP 响应回到前端之前就断连。
+        // 所以先切到"安装中"再发请求；网络错误（后端已死、无 response）是**预期**的，不当失败，
+        // 直接进健康轮询等新版本起来。只有带 detail 的真实业务错误（如"安装包尚未下载完成"）才算失败。
         setPhase("installing");
+        try {
+          await api.post("/setup/update/install");
+        } catch (e: any) {
+          if (e?.response?.data?.detail) {
+            setError(e.response.data.detail);
+            setPhase("error");
+            return;
+          }
+          // 否则是网络错误＝后端被更新器杀掉，符合预期 → 继续轮询健康
+        }
         void pollRestart();
       } catch (e: any) {
         setError(e?.response?.data?.detail || e?.message || "更新失败");
