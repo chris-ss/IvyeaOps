@@ -110,8 +110,15 @@ try {
             catch { $locked = $true }
         }
         if (-not $portBusy -and -not $procRunning -and -not $locked) { break }
-        # 残留子进程/worker 仍锁着 _internal\*.pyd —— 再扫一遍全部杀掉。
+        # 残留子进程/worker 仍锁着 _internal\*.pyd —— 强杀。Stop-Process -Force **不杀子进程树**，
+        # 而 IvyeaOpsServer.exe 会 spawn `IvyeaOpsServer.exe agent-serve`(:8765) 及终端/agent
+        # 子进程；用 taskkill /F /T 按映像名杀掉整棵树(含非同名子进程)，再显式杀 :8765 owner。
+        try { & taskkill /F /T /IM IvyeaOpsServer.exe 2>$null | Out-Null } catch {}
         if ($procRunning) { try { $procRunning | Stop-Process -Force -ErrorAction SilentlyContinue } catch {} }
+        try {
+            $agent = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($agent) { & taskkill /F /T /PID $agent.OwningProcess 2>$null | Out-Null }
+        } catch {}
         Start-Sleep -Milliseconds 500
     }
 

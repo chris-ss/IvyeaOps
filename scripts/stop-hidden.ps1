@@ -30,15 +30,18 @@ if (-not $Stopped) {
     }
 }
 
-# 兜底扫杀：IvyeaOpsServer.exe(PyInstaller onedir)会有子进程/worker(终端会话、
-# ivyea-agent 等)也加载 _internal\*.pyd —— 只按 PID/端口杀会漏掉它们，导致更新时
-# robocopy 复制 DLL 报错误 32(文件占用)。按进程名把残留的全部结束。
+# 兜底扫杀：IvyeaOpsServer.exe(PyInstaller onedir)会 spawn `IvyeaOpsServer.exe agent-serve`
+# (:8765) 及终端/agent 子进程，都加载 _internal\*.pyd —— 只按 PID/端口/进程名 Stop-Process
+# 会漏掉子进程树(Stop-Process 不杀子进程)，导致更新时 robocopy 复制 DLL 报错误 32(文件占用)。
+# 用 taskkill /F /T 按映像名杀整棵树(含非同名子进程)，再显式杀 :8765 owner。
+try { & taskkill /F /T /IM IvyeaOpsServer.exe 2>$null | Out-Null; $Stopped = $true } catch {}
 try {
     $all = Get-Process -Name IvyeaOpsServer -ErrorAction SilentlyContinue
-    if ($all) {
-        $all | Stop-Process -Force -ErrorAction SilentlyContinue
-        $Stopped = $true
-    }
+    if ($all) { $all | Stop-Process -Force -ErrorAction SilentlyContinue; $Stopped = $true }
+} catch {}
+try {
+    $agent = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($agent) { & taskkill /F /T /PID $agent.OwningProcess 2>$null | Out-Null; $Stopped = $true }
 } catch {}
 
 if ($Stopped) {

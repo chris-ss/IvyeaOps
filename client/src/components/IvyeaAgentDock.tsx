@@ -175,6 +175,25 @@ export default function IvyeaAgentDock() {
   const [savingText, setSavingText] = useState(false);
   const messagesRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerFileRef = useRef<HTMLInputElement>(null);
+  const [attaching, setAttaching] = useState(false);
+  // 对话区「添加文件」：把选中的文件上传到知识库（confirm+rebuild），并在输入框提示，
+  // 之后就能直接问 Agent 该文件内容（复用现有 knowledge/upload）。
+  const attachFileToChat = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setAttaching(true);
+    try {
+      await ivyeaKnowledgeUpload({ file: f, title: f.name, sourceType: "user", tags: "", confirm: true, rebuild: true });
+      setInput((prev) => (prev ? prev + "\n" : "") + `（已添加文件「${f.name}」到知识库，你可以问我它的内容）`);
+      await loadKnowledge();
+    } catch (err: any) {
+      setError(apiErrorMessage(err, "添加文件失败"));
+    } finally {
+      setAttaching(false);
+      if (composerFileRef.current) composerFileRef.current.value = "";
+    }
+  };
   const fabDragRef = useRef({
     dragging: false,
     moved: false,
@@ -786,6 +805,11 @@ export default function IvyeaAgentDock() {
                       }}
                       placeholder="问 Ivyea Agent..."
                     />
+                    <input ref={composerFileRef} type="file" style={{ display: "none" }} onChange={attachFileToChat} />
+                    <button title="添加文件（上传到知识库，可直接问它的内容）"
+                            onClick={() => composerFileRef.current?.click()} disabled={attaching || sending}>
+                      <Upload size={16} />
+                    </button>
                     <button onClick={sendMessage} disabled={!input.trim() || sending}><Send size={16} /></button>
                   </div>
                 </>

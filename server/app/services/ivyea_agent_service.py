@@ -290,6 +290,48 @@ def agent_version() -> str:
         return ""
 
 
+_AGENT_REPO = "Hector-xue/ivyea-agent"
+_agent_latest_cache: dict[str, Any] = {"tag": "", "at": 0.0}
+
+
+def latest_agent_version() -> str:
+    """GitHub 上 IvyeaAgent 最新 release 的 tag（缓存 6h；离线/失败返回缓存或 ''）。
+    供系统配置卡片显示"最新 vX / 有更新"。"""
+    import time
+    now = time.time()
+    if _agent_latest_cache["tag"] and now - float(_agent_latest_cache["at"]) < 6 * 3600:
+        return str(_agent_latest_cache["tag"])
+    try:
+        import urllib.request
+        import json as _json
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{_AGENT_REPO}/releases/latest",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "IvyeaOps"})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            tag = str(_json.loads(r.read().decode("utf-8", "replace")).get("tag_name") or "")
+        if tag:
+            _agent_latest_cache.update(tag=tag, at=now)
+        return tag
+    except Exception:  # noqa: BLE001
+        return str(_agent_latest_cache["tag"] or "")
+
+
+def _ver_tuple(v: str) -> tuple:
+    parts = []
+    for p in (v or "").strip().lstrip("vV").split("."):
+        num = "".join(ch for ch in p if ch.isdigit())
+        parts.append(int(num) if num else 0)
+    return tuple(parts) or (0,)
+
+
+def agent_update_available(current: str = "", latest: str = "") -> bool:
+    current = current or _installed_agent_version("") or agent_version()
+    latest = latest or latest_agent_version()
+    if not current or not latest:
+        return False   # 版本测不出（如源码机 serve 未起）→ 不误报"有更新"
+    return _ver_tuple(latest) > _ver_tuple(current)
+
+
 def _installed_agent_version(py: str) -> str:
     """Version of the *installed* ivyea_agent package (reflects files on disk),
     independent of whether the serve has restarted to load them."""
@@ -300,6 +342,18 @@ def _installed_agent_version(py: str) -> str:
             return str(getattr(ivyea_agent, "__version__", "") or "")
         except Exception:  # noqa: BLE001
             return ""
+    # `ivyea --version` 对**源码 launcher / pip / venv 都可靠**（源码机没 pip 装、site-packages
+    # 被移除时 `py -c import ivyea_agent` 会失败返回空 → 误判"有更新"）。优先用它。
+    try:
+        cli = _find_ivyea_cli()
+        if cli:
+            p = subprocess.run([cli, "--version"], text=True, capture_output=True,
+                               timeout=15, **no_window_kwargs())
+            out = (p.stdout or "").strip()   # "ivyea-agent 1.1.3" → "1.1.3"
+            if out:
+                return out.split()[-1]
+    except Exception:  # noqa: BLE001
+        pass
     try:
         p = subprocess.run([py, "-c", "import ivyea_agent, sys; sys.stdout.write(ivyea_agent.__version__)"],
                            text=True, capture_output=True, timeout=15, **no_window_kwargs())
@@ -346,13 +400,18 @@ def upgrade_agent(progress=None) -> dict[str, Any]:
     repo = (os.getenv("IVYEA_AGENT_REPO") or "https://github.com/Hector-xue/ivyea-agent.git").strip()
     ref = (os.getenv("IVYEA_AGENT_REF") or "main").strip()
     before = _installed_agent_version(py) or agent_version()
-    _p("downloading", 25)   # pip install over git can take a while behind a proxy
-    # --no-cache-dir + --force-reinstall: pip caches VCS builds, so a plain
-    # `pip install -U git+…@main` can silently reinstall a stale build and report
-    # "已是最新" even when main moved. Force a fresh pull. --no-deps keeps it fast
-    # (the agent's deps are stable; the code is what changes).
-    install = _run_step([py, "-m", "pip", "install", "--no-cache-dir",
-                         "--force-reinstall", "--no-deps", f"git+{repo}@{ref}"])
+    _p("downloading", 25)
+    # 优先用 IvyeaAgent 自己的 updater：`ivyea self update` 会按安装方式选对更新方式——
+    # 源码/launcher 安装 → git pull（这台 dev 机就是，pip 装了也不影响运行的源码）；
+    # pip/pipx 安装 → 升级包。老版本(无 self update / 未知选项)回退到 pip 装。
+    upd = _run_step([cli, "self", "update"], timeout=300.0)
+    _out = (upd.get("stdout") or "") + (upd.get("stderr") or "")
+    if upd.get("returncode") == 0 or "已是最新" in _out or "更新完成" in _out:
+        install = upd
+    else:
+        # --no-cache-dir + --force-reinstall: pip caches VCS builds → 强制新拉。--no-deps 快。
+        install = _run_step([py, "-m", "pip", "install", "--no-cache-dir",
+                             "--force-reinstall", "--no-deps", f"git+{repo}@{ref}"])
     _p("restarting", 80)
     _run_step([cli, "self", "service-stop"], timeout=20.0)   # stop old serve
     restart = start_local_service()                          # start fresh (new code)

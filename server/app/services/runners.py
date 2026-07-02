@@ -39,19 +39,20 @@ def _extra_paths() -> list[str]:
         "/usr/bin",
     ]
 
-# Ordered runner preference (auto-pick walks this list).
-RUNNER_ORDER = ("hermes", "codex", "claude")
+# Ordered runner preference (auto-pick walks this list). IvyeaAgent 首选（自托管、自带亚马逊域）。
+RUNNER_ORDER = ("ivyea-agent", "hermes", "codex", "claude")
 
 # Human-friendly labels shown in the UI selector.
 RUNNER_LABELS = {
-    "hermes": "Hermes（推荐 · 自带 MCP）",
+    "ivyea-agent": "IvyeaAgent（推荐 · 自托管 · 亚马逊域）",
+    "hermes": "Hermes（自带 MCP）",
     "codex":  "Codex（OpenAI）",
     "claude": "Claude Code",
 }
 
 
 def _find_bin(name: str) -> Optional[str]:
-    """Locate an executable named ``name`` even when systemd's PATH is thin."""
+    """Locate an executable for runner ``name`` even when systemd's PATH is thin."""
     # First honor hub_settings explicit binary overrides.
     from app.core import integrations
     direct_lookup = {
@@ -64,15 +65,17 @@ def _find_bin(name: str) -> Optional[str]:
         configured = direct_lookup()
         if configured:
             return configured
-    p = shutil.which(name)
+    # ivyea-agent 的可执行是 `ivyea`（launcher / venv / Scripts），runner 名与 exe 名不同。
+    exe = "ivyea" if name == "ivyea-agent" else name
+    p = shutil.which(exe)
     if p:
         return p
-    # Fallback over known dirs. On Windows the executable is `name.exe` (or .cmd/
+    # Fallback over known dirs. On Windows the executable is `exe.exe` (or .cmd/
     # .bat) and os.access(..., X_OK) is unreliable — so try those suffixes and
     # don't gate on the exec bit. This is why a freshly-installed hermes.exe was
     # not detected (status stayed "需安装/修复") when it wasn't on PATH.
     win = sys.platform == "win32"
-    candidates = [name, name + ".exe", name + ".cmd", name + ".bat"] if win else [name]
+    candidates = [exe, exe + ".exe", exe + ".cmd", exe + ".bat"] if win else [exe]
     for root in _extra_paths():
         for n in candidates:
             cand = Path(root) / n
@@ -92,6 +95,9 @@ def _resolve_runner() -> tuple[Optional[str], Optional[str]]:
 
 def _build_runner_cmd(runner: str, binary: str, prompt: str) -> List[str]:
     """Build the subprocess argv for the given runner + prompt."""
+    if runner == "ivyea-agent":
+        # -p: 非交互一次性，结果打 stdout；--approve-all: 无人值守自动放行工具。
+        return [binary, "chat", "-p", prompt, "--approve-all"]
     if runner == "hermes":
         # -z: one-shot prompt, reply to stdout, no TUI.
         return [binary, "-z", prompt]

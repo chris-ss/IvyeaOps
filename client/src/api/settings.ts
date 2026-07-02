@@ -177,7 +177,10 @@ export async function selfCheckSettings(): Promise<SelfCheckResp> {
   return data;
 }
 
-export interface AgentVersionResp { version: string; available: boolean; }
+export interface AgentVersionResp {
+  version: string; available: boolean;
+  installed?: string; latest?: string; update_available?: boolean;
+}
 
 export async function getAgentVersion(): Promise<AgentVersionResp> {
   const { data } = await api.get<AgentVersionResp>("/ivyea-agent/version", { timeout: 8000 });

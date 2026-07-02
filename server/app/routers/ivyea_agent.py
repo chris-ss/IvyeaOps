@@ -165,8 +165,16 @@ def status() -> dict[str, Any]:
 
 @router.get("/version")
 def agent_version() -> dict[str, Any]:
-    """Current local IvyeaAgent version (for the 系统配置 update card)."""
-    return {"version": svc.agent_version(), "available": svc.availability().get("available", False)}
+    """IvyeaAgent 版本卡片：当前版本 + GitHub 最新版 + 是否有更新（供系统配置显示/更新按钮）。"""
+    installed = svc._installed_agent_version("") or svc.agent_version()
+    latest = svc.latest_agent_version()
+    return {
+        "version": svc.agent_version(),
+        "installed": installed,
+        "latest": latest,
+        "update_available": svc.agent_update_available(installed, latest),
+        "available": svc.availability().get("available", False),
+    }
 
 
 import threading as _threading

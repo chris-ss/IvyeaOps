@@ -689,12 +689,20 @@ const _PHASE_LABEL: Record<string, string> = {
 
 function AgentUpdateRow() {
   const [ver, setVer] = useState<string>("");
+  const [latest, setLatest] = useState<string>("");
+  const [hasUpd, setHasUpd] = useState(false);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<string>("");
   const [percent, setPercent] = useState(0);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const timer = useRef<number | null>(null);
-  const load = () => { getAgentVersion().then(r => setVer(r.version || "")).catch(() => setVer("")); };
+  const load = () => {
+    getAgentVersion().then(r => {
+      setVer(r.installed || r.version || "");
+      setLatest(r.latest || "");
+      setHasUpd(!!r.update_available);
+    }).catch(() => setVer(""));
+  };
   useEffect(load, []);
   useEffect(() => () => { if (timer.current) window.clearInterval(timer.current); }, []);
 
@@ -707,6 +715,7 @@ function AgentUpdateRow() {
           if (timer.current) window.clearInterval(timer.current);
           setBusy(false);
           setVer(p.after || ver);
+          if (p.ok) load();   // 刷新 最新版/有更新 徽标
           setMsg(p.ok
             ? { ok: true, text: p.before === p.after ? `已是最新（${p.after || "未知"}）` : `已更新 ${p.before || "?"} → ${p.after || "?"}` }
             : { ok: false, text: p.note || p.error || "更新失败" });
@@ -729,8 +738,14 @@ function AgentUpdateRow() {
 
   return (
     <div className="hs-agent-card">
-      <div className="hs-agent-card-title">版本与更新</div>
-      <div className="hs-agent-card-desc">当前 IvyeaAgent 版本 <b style={{ color: "var(--t)" }}>{ver || "未知/未运行"}</b>。安装 IvyeaOps 时已内置 IvyeaAgent。</div>
+      <div className="hs-agent-card-title">版本与更新
+        {hasUpd && <span style={{ marginLeft: 8, fontSize: 10, color: "#fff", background: "#dc2626", borderRadius: 8, padding: "1px 7px" }}>有新版</span>}
+      </div>
+      <div className="hs-agent-card-desc">
+        当前 IvyeaAgent 版本 <b style={{ color: "var(--t)" }}>{ver || "未知/未运行"}</b>
+        {latest && <> · 最新 <b style={{ color: hasUpd ? "#dc2626" : "var(--t)" }}>{latest}</b></>}
+        {hasUpd ? "，点「检查并更新」升级。" : "（已是最新）。"}
+      </div>
       {busy && (
         <div style={{ margin: "8px 0" }}>
           <div style={{ height: 6, borderRadius: 3, background: "var(--line,#e5e7eb)", overflow: "hidden" }}>
