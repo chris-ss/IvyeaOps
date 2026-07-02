@@ -391,7 +391,8 @@
 
 .ivyea-agent-composer {
   display: grid;
-  grid-template-columns: 1fr 42px;
+  grid-template-columns: 42px 1fr 42px;   /* [上传按钮][输入框][发送按钮] 一行贴底 */
+  align-items: end;
   gap: 8px;
   padding: 10px;
   border-top: 1px solid var(--b);
@@ -419,6 +420,7 @@
   border-radius: 6px;
   background: var(--acc);
   color: var(--bg);
+  height: 42px;              /* 与输入框同高，贴底对齐（输入框多行时按钮仍钉在底部）*/
   display: grid;
   place-items: center;
   cursor: pointer;
