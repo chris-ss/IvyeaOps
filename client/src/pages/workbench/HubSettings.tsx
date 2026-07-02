@@ -9,6 +9,10 @@ import {
 } from "../../api/settings";
 import { installAgentStreamUrl } from "../../api/setup";
 import { lockBodyScroll } from "../../lib/scrollLock";
+import {
+  FONT_OPTIONS, ZOOM_OPTIONS, WEIGHT_OPTIONS,
+  getFontId, getZoom, getWeight, applyFont, applyZoom, applyWeight,
+} from "../../lib/appearance";
 
 type SaveStatus = "idle" | "saving" | "ok" | "error";
 
@@ -791,6 +795,81 @@ const EMPTY: HubSettings = {
   autofix_enabled: false,
 };
 
+// ── 外观 / 显示：字体族 + 全局字号（即时生效 + localStorage，无后端）───────────────
+function AppearanceSection() {
+  const [fontId, setFontId] = useState(getFontId());
+  const [zoom, setZoom] = useState(getZoom());
+  const [weight, setWeight] = useState(getWeight());
+  const onFont = (id: string) => { setFontId(id); applyFont(id); };
+  const onZoom = (v: number) => { setZoom(v); applyZoom(v); };
+  const onWeight = (v: number) => { setWeight(v); applyWeight(v); };
+  return (
+    <div className="hs-section">
+      <div className="hs-section-hd">
+        <div>
+          <div className="hs-section-title">外观 / 显示</div>
+          <div className="hs-section-desc">
+            调整全局字体和字号，让界面更清晰。改动即时生效，仅影响当前设备（不上传、不影响他人）。
+          </div>
+        </div>
+      </div>
+      <div className="hs-fields">
+        <div className="hs-agent-grid">
+          <div className="hs-agent-card">
+            <div className="hs-agent-card-title">字体</div>
+            <div className="hs-agent-card-desc">
+              默认「跟随主题」。觉得字太细/不清晰，换「系统默认 · 清晰」或「微软雅黑」通常最舒服。
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <SheetSelect className="hs-input" value={fontId} onChange={onFont} title="选择字体"
+                options={FONT_OPTIONS.map((o) => ({ value: o.id, label: o.label }))} />
+            </div>
+          </div>
+
+          <div className="hs-agent-card">
+            <div className="hs-agent-card-title">字号</div>
+            <div className="hs-agent-card-desc">整体缩放界面（含图标与间距），等同浏览器的放大/缩小。</div>
+            <div className="hs-test-row" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
+              {ZOOM_OPTIONS.map((o) => {
+                const active = Math.abs(zoom - o.value) < 1e-6;
+                return (
+                  <button key={o.id} type="button" className="hs-test-btn" onClick={() => onZoom(o.value)}
+                    style={active ? { borderColor: "var(--acc)", color: "var(--acc)" } : undefined}>
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="hs-agent-card">
+            <div className="hs-agent-card-title">字重（加粗）</div>
+            <div className="hs-agent-card-desc">觉得字太细可调粗。只加粗正文，标题不受影响；手机、桌面都生效。</div>
+            <div className="hs-test-row" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
+              {WEIGHT_OPTIONS.map((o) => {
+                const active = weight === o.value;
+                return (
+                  <button key={o.id} type="button" className="hs-test-btn" onClick={() => onWeight(o.value)}
+                    style={active ? { borderColor: "var(--acc)", color: "var(--acc)" } : undefined}>
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="hs-agent-card" style={{ gridColumn: "1 / -1" }}>
+            <div className="hs-agent-card-title">预览</div>
+            <div style={{ marginTop: 6, fontSize: 14, lineHeight: 1.8, color: "var(--t)" }}>
+              IvyeaOps 广告优化 · Listing 诊断 · 知识库检索 — The quick brown fox 0123456789
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function HubSettings() {
   const [vals, setVals] = useState<HubSettings>(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -1288,6 +1367,9 @@ export default function HubSettings() {
         </Section>
 
       </AdvancedBlock>
+
+      {/* ── 外观 / 显示（低频显示项，放页面下方）── */}
+      <AppearanceSection />
 
       {/* ── 账号安全 ── */}
       <ChangePassword />

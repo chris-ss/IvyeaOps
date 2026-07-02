@@ -89,7 +89,7 @@ function RequireAuth({ children }: { children: JSX.Element }) {
         style={{
           display: "grid",
           placeItems: "center",
-          height: "100vh",
+          height: "100%",
           background: "var(--bg)",
           color: "var(--t3)",
           fontSize: 11,

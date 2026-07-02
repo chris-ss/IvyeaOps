@@ -210,7 +210,13 @@ html{height:100%;background:var(--bg);color:var(--t);font-family:var(--font);fon
 body{height:100%;
      background:linear-gradient(var(--bg-cover),var(--bg-cover)),url('/art/bg.png') center/cover no-repeat;
      color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
-#root{height:100%;background:transparent;color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden}
+/* zoom: 全局字号缩放（用户在系统配置里调，见 lib/appearance.ts）。CSS zoom 清晰不糊，
+   Chromium/Edge(Windows 默认浏览器)完美支持；覆盖主 UI + agents + cloudcli + 固定定位模态。 */
+/* 高度：① 用 dvh(动态视口高)而非 % —— 手机上 % 链会解析成"大视口"(比可见区大)，导致内部滚动
+   容器算错高、底部滚不到；dvh 跟随地址栏伸缩的可见高度。② 除以 zoom 补偿 —— zoom 不缩放 dvh，
+   不补偿则 zoom<1 底部留白、zoom>1 溢出。100vh 作为不支持 dvh 时的回退。子级(.app)用 height:100%
+   跟随此高度即可。 */
+#root{height:calc(100vh / var(--ui-zoom,1));height:calc(100dvh / var(--ui-zoom,1));background:transparent;color:var(--t);font-family:var(--font);font-size:13px;overflow:hidden;zoom:var(--ui-zoom,1);font-weight:var(--ui-weight,400)}
 
 /* ── HiDPI / Retina ── */
 @media (-webkit-min-device-pixel-ratio:2),(min-resolution:192dpi){
@@ -235,7 +241,9 @@ body::after{
 }
 
 /* --- APP SHELL --- */
-.app{display:flex;height:100vh;height:100dvh}
+/* height:100% 而非 100vh：#root 有 zoom 且高度已按 zoom 补偿(calc(100%/zoom))；vh 不随 zoom
+   缩放，用 100vh 会在 zoom<1 时渲染成小于 #root→底部露缝。100% 跟随 #root 高度，缩放后正好铺满。 */
+.app{display:flex;height:100%}
 
 /* --- SIDEBAR --- */
 .sb{width:196px;min-width:196px;background:var(--bg1);box-shadow:inset -1px 0 0 0 var(--b);display:flex;flex-direction:column;transition:width .22s ease,min-width .22s ease}
@@ -445,7 +453,7 @@ body::after{
 .cs:hover{background:color-mix(in srgb, var(--acc) 6%, transparent)}
 
 /* --- TERMINAL --- */
-.term{background:#000;border:1px solid var(--b);border-radius:var(--r);font-family:var(--font);font-size:12px;display:flex;flex-direction:column}
+.term{background:#000;border:1px solid var(--b);border-radius:var(--r);font-family:'JetBrains Mono','Fira Code','SF Mono',Consolas,monospace;font-size:12px;display:flex;flex-direction:column}
 .term-bar{padding:7px 12px;border-bottom:1px solid #1a1a1a;display:flex;align-items:center;gap:4px}
 .term-dot{width:8px;height:8px;border-radius:50%}
 .term-out{flex:1;overflow-y:auto;padding:10px 12px;color:#00ff88;line-height:1.7;min-height:200px}
@@ -458,7 +466,7 @@ body::after{
 .term-out .tl-warn{color:#fbbf24}
 .term-in-row{display:flex;align-items:center;gap:6px;padding:8px 12px;border-top:1px solid #1a1a1a}
 .term-prompt{color:#4ade80;flex-shrink:0;font-size:11px}
-.term-in{flex:1;background:transparent;border:none;outline:none;color:#00ff88;font-family:var(--font);font-size:12px}
+.term-in{flex:1;background:transparent;border:none;outline:none;color:#00ff88;font-family:'JetBrains Mono','Fira Code','SF Mono',Consolas,monospace;font-size:12px}
 
 /* --- GAUGE --- */
 .gauge-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
@@ -521,7 +529,7 @@ body::after{
 .tab.active{color:var(--acc);border-bottom-color:var(--acc)}
 
 /* --- LOGIN SCREEN --- */
-.login-wrap{min-height:100vh;display:grid;place-items:center;background:var(--bg);font-family:var(--font)}
+.login-wrap{min-height:100%;height:100%;display:grid;place-items:center;background:var(--bg);font-family:var(--font)}
 .login-box{background:var(--bg1);border:1px solid var(--b);border-radius:var(--r);padding:24px;width:340px}
 .login-box .mark{font-size:9px;color:var(--t3);letter-spacing:.14em;margin-bottom:6px}
 .login-box h1{font-size:15px;color:var(--t);font-weight:400;margin-bottom:18px}

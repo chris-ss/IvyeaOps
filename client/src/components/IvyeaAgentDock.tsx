@@ -1,4 +1,5 @@
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import {
   ArrowLeft,
@@ -666,7 +667,10 @@ export default function IvyeaAgentDock() {
   const visibleUploads = useMemo(() => uploads.slice(0, 8), [uploads]);
   const visibleCards = useMemo(() => cards.slice(0, 8), [cards]);
 
-  return (
+  // 挂到 document.body（脱离 #root 的 zoom）：FAB/面板是 position:fixed 悬浮层，放在 zoom 里会
+  // 导致 fixed 相对被缩放的 #root 定位、且拖拽坐标错乱（拉不到真边缘）。挂 body 后回到纯视口
+  // 坐标系，拖拽与 zoom 前一致；主题/字体变量在 documentElement 上，body 子树照样继承。
+  return createPortal(
     <>
       <button
         className={`ivyea-agent-fab ${statusTone}`}
@@ -977,6 +981,7 @@ export default function IvyeaAgentDock() {
           )}
         </section>
       )}
-    </>
+    </>,
+    document.body,
   );
 }
