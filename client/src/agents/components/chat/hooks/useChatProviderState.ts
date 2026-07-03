@@ -19,6 +19,8 @@ const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   // (config.yaml primary) and self-heals once the catalog loads.
   hermes: 'default',
   agy: 'default',
+  // ivyea 的主脑在 CLI 内配置（ivyea /model），chat -p 无 -m 覆盖，只有 default。
+  ivyea: 'default',
 };
 
 const getPermissionModesForProvider = (provider: LLMProvider): PermissionMode[] => {
@@ -30,6 +32,11 @@ const getPermissionModesForProvider = (provider: LLMProvider): PermissionMode[] 
   }
   if (provider === 'opencode' || provider === 'hermes' || provider === 'agy') {
     return ['default'];
+  }
+  if (provider === 'ivyea') {
+    // default → --permission-mode policy（按 ~/.ivyea/policy.json 判定）；
+    // bypassPermissions → --approve-all（全放行）。
+    return ['default', 'bypassPermissions'];
   }
   return ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
 };
@@ -85,6 +92,9 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   const [agyModel, setAgyModel] = useState<string>(() => {
     return localStorage.getItem('agy-model') || FALLBACK_DEFAULT_MODEL.agy;
   });
+  const [ivyeaModel, setIvyeaModel] = useState<string>(() => {
+    return localStorage.getItem('ivyea-model') || FALLBACK_DEFAULT_MODEL.ivyea;
+  });
 
   const [providerModelCatalog, setProviderModelCatalog] = useState<
     Partial<Record<LLMProvider, ProviderModelsDefinition>>
@@ -135,12 +145,18 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       return;
     }
 
+    if (targetProvider === 'ivyea') {
+      setIvyeaModel(model);
+      localStorage.setItem('ivyea-model', model);
+      return;
+    }
+
     setOpenCodeModel(model);
     localStorage.setItem('opencode-model', model);
   }, []);
 
   const loadProviderModels = useCallback(async (options: { bypassCache?: boolean } = {}) => {
-    const providers: LLMProvider[] = ['claude', 'cursor', 'codex', 'gemini', 'opencode', 'hermes', 'agy'];
+    const providers: LLMProvider[] = ['claude', 'cursor', 'codex', 'gemini', 'opencode', 'hermes', 'agy', 'ivyea'];
     const requestId = providerModelsRequestIdRef.current + 1;
     providerModelsRequestIdRef.current = requestId;
     const isHardRefresh = options.bypassCache === true;
@@ -310,6 +326,19 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   }, [providerModelCatalog.agy, agyModel]);
 
   useEffect(() => {
+    const ivyea = providerModelCatalog.ivyea;
+    if (ivyea) {
+      const next = pickStoredOrCurrent('ivyea-model', ivyeaModel, ivyea);
+      if (next !== ivyeaModel) {
+        setIvyeaModel(next);
+      }
+      if (localStorage.getItem('ivyea-model') !== next) {
+        localStorage.setItem('ivyea-model', next);
+      }
+    }
+  }, [providerModelCatalog.ivyea, ivyeaModel]);
+
+  useEffect(() => {
     if (!selectedSession?.id) {
       return;
     }
@@ -429,6 +458,8 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     setHermesModel,
     agyModel,
     setAgyModel,
+    ivyeaModel,
+    setIvyeaModel,
     permissionMode,
     setPermissionMode,
     pendingPermissionRequests,

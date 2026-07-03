@@ -29,6 +29,7 @@ const agentConfig: Record<AgentProvider, AgentConfig> = {
   opencode: { name: 'OpenCode', color: 'zinc' },
   hermes: { name: 'Hermes', color: 'teal' },
   agy: { name: 'Antigravity', color: 'zinc' },
+  ivyea: { name: 'IvyeaAgent', color: 'teal' },
 };
 
 const colorClasses = {

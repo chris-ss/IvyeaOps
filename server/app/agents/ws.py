@@ -20,7 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.config import settings
 from app.core.security import verify_session
-from app.agents import claude_driver, codex_driver, hermes_driver
+from app.agents import claude_driver, codex_driver, hermes_driver, ivyea_driver
 from app.agents.claude_sessions import create_normalized_message
 
 router = APIRouter()
@@ -103,6 +103,13 @@ async def _handle_chat_message(data: dict, writer: ChatWriter, ws: WebSocket,
             task.add_done_callback(tasks.discard)
             return
 
+        if msg_type == "ivyea-command":
+            task = asyncio.create_task(
+                ivyea_driver.query_ivyea(data.get("command") or "", data.get("options") or {}, writer))
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+            return
+
         if msg_type == "abort-session":
             provider = data.get("provider") or "claude"
             session_id = data.get("sessionId") if isinstance(data.get("sessionId"), str) else ""
@@ -110,6 +117,8 @@ async def _handle_chat_message(data: dict, writer: ChatWriter, ws: WebSocket,
                 success = await hermes_driver.abort_session(session_id)
             elif provider == "codex":
                 success = await codex_driver.abort_session(session_id)
+            elif provider == "ivyea":
+                success = await ivyea_driver.abort_session(session_id)
             elif provider == "claude":
                 success = await claude_driver.abort_session(session_id)
             else:
@@ -137,6 +146,8 @@ async def _handle_chat_message(data: dict, writer: ChatWriter, ws: WebSocket,
                 is_active = hermes_driver.is_active(session_id)
             elif provider == "codex":
                 is_active = codex_driver.is_active(session_id)
+            elif provider == "ivyea":
+                is_active = ivyea_driver.is_active(session_id)
             elif provider == "claude":
                 is_active = claude_driver.is_active(session_id)
                 if is_active:
@@ -157,7 +168,7 @@ async def _handle_chat_message(data: dict, writer: ChatWriter, ws: WebSocket,
         if msg_type == "get-active-sessions":
             await writer.send({"type": "active-sessions", "sessions": {
                 "claude": claude_driver.get_active(), "hermes": hermes_driver.get_active(),
-                "codex": codex_driver.get_active(),
+                "codex": codex_driver.get_active(), "ivyea": ivyea_driver.get_active(),
                 "cursor": [], "gemini": [], "opencode": []}})
             return
     except Exception as e:

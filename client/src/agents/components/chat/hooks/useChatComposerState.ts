@@ -44,6 +44,7 @@ interface UseChatComposerStateArgs {
   opencodeModel: string;
   hermesModel?: string;
   agyModel?: string;
+  ivyeaModel?: string;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
@@ -177,6 +178,7 @@ export function useChatComposerState({
   opencodeModel,
   hermesModel,
   agyModel,
+  ivyeaModel,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -343,6 +345,8 @@ export function useChatComposerState({
           model = hermesModel || '';
         } else if (provider === 'agy') {
           model = agyModel || '';
+        } else if (provider === 'ivyea') {
+          model = ivyeaModel || 'default';
         } else {
           model = cursorModel;
         }
@@ -750,6 +754,22 @@ export function useChatComposerState({
             resume: Boolean(effectiveSessionId),
             model: hermesModel,
             sessionSummary,
+          },
+        });
+      } else if (provider === 'ivyea') {
+        // ivyea chat -p --output-format stream-json：每轮单进程 + --resume 续接原生会话。
+        sendMessage({
+          type: 'ivyea-command',
+          command: messageContent,
+          sessionId: effectiveSessionId,
+          options: {
+            cwd: resolvedProjectPath,
+            projectPath: resolvedProjectPath,
+            sessionId: effectiveSessionId,
+            resume: Boolean(effectiveSessionId),
+            sessionSummary,
+            permissionMode,
+            toolsSettings,
           },
         });
       } else {

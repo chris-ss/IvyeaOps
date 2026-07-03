@@ -192,7 +192,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                                 ? t('messageTypes.hermes', { defaultValue: 'Hermes' })
                                 : provider === 'agy'
                                   ? t('messageTypes.agy', { defaultValue: 'Antigravity' })
-                                  : t('messageTypes.claude'))}
+                                  : provider === 'ivyea'
+                                    ? t('messageTypes.ivyea', { defaultValue: 'IvyeaAgent' })
+                                    : t('messageTypes.claude'))}
               </div>
             </div>
           )}

@@ -93,11 +93,49 @@ def _resolve_runner() -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+# ivyea-agent ≥1.2.0 支持 `chat -p --output-format stream-json`（NDJSON 事件，对齐
+# Claude Code）。用 `chat --help` 探测一次并缓存，旧版自动回退纯文本 argv。
+_IVYEA_HELP_CACHE: Dict[str, str] = {}
+
+
+def _ivyea_chat_help(binary: str) -> str:
+    """Return (cached) `ivyea chat --help` text; empty string on any failure."""
+    if binary in _IVYEA_HELP_CACHE:
+        return _IVYEA_HELP_CACHE[binary]
+    import subprocess
+    from app.core.proc import no_window_kwargs
+    try:
+        proc = subprocess.run([binary, "chat", "--help"], capture_output=True, text=True,
+                              timeout=30, env=build_child_env(binary), **no_window_kwargs())
+        text = (proc.stdout or "") + (proc.stderr or "")
+    except Exception:
+        text = ""
+    _IVYEA_HELP_CACHE[binary] = text
+    return text
+
+
+def ivyea_stream_json_supported(binary: str) -> bool:
+    return "--output-format" in _ivyea_chat_help(binary)
+
+
+def _ivyea_permission_args(binary: str) -> List[str]:
+    """无人值守审批档：默认 --approve-all（与历史行为一致，xlsx 方案等需要写文件）。
+    运维在 ~/.ivyea/policy.json 配好写根/命令白名单后，可设环境变量
+    IVYEA_OPS_IVYEA_PERMISSION_MODE=policy 切到 policy 档（单工具拒绝不终止整轮）。"""
+    mode = (os.environ.get("IVYEA_OPS_IVYEA_PERMISSION_MODE") or "approve-all").strip().lower()
+    if mode == "policy" and "--permission-mode" in _ivyea_chat_help(binary):
+        return ["--permission-mode", "policy"]
+    return ["--approve-all"]
+
+
 def _build_runner_cmd(runner: str, binary: str, prompt: str) -> List[str]:
     """Build the subprocess argv for the given runner + prompt."""
     if runner == "ivyea-agent":
-        # -p: 非交互一次性，结果打 stdout；--approve-all: 无人值守自动放行工具。
-        return [binary, "chat", "-p", prompt, "--approve-all"]
+        # -p: 非交互一次性，结果打 stdout。新版走 stream-json 拿结构化过程事件。
+        argv = [binary, "chat", "-p", prompt, *_ivyea_permission_args(binary)]
+        if ivyea_stream_json_supported(binary):
+            argv += ["--output-format", "stream-json"]
+        return argv
     if runner == "hermes":
         # -z: one-shot prompt, reply to stdout, no TUI.
         return [binary, "-z", prompt]
@@ -173,3 +211,105 @@ def build_child_env(runner_bin: str) -> Dict[str, str]:
     child_env.setdefault("HOME", str(Path.home()))
     child_env.setdefault("IS_SANDBOX", "1")
     return child_env
+
+
+# ---------------------------------------------------------------------------
+# ivyea-agent stream-json 解析：把 NDJSON 事件流还原成 最终文本 + 过程事件 + 花费。
+# 事件 schema 对齐 Claude Code：system/init → assistant(text/tool_use) →
+# user(tool_result) → result（费用字段是 total_cost_cny，人民币）。
+# 非 JSON 行（stderr 混入/旧版纯文本）一律跳过；没有 result 事件时降级为原文透传。
+# ---------------------------------------------------------------------------
+
+_TOOL_RESULT_KEEP = 2000   # steps 里工具结果保留的最大字符（防 steps.json 爆炸）
+
+
+class IvyeaStreamJsonParser:
+    """行缓冲增量解析器。feed() 喂原始 chunk，随时读 .events / .progress / .result_event。"""
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self.events: List[Dict[str, Any]] = []   # 压缩后的过程事件（tool_use/tool_result/text）
+        self.progress: str = ""                  # 最近一次人读进度（"正在调用 xxx…"）
+        self.result_event: Optional[Dict[str, Any]] = None
+        self.session_id: str = ""
+        self.saw_json = False                    # 是否见过任何合法事件（判定新旧 CLI）
+
+    def feed(self, chunk: str) -> None:
+        self._buf += chunk
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            self._handle_line(line.strip())
+
+    def close(self) -> None:
+        if self._buf.strip():
+            self._handle_line(self._buf.strip())
+        self._buf = ""
+
+    def _handle_line(self, line: str) -> None:
+        if not line.startswith("{"):
+            return
+        import json as _json
+        try:
+            ev = _json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(ev, dict):
+            return
+        et = ev.get("type")
+        if et == "system" and ev.get("subtype") == "init":
+            self.saw_json = True
+            self.session_id = str(ev.get("session_id") or "")
+            return
+        if et == "assistant":
+            self.saw_json = True
+            for block in (ev.get("message") or {}).get("content") or []:
+                if block.get("type") == "tool_use":
+                    self.events.append({"type": "tool_use", "name": block.get("name") or "",
+                                        "input": block.get("input") or {}})
+                    self.progress = f"正在调用 {block.get('name') or '工具'}…"
+                elif block.get("type") == "text" and (block.get("text") or "").strip():
+                    self.events.append({"type": "text", "text": block["text"]})
+            return
+        if et == "user":
+            for block in (ev.get("message") or {}).get("content") or []:
+                if block.get("type") == "tool_result":
+                    self.events.append({
+                        "type": "tool_result", "tool_use_id": block.get("tool_use_id") or "",
+                        "is_error": bool(block.get("is_error")),
+                        "content": str(block.get("content") or "")[:_TOOL_RESULT_KEEP],
+                    })
+            return
+        if et == "result":
+            self.saw_json = True
+            self.result_event = ev
+
+    @property
+    def final_text(self) -> str:
+        return str((self.result_event or {}).get("result") or "")
+
+    @property
+    def cost_cny(self) -> Optional[float]:
+        v = (self.result_event or {}).get("total_cost_cny")
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+
+def extract_runner_output(runner: str, raw: str) -> Dict[str, Any]:
+    """统一的 runner stdout 后处理。
+
+    返回 {"text", "events", "cost_cny", "session_id", "structured"}：
+    - ivyea-agent 且 stdout 是 stream-json → text=result 事件里的最终答案，
+      events=过程事件（工具调用/结果/中间文本），structured=True。
+    - 其它 runner / 旧版纯文本 / 解析不出 result → text=原文透传，structured=False。
+    """
+    if runner == "ivyea-agent" and '"type"' in raw:
+        # 不按首行判定（stderr 告警可能混在最前面），解析器本身会跳过所有非 JSON 行。
+        p = IvyeaStreamJsonParser()
+        p.feed(raw)
+        p.close()
+        if p.result_event is not None:
+            return {"text": p.final_text, "events": p.events, "cost_cny": p.cost_cny,
+                    "session_id": p.session_id, "structured": True}
+    return {"text": raw, "events": [], "cost_cny": None, "session_id": "", "structured": False}

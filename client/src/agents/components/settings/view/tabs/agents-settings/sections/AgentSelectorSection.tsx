@@ -11,6 +11,7 @@ const AGENT_NAMES: Record<AgentProvider, string> = {
   opencode: 'OpenCode',
   hermes: 'Hermes',
   agy: 'Antigravity',
+  ivyea: 'IvyeaAgent',
 };
 
 export default function AgentSelectorSection({
