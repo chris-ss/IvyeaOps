@@ -22,6 +22,24 @@ if len(sys.argv) > 1 and sys.argv[1] == "agent-serve":
 # Lets a Windows `ivyea` launcher run the *in-exe* agent (always in sync with IvyeaOps,
 # no separate Python/pip install needed). Checked BEFORE the heavy IvyeaOps imports.
 if len(sys.argv) > 1 and sys.argv[1] == "ivyea":
+    # This exe is a *windowed* (GUI-subsystem) PyInstaller build → it has no console, so
+    # sys.stdin/stdout/stderr are None. Attach to the launching terminal's console and
+    # reopen the std streams, otherwise the agent TUI can't read/write and any
+    # `sys.stdin.isatty()` used to crash with AttributeError.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.AttachConsole(-1)  # ATTACH_PARENT_PROCESS
+        except Exception:
+            pass
+        for _name, _dev, _mode in (("stdin", "CONIN$", "r"), ("stdout", "CONOUT$", "w"),
+                                    ("stderr", "CONOUT$", "w")):
+            if getattr(sys, _name, None) is None:
+                try:
+                    setattr(sys, _name, open(_dev, _mode, encoding="utf-8", errors="replace",
+                                             buffering=1))
+                except Exception:
+                    pass
     from ivyea_agent.cli import main as _agent_main
     raise SystemExit(_agent_main(sys.argv[2:]))
 
@@ -162,7 +180,9 @@ def _ensure_ivyea_launcher() -> None:
         home = Path(os.environ.get("USERPROFILE") or Path.home())
         localbin = home / ".local" / "bin"
         localbin.mkdir(parents=True, exist_ok=True)
-        content = f'@echo off\r\n"{exe}" ivyea %*\r\n'
+        # start "" /wait /b：GUI-subsystem exe 从 shell 直接跑不会阻塞，用 /b 在同一控制台跑、
+        # /wait 等它退出，配合 exe 内的 AttachConsole 让交互 TUI 占住当前 PowerShell 终端。
+        content = f'@echo off\r\nstart "" /wait /b "{exe}" ivyea %*\r\n'
         cmd = localbin / "ivyea.cmd"
         try:
             if not cmd.exists() or cmd.read_text(encoding="utf-8", errors="replace") != content:
