@@ -71,3 +71,14 @@ def test_agent_serve_entry_mode_runs_the_agent():
             p.wait(timeout=5)
         except Exception:
             p.kill()
+
+
+def test_ivyea_entry_mode_runs_the_agent_cli():
+    """`ivyeaops_server.py ivyea <args>` 跑内置 agent CLI —— 供 Windows 的 `ivyea` 启动器用
+    exe 内置 agent（PowerShell 里 `ivyea` 能打开、随 IvyeaOps 更新）。"""
+    r = subprocess.run(
+        [sys.executable, "ivyeaops_server.py", "ivyea", "--version"],
+        cwd=str(_SERVER_DIR), capture_output=True, text=True, timeout=30,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "ivyea-agent" in (r.stdout + r.stderr).lower()
