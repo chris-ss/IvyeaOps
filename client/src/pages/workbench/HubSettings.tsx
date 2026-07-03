@@ -695,6 +695,8 @@ function AgentUpdateRow() {
   const [ver, setVer] = useState<string>("");
   const [latest, setLatest] = useState<string>("");
   const [hasUpd, setHasUpd] = useState(false);
+  const [frozen, setFrozen] = useState(false);
+  const [latestKnown, setLatestKnown] = useState(true);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<string>("");
   const [percent, setPercent] = useState(0);
@@ -705,6 +707,8 @@ function AgentUpdateRow() {
       setVer(r.installed || r.version || "");
       setLatest(r.latest || "");
       setHasUpd(!!r.update_available);
+      setFrozen(!!r.frozen);
+      setLatestKnown(r.latest_known !== false);
     }).catch(() => setVer(""));
   };
   useEffect(load, []);
@@ -721,7 +725,8 @@ function AgentUpdateRow() {
           setVer(p.after || ver);
           if (p.ok) load();   // 刷新 最新版/有更新 徽标
           setMsg(p.ok
-            ? { ok: true, text: p.before === p.after ? `已是最新（${p.after || "未知"}）` : `已更新 ${p.before || "?"} → ${p.after || "?"}` }
+            ? { ok: true, text: p.note ? p.note                               // frozen: 随 IvyeaOps 更新的说明
+                : (p.before === p.after ? `已是最新（${p.after || "未知"}）` : `已更新 ${p.before || "?"} → ${p.after || "?"}`) }
             : { ok: false, text: p.note || p.error || "更新失败" });
         }
       } catch { /* keep polling; transient errors during serve restart are expected */ }
@@ -748,7 +753,14 @@ function AgentUpdateRow() {
       <div className="hs-agent-card-desc">
         当前 IvyeaAgent 版本 <b style={{ color: "var(--t)" }}>{ver || "未知/未运行"}</b>
         {latest && <> · 最新 <b style={{ color: hasUpd ? "#dc2626" : "var(--t)" }}>{latest}</b></>}
-        {hasUpd ? "，点「检查并更新」升级。" : "（已是最新）。"}
+        {!latestKnown
+          ? "（暂时无法连 GitHub 检查最新版，可能网络问题，稍后再试）。"
+          : hasUpd
+            ? (frozen
+                ? "，有新版：内置 IvyeaAgent 随 IvyeaOps 一起更新——请用左下角「更新」升级 IvyeaOps 即可获得。"
+                : "，点「检查并更新」升级。")
+            : "（已是最新）。"}
+        {frozen && <>{" "}<span style={{ color: "var(--t3)" }}>（内置版本，随 IvyeaOps 更新）</span></>}
       </div>
       {busy && (
         <div style={{ margin: "8px 0" }}>

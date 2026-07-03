@@ -165,13 +165,18 @@ def status() -> dict[str, Any]:
 
 @router.get("/version")
 def agent_version() -> dict[str, Any]:
-    """IvyeaAgent 版本卡片：当前版本 + GitHub 最新版 + 是否有更新（供系统配置显示/更新按钮）。"""
+    """IvyeaAgent 版本卡片：当前版本 + GitHub 最新版 + 是否有更新（供系统配置显示/更新按钮）。
+    frozen=True 时 IvyeaAgent 是打包进 IvyeaOpsServer.exe 的、随 IvyeaOps 一起更新（无法独立升级）。
+    latest_known=False 表示这次没能连上 GitHub 查到最新版（别当成"已是最新"，要提示无法检查）。"""
+    import sys as _sys
     installed = svc._installed_agent_version("") or svc.agent_version()
     latest = svc.latest_agent_version()
     return {
         "version": svc.agent_version(),
         "installed": installed,
         "latest": latest,
+        "latest_known": bool(latest),
+        "frozen": bool(getattr(_sys, "frozen", False)),
         "update_available": svc.agent_update_available(installed, latest),
         "available": svc.availability().get("available", False),
     }
