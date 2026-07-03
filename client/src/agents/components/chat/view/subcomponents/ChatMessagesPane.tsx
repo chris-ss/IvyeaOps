@@ -39,6 +39,7 @@ interface ChatMessagesPaneProps {
   setHermesModel: (model: string) => void;
   agyModel: string;
   setAgyModel: (model: string) => void;
+  ivyeaModel: string;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
   providerModelsLoading: boolean;
   tasksEnabled: boolean;
@@ -92,6 +93,7 @@ export default function ChatMessagesPane({
   setHermesModel,
   agyModel,
   setAgyModel,
+  ivyeaModel,
   providerModelCatalog,
   providerModelsLoading,
   tasksEnabled,
@@ -183,6 +185,7 @@ export default function ChatMessagesPane({
           setHermesModel={setHermesModel}
           agyModel={agyModel}
           setAgyModel={setAgyModel}
+          ivyeaModel={ivyeaModel}
           providerModelCatalog={providerModelCatalog}
           providerModelsLoading={providerModelsLoading}
           tasksEnabled={tasksEnabled}

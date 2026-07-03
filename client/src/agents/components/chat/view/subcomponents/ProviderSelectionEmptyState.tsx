@@ -31,6 +31,7 @@ const PROVIDER_META: { id: LLMProvider; name: string }[] = [
   { id: "opencode", name: "OpenCode" },
   { id: "hermes", name: "Hermes" },
   { id: "agy", name: "Antigravity" },
+  { id: "ivyea", name: "IvyeaAgent" },
 ];
 
 const MOD_KEY =
@@ -56,6 +57,7 @@ type ProviderSelectionEmptyStateProps = {
   setHermesModel: (model: string) => void;
   agyModel: string;
   setAgyModel: (model: string) => void;
+  ivyeaModel: string;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
   providerModelsLoading: boolean;
   tasksEnabled: boolean;
@@ -87,6 +89,7 @@ function getCurrentModel(
   o: string,
   h: string,
   a: string,
+  iv: string,
 ) {
   if (p === "claude") return c;
   if (p === "codex") return co;
@@ -94,6 +97,7 @@ function getCurrentModel(
   if (p === "opencode") return o;
   if (p === "hermes") return h;
   if (p === "agy") return a;
+  if (p === "ivyea") return iv;
   return cu;
 }
 
@@ -104,6 +108,7 @@ function getProviderDisplayName(p: LLMProvider) {
   if (p === "opencode") return "OpenCode";
   if (p === "hermes") return "Hermes";
   if (p === "agy") return "Antigravity";
+  if (p === "ivyea") return "IvyeaAgent";
   return "Gemini";
 }
 
@@ -127,6 +132,7 @@ export default function ProviderSelectionEmptyState({
   setHermesModel,
   agyModel,
   setAgyModel,
+  ivyeaModel,
   providerModelCatalog,
   providerModelsLoading,
   tasksEnabled,
@@ -158,6 +164,7 @@ export default function ProviderSelectionEmptyState({
     opencodeModel,
     hermesModel,
     agyModel,
+    ivyeaModel,
   );
 
   const currentModelLabel = useMemo(() => {
@@ -188,6 +195,8 @@ export default function ProviderSelectionEmptyState({
       } else if (providerId === "agy") {
         setAgyModel(modelValue);
         localStorage.setItem("agy-model", modelValue);
+      } else if (providerId === "ivyea") {
+        localStorage.setItem("ivyea-model", modelValue);   // 单一 default，无需本地 state
       } else {
         setCursorModel(modelValue);
         localStorage.setItem("cursor-model", modelValue);
@@ -346,6 +355,10 @@ export default function ProviderSelectionEmptyState({
                 agy: t("providerSelection.readyPrompt.agy", {
                   model: agyModel,
                   defaultValue: "Ready with Antigravity {{model}}",
+                }),
+                ivyea: t("providerSelection.readyPrompt.ivyea", {
+                  model: ivyeaModel,
+                  defaultValue: "Ready with IvyeaAgent {{model}}",
                 }),
               }[provider]
             }

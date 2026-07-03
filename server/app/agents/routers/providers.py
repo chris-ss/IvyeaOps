@@ -27,6 +27,7 @@ router = APIRouter()
 _PROVIDER_BIN = {
     "claude": "claude", "codex": "codex", "cursor": "cursor-agent",
     "gemini": "gemini", "opencode": "opencode", "hermes": "hermes", "agy": "antigravity",
+    "ivyea": "ivyea",
 }
 
 _CLAUDE_MODELS = {
@@ -80,6 +81,10 @@ def _agent_models(provider: str) -> Optional[dict]:
 _PROVIDER_MODELS = {
     "claude": _CLAUDE_MODELS,
     "codex": _opts(["gpt-5.5", "gpt-5", "gpt-5-codex", "o3", "o4-mini", "codex-mini"]),
+    # ivyea 的主脑在 CLI 内配置（ivyea /model），chat -p 没有 -m 覆盖 —— 只列 default。
+    "ivyea": {"OPTIONS": [{"value": "default", "label": "default（ivyea 配置的主脑）",
+                           "description": "模型在服务器上用 ivyea /model 或 ivyea config 配置"}],
+              "DEFAULT": "default"},
 }
 
 
@@ -115,7 +120,12 @@ def _ok(data) -> dict:
 
 
 def _which(bin_name: str) -> bool:
-    search = os.pathsep.join([os.path.expanduser("~/.hermes/node/bin"), os.environ.get("PATH", "")])
+    search = os.pathsep.join([
+        os.path.expanduser("~/.hermes/node/bin"),
+        os.path.expanduser("~/.local/bin"),      # ivyea launcher / pipx 常在这
+        os.path.expanduser("~/.ivyea/bin"),
+        os.environ.get("PATH", ""),
+    ])
     return shutil.which(bin_name, path=search) is not None
 
 
@@ -185,6 +195,13 @@ async def auth_status(provider: str) -> dict:
                     "authenticated": has_model, "email": "API Key (config.yaml)",
                     "method": "api_key",
                     "error": None if has_model else "Hermes 未配置模型（在枢纽设置中配置）"})
+    if provider == "ivyea":
+        # ivyea 自托管：主脑 key 由 `ivyea config` 管理，装了即视为可用（跑不了时
+        # 驱动会把 ivyea 的报错原样送回对话）。
+        return _ok({"installed": installed, "provider": "ivyea",
+                    "authenticated": installed, "email": "Self-hosted (ivyea config)",
+                    "method": "api_key" if installed else None,
+                    "error": None if installed else "IvyeaAgent CLI (ivyea) 未安装"})
     # Best-effort for other providers: installed CLI is treated as usable.
     return _ok({"installed": installed, "provider": provider, "authenticated": installed,
                 "email": None, "method": None,

@@ -78,6 +78,7 @@ function ChatInterface({
     setHermesModel,
     agyModel,
     setAgyModel,
+    ivyeaModel,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -198,6 +199,7 @@ function ChatInterface({
     opencodeModel,
     hermesModel,
     agyModel,
+    ivyeaModel,
     isLoading,
     canAbortSession,
     tokenBudget,
@@ -301,6 +303,8 @@ function ChatInterface({
                 ? t('messageTypes.hermes', { defaultValue: 'Hermes' })
                 : provider === 'agy'
                   ? t('messageTypes.agy', { defaultValue: 'Antigravity' })
+                  : provider === 'ivyea'
+                    ? t('messageTypes.ivyea', { defaultValue: 'IvyeaAgent' })
             : t('messageTypes.claude');
 
     return (
@@ -345,6 +349,7 @@ function ChatInterface({
           setHermesModel={setHermesModel}
           agyModel={agyModel}
           setAgyModel={setAgyModel}
+          ivyeaModel={ivyeaModel}
           providerModelCatalog={providerModelCatalog}
           providerModelsLoading={providerModelsLoading}
           tasksEnabled={tasksEnabled}
@@ -441,6 +446,8 @@ function ChatInterface({
                         ? t('messageTypes.hermes', { defaultValue: 'Hermes' })
                         : provider === 'agy'
                           ? t('messageTypes.agy', { defaultValue: 'Antigravity' })
+                          : provider === 'ivyea'
+                            ? t('messageTypes.ivyea', { defaultValue: 'IvyeaAgent' })
                     : t('messageTypes.claude'),
           })}
           isTextareaExpanded={isTextareaExpanded}
