@@ -18,6 +18,13 @@ if len(sys.argv) > 1 and sys.argv[1] == "agent-serve":
     from ivyea_agent.cli import main as _agent_main  # bundled via PyInstaller --collect-all
     raise SystemExit(_agent_main(["serve", *sys.argv[2:]]))
 
+# Standalone IvyeaAgent CLI straight from this exe: `<exe> ivyea <args>` == `ivyea <args>`.
+# Lets a Windows `ivyea` launcher run the *in-exe* agent (always in sync with IvyeaOps,
+# no separate Python/pip install needed). Checked BEFORE the heavy IvyeaOps imports.
+if len(sys.argv) > 1 and sys.argv[1] == "ivyea":
+    from ivyea_agent.cli import main as _agent_main
+    raise SystemExit(_agent_main(sys.argv[2:]))
+
 import uvicorn
 
 
@@ -143,6 +150,46 @@ def _control_window_enabled() -> bool:
     )
 
 
+def _ensure_ivyea_launcher() -> None:
+    """Windows：放一个能用的 `ivyea` 启动器（`<exe> ivyea %*` → 内置 IvyeaAgent CLI），让 PowerShell
+    里输入 `ivyea` 就能打开内置 agent（随 IvyeaOps 更新，无需单独装 Python）。若 ~/.local/bin 下有
+    失效的 pip 空壳 `ivyea.exe`（.exe 在 PATHEXT 里优先于 .cmd、且 import ivyea_agent 报错），实测
+    它坏了就改名成 .disabled 让 ivyea.cmd 生效。幂等；出错不影响启动。"""
+    if not sys.platform.startswith("win") or not getattr(sys, "frozen", False):
+        return
+    try:
+        exe = Path(sys.executable).resolve()
+        home = Path(os.environ.get("USERPROFILE") or Path.home())
+        localbin = home / ".local" / "bin"
+        localbin.mkdir(parents=True, exist_ok=True)
+        content = f'@echo off\r\n"{exe}" ivyea %*\r\n'
+        cmd = localbin / "ivyea.cmd"
+        try:
+            if not cmd.exists() or cmd.read_text(encoding="utf-8", errors="replace") != content:
+                cmd.write_text(content, encoding="utf-8")
+        except OSError:
+            pass
+        broken = localbin / "ivyea.exe"
+        if broken.exists():
+            is_broken = True
+            try:  # CREATE_NO_WINDOW=0x08000000，别弹黑框
+                r = subprocess.run([str(broken), "--version"], capture_output=True,
+                                   timeout=20, creationflags=0x08000000)
+                is_broken = r.returncode != 0
+            except Exception:
+                is_broken = True
+            if is_broken:
+                try:
+                    disabled = localbin / "ivyea.exe.disabled"
+                    if disabled.exists():
+                        disabled.unlink()
+                    broken.rename(disabled)
+                except OSError:
+                    pass
+    except Exception:
+        pass
+
+
 def _bootstrap_frozen_env() -> None:
     if not getattr(sys, "frozen", False):
         return
@@ -200,6 +247,7 @@ def _bootstrap_frozen_env() -> None:
 
 
 _bootstrap_frozen_env()
+_ensure_ivyea_launcher()
 
 from app.core.config import settings
 from app.core.version import app_version
