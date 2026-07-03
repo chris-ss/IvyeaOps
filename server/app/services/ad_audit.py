@@ -51,8 +51,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.services.asin_audit import _job_lock  # share single-job semaphore
 from app.services.asin_audit import _split_report_and_json
 from app.services.runners import (
+    IvyeaStreamJsonParser,
     build_child_env,
     _build_runner_cmd,
+    extract_runner_output,
     resolve_with_pref,
     runner_status,
 )
@@ -147,6 +149,9 @@ class AdJob:
     error: Optional[str] = None
     pid: Optional[int] = None
     stdout_bytes: int = 0
+    # ivyea-agent stream-json 附加信息（旧 runner/旧版 CLI 时保持默认值）。
+    cost_cny: Optional[float] = None       # 本次审计的模型花费（人民币）
+    agent_session_id: str = ""             # ivyea 会话 ID（可 --resume 续问）
 
     def to_meta(self) -> Dict[str, Any]:
         return asdict(self)
@@ -876,6 +881,9 @@ async def _run_agent(job: AdJob) -> None:
 
     buf_bytes = 0
     buf_chunks: List[bytes] = []
+    # ivyea-agent stream-json：增量解析事件流，把"正在调用 xxx 工具"实时写进 job.progress。
+    live_parser = IvyeaStreamJsonParser() if runner == "ivyea-agent" else None
+    last_live_progress = ""
 
     async def _flush() -> None:
         nonlocal buf_bytes
@@ -910,10 +918,16 @@ async def _run_agent(job: AdJob) -> None:
                 break
             buf_chunks.append(chunk)
             buf_bytes += len(chunk)
+            if live_parser is not None:
+                live_parser.feed(chunk.decode("utf-8", errors="replace"))
+                if live_parser.progress and live_parser.progress != last_live_progress:
+                    last_live_progress = live_parser.progress
+                    job.progress = live_parser.progress
+                    _write_meta(job)
             if buf_bytes >= FLUSH_EVERY_BYTES:
                 await _flush()
                 kb = job.stdout_bytes // 1024
-                job.progress = f"已生成 ~{kb} KB…"
+                job.progress = last_live_progress or f"已生成 ~{kb} KB…"
                 _write_meta(job)
 
         await _flush()
@@ -936,6 +950,17 @@ async def _run_agent(job: AdJob) -> None:
 
         # Success — split markdown and structured JSON.
         raw = stdout_log.read_text(encoding="utf-8", errors="replace")
+        # ivyea-agent stream-json：先把 NDJSON 还原成最终答案文本 + 过程事件；
+        # 其它 runner / 旧版 ivyea 原文透传。
+        parsed = extract_runner_output(runner, raw)
+        raw = parsed["text"]
+        if parsed["structured"]:
+            (jd / "steps.json").write_text(
+                json.dumps(parsed["events"], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            job.cost_cny = parsed["cost_cny"]
+            job.agent_session_id = parsed["session_id"]
         md_text, structured = _split_report_and_json(raw)
         (jd / "report.md").write_text(md_text, encoding="utf-8")
         if structured is not None:

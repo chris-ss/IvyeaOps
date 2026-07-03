@@ -43,6 +43,7 @@ from app.services.runners import (  # noqa: F401 — re-exported for tests
     _find_bin,
     _resolve_runner,
     build_child_env,
+    extract_runner_output,
     resolve_with_pref,
     runner_status as _cli_runner_status,
 )
@@ -558,6 +559,14 @@ async def _run_claude(job: Job) -> None:
 
         # Success — split markdown and structured JSON.
         raw = stdout_log.read_text(encoding="utf-8", errors="replace")
+        # ivyea-agent CLI 走 stream-json 时先还原最终文本并留存过程事件；其它 runner 透传。
+        parsed = extract_runner_output(runner, raw)
+        raw = parsed["text"]
+        if parsed["structured"]:
+            (jd / "steps.json").write_text(
+                json.dumps(parsed["events"], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         md_text, structured = _split_report_and_json(raw)
         (jd / "report.md").write_text(md_text, encoding="utf-8")
         if structured is not None:
