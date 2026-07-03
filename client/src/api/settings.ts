@@ -180,6 +180,7 @@ export async function selfCheckSettings(): Promise<SelfCheckResp> {
 export interface AgentVersionResp {
   version: string; available: boolean;
   installed?: string; latest?: string; update_available?: boolean;
+  latest_known?: boolean; frozen?: boolean;
 }
 
 export async function getAgentVersion(): Promise<AgentVersionResp> {
