@@ -121,7 +121,7 @@ jobs:
           if [ -z "$AGENT_REF" ]; then
             # 默认打包 ivyea-agent 的**最新 release tag**(可复现、总是已发布版本),
             # 而非 main HEAD(可能含未发布 WIP)。API 拿不到则回退 main。
-            AGENT_REF=$(curl -fsSL "https://api.github.com/repos/Hector-xue/ivyea-agent/releases/latest" 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('tag_name') or '')" 2>/dev/null)
+            AGENT_REF=$(curl -fsSL "https://api.github.com/repos/Hector-xue/ivyea-agent/releases/latest" 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('tag_name') or '')" 2>/dev/null || true)
             [ -z "$AGENT_REF" ] && AGENT_REF="main"
           fi
           echo "bundling ivyea-agent ref: $AGENT_REF"
@@ -318,7 +318,7 @@ jobs:
           if [ -z "$AGENT_REF" ]; then
             # 默认打包 ivyea-agent 的**最新 release tag**(可复现、总是已发布版本),
             # 而非 main HEAD(可能含未发布 WIP)。API 拿不到则回退 main。
-            AGENT_REF=$(curl -fsSL "https://api.github.com/repos/Hector-xue/ivyea-agent/releases/latest" 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('tag_name') or '')" 2>/dev/null)
+            AGENT_REF=$(curl -fsSL "https://api.github.com/repos/Hector-xue/ivyea-agent/releases/latest" 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('tag_name') or '')" 2>/dev/null || true)
             [ -z "$AGENT_REF" ] && AGENT_REF="main"
           fi
           echo "bundling ivyea-agent ref: $AGENT_REF"
