@@ -35,7 +35,7 @@ _FORBIDDEN = {
 
 
 def _bucket_sessions(rows) -> dict:
-    buckets = {"claude": [], "cursor": [], "codex": [], "gemini": [], "opencode": [], "hermes": [], "agy": []}
+    buckets = {"claude": [], "cursor": [], "codex": [], "gemini": [], "opencode": [], "hermes": [], "agy": [], "ivyea": []}
     for row in rows:
         provider = row["provider"]
         if provider not in buckets:
@@ -87,6 +87,7 @@ def _project_item(conn, row, *, include_archived: bool) -> dict:
         "opencodeSessions": buckets["opencode"],
         "hermesSessions": buckets["hermes"],
         "agySessions": buckets["agy"],
+        "ivyeaSessions": buckets["ivyea"],
         "sessionMeta": {"hasMore": has_more, "total": total},
     }
 
@@ -142,6 +143,7 @@ async def project_sessions(
         "opencodeSessions": buckets["opencode"],
         "hermesSessions": buckets["hermes"],
         "agySessions": buckets["agy"],
+        "ivyeaSessions": buckets["ivyea"],
         "sessionMeta": {"hasMore": off + len(srows) < total, "total": total},
     }
 

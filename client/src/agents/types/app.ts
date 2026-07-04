@@ -66,6 +66,7 @@ export interface Project {
   opencodeSessions?: ProjectSession[];
   hermesSessions?: ProjectSession[];
   agySessions?: ProjectSession[];
+  ivyeaSessions?: ProjectSession[];
   sessionMeta?: ProjectSessionMeta;
   taskmaster?: ProjectTaskmasterInfo;
   [key: string]: unknown;

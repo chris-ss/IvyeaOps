@@ -254,6 +254,27 @@ AGENT_DEFS: dict[str, AgentDef] = {
         prompt_regex=r"\n(?:agy|Antigravity) ?[>›❯]\s*$",
         caps_extra={"supports_oneshot": True, "supports_resume": True},
     ),
+    # ---- Ivyea Agent (native provider, driven by agents/ivyea_driver) ----
+    # Registered so the deep-analysis / market-research agent picker
+    # (/api/agents/catalog) can surface it. The actual chat is driven by the
+    # native agents provider system (agents/routers/providers.py id="ivyea"),
+    # not these cli_args — the model is configured server-side via `ivyea /model`.
+    "ivyea": AgentDef(
+        id="ivyea",
+        display_name="Ivyea Agent",
+        bin_candidates=[
+            "ivyea",
+            os.path.expanduser("~/.local/bin/ivyea"),
+            os.path.expanduser("~/.ivyea/bin/ivyea"),
+        ],
+        default_model="default",
+        static_models=["default"],
+        cli_args=["chat"],
+        chat_args=["chat", "-p", "{prompt}"],
+        chat_skip_model=True,
+        resume_strategy="prompt",
+        caps_extra={"supports_oneshot": True, "native_provider": True},
+    ),
 }
 
 

@@ -162,7 +162,7 @@ def runner_status() -> List[Dict[str, Any]]:
             "path": p,
             "reason": None if p else "未安装",
         })
-    auto_name, _ = _resolve_runner()
+    auto_name, _ = _resolve_auto()
     rows.insert(0, {
         "name": "auto",
         "label": f"自动（当前：{auto_name or '无可用'}）",
@@ -174,6 +174,33 @@ def runner_status() -> List[Dict[str, Any]]:
     return rows
 
 
+def _audit_default_runner() -> str:
+    """Configured default runner for audits (settings ``audit_default_runner``).
+
+    Defaults to ``hermes`` — the only runner IvyeaOps wires up with both the
+    skill (seeded to ~/.hermes/skills) and the data-source MCP (sorftime/sif_mcp
+    in ~/.hermes/config.yaml), so audits get skill guidance + real data and can
+    emit the structured JSON the UI parses. Falls back through RUNNER_ORDER.
+    """
+    try:
+        from app.core import hub_settings as _hs
+        return (str(_hs.get("audit_default_runner") or "").strip().lower()) or "hermes"
+    except Exception:
+        return "hermes"
+
+
+def _resolve_auto() -> tuple[Optional[str], Optional[str]]:
+    """Auto-pick: configured default (hermes) first, then RUNNER_ORDER."""
+    default = _audit_default_runner()
+    for cand in [default, *RUNNER_ORDER]:
+        if not cand:
+            continue
+        p = _find_bin(cand)
+        if p:
+            return cand, p
+    return None, None
+
+
 def resolve_with_pref(pref: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve a runner preference to ``(runner_name, binary_path, error)``.
 
@@ -183,7 +210,7 @@ def resolve_with_pref(pref: str) -> tuple[Optional[str], Optional[str], Optional
     """
     pref = (pref or "auto").lower()
     if pref == "auto":
-        name, path = _resolve_runner()
+        name, path = _resolve_auto()
         if not name:
             return None, None, "no agent CLI is available on this host"
         return name, path, None

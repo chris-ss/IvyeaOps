@@ -64,7 +64,8 @@ const projectsHaveChanges = (
       serialize(nextProject.geminiSessions) !== serialize(prevProject.geminiSessions) ||
       serialize(nextProject.opencodeSessions) !== serialize(prevProject.opencodeSessions) ||
       serialize(nextProject.hermesSessions) !== serialize(prevProject.hermesSessions) ||
-      serialize(nextProject.agySessions) !== serialize(prevProject.agySessions)
+      serialize(nextProject.agySessions) !== serialize(prevProject.agySessions) ||
+      serialize(nextProject.ivyeaSessions) !== serialize(prevProject.ivyeaSessions)
     );
   });
 };
@@ -104,6 +105,7 @@ const getProjectSessions = (project: Project): ProjectSession[] => {
     ...(project.opencodeSessions ?? []),
     ...(project.hermesSessions ?? []),
     ...(project.agySessions ?? []),
+    ...(project.ivyeaSessions ?? []),
   ];
 };
 
@@ -154,6 +156,7 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
       opencodeSessions: mergeSessionProviderLists(incomingProject.opencodeSessions ?? [], previousProject.opencodeSessions ?? []),
       hermesSessions: mergeSessionProviderLists(incomingProject.hermesSessions ?? [], previousProject.hermesSessions ?? []),
       agySessions: mergeSessionProviderLists(incomingProject.agySessions ?? [], previousProject.agySessions ?? []),
+      ivyeaSessions: mergeSessionProviderLists(incomingProject.ivyeaSessions ?? [], previousProject.ivyeaSessions ?? []),
     };
 
     const totalSessions = Number(incomingProject.sessionMeta?.total ?? previousLoadedCount);
@@ -169,7 +172,7 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
 
 const mergeProjectSessionPage = (
   existingProject: Project,
-  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'opencodeSessions' | 'hermesSessions' | 'agySessions' | 'sessionMeta'>,
+  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'opencodeSessions' | 'hermesSessions' | 'agySessions' | 'ivyeaSessions' | 'sessionMeta'>,
 ): Project => {
   const mergedProject: Project = {
     ...existingProject,
@@ -180,6 +183,7 @@ const mergeProjectSessionPage = (
     opencodeSessions: mergeSessionProviderLists(existingProject.opencodeSessions ?? [], sessionsPage.opencodeSessions ?? []),
     hermesSessions: mergeSessionProviderLists(existingProject.hermesSessions ?? [], sessionsPage.hermesSessions ?? []),
     agySessions: mergeSessionProviderLists(existingProject.agySessions ?? [], sessionsPage.agySessions ?? []),
+    ivyeaSessions: mergeSessionProviderLists(existingProject.ivyeaSessions ?? [], sessionsPage.ivyeaSessions ?? []),
   };
 
   const totalSessions = Number(sessionsPage.sessionMeta?.total ?? existingProject.sessionMeta?.total ?? 0);
@@ -612,6 +616,21 @@ export function useProjectsState({
         }
         return;
       }
+
+      const ivyeaSession = project.ivyeaSessions?.find((session) => session.id === sessionId);
+      if (ivyeaSession) {
+        const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
+        const shouldUpdateSession =
+          selectedSession?.id !== sessionId || selectedSession.__provider !== 'ivyea';
+
+        if (shouldUpdateProject) {
+          setSelectedProject(project);
+        }
+        if (shouldUpdateSession) {
+          setSelectedSession({ ...ivyeaSession, __provider: 'ivyea' });
+        }
+        return;
+      }
     }
 
     // Session id is in the URL but not yet present on any project payload (common
@@ -633,8 +652,24 @@ export function useProjectsState({
       providerFromStorage = null;
     }
 
+    // Prefer a single-provider synthetic project (Ivyea Agent / Hermes / Antigravity):
+    // a brand-new session there is that provider regardless of the last-selected one.
+    // Falls back to the last-selected provider from localStorage for code projects.
+    const syntheticProvider: LLMProvider | null =
+      (selectedProject.sessions?.length ?? 0) > 0
+        ? null
+        : (selectedProject.ivyeaSessions?.length ?? 0) > 0
+          ? 'ivyea'
+          : (selectedProject.hermesSessions?.length ?? 0) > 0
+            ? 'hermes'
+            : (selectedProject.agySessions?.length ?? 0) > 0
+              ? 'agy'
+              : null;
+
     const normalizedProvider: LLMProvider =
-      providerFromStorage === 'cursor'
+      syntheticProvider
+        ? syntheticProvider
+        : providerFromStorage === 'cursor'
         ? 'cursor'
         : providerFromStorage === 'codex'
           ? 'codex'
@@ -646,6 +681,8 @@ export function useProjectsState({
                 ? 'hermes'
                 : providerFromStorage === 'agy'
                   ? 'agy'
+                  : providerFromStorage === 'ivyea'
+                    ? 'ivyea'
             : 'claude';
 
     setSelectedSession({
@@ -731,6 +768,7 @@ export function useProjectsState({
           const opencodeSessions = project.opencodeSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const hermesSessions = project.hermesSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const agySessions = project.agySessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
+          const ivyeaSessions = project.ivyeaSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
 
           const removedFromProject = (
             sessions.length !== (project.sessions?.length ?? 0)
@@ -740,6 +778,7 @@ export function useProjectsState({
             || opencodeSessions.length !== (project.opencodeSessions?.length ?? 0)
             || hermesSessions.length !== (project.hermesSessions?.length ?? 0)
             || agySessions.length !== (project.agySessions?.length ?? 0)
+            || ivyeaSessions.length !== (project.ivyeaSessions?.length ?? 0)
           );
 
           if (!removedFromProject) {
@@ -755,6 +794,7 @@ export function useProjectsState({
             opencodeSessions,
             hermesSessions,
             agySessions,
+            ivyeaSessions,
           };
 
           const totalSessions = Math.max(0, Number(project.sessionMeta?.total ?? 0) - 1);

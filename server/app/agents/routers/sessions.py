@@ -80,6 +80,9 @@ async def session_messages(
     # hermes transcripts come from its own session store (read outside the DB conn).
     if provider == "hermes":
         return hermes_driver.read_history(sid)
+    if provider == "ivyea":
+        from app.agents import ivyea_driver
+        return ivyea_driver.read_history(sid)
     if provider == "codex":
         from app.agents import codex_driver
         return codex_driver.read_history(codex_jsonl, sid)
