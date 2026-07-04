@@ -652,8 +652,24 @@ export function useProjectsState({
       providerFromStorage = null;
     }
 
+    // Prefer a single-provider synthetic project (Ivyea Agent / Hermes / Antigravity):
+    // a brand-new session there is that provider regardless of the last-selected one.
+    // Falls back to the last-selected provider from localStorage for code projects.
+    const syntheticProvider: LLMProvider | null =
+      (selectedProject.sessions?.length ?? 0) > 0
+        ? null
+        : (selectedProject.ivyeaSessions?.length ?? 0) > 0
+          ? 'ivyea'
+          : (selectedProject.hermesSessions?.length ?? 0) > 0
+            ? 'hermes'
+            : (selectedProject.agySessions?.length ?? 0) > 0
+              ? 'agy'
+              : null;
+
     const normalizedProvider: LLMProvider =
-      providerFromStorage === 'cursor'
+      syntheticProvider
+        ? syntheticProvider
+        : providerFromStorage === 'cursor'
         ? 'cursor'
         : providerFromStorage === 'codex'
           ? 'codex'
@@ -665,6 +681,8 @@ export function useProjectsState({
                 ? 'hermes'
                 : providerFromStorage === 'agy'
                   ? 'agy'
+                  : providerFromStorage === 'ivyea'
+                    ? 'ivyea'
             : 'claude';
 
     setSelectedSession({
