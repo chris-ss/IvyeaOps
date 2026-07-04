@@ -30,7 +30,7 @@ async def system_update() -> dict:
 # hardcoded set in ProviderSelectionEmptyState.tsx / providers.py _PROVIDER_BIN).
 # We intersect the registry catalog with this so the deep-analysis picker never
 # offers an agent the chat view can't drive (e.g. kiro).
-_NATIVE_PROVIDERS = {"claude", "codex", "cursor", "gemini", "opencode", "hermes", "agy"}
+_NATIVE_PROVIDERS = {"claude", "codex", "cursor", "gemini", "opencode", "hermes", "agy", "ivyea"}
 
 
 @router.get("/catalog")

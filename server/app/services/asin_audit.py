@@ -290,13 +290,29 @@ def _ivyea_agent_available() -> tuple[bool, str]:
 def _resolve_audit_runner(pref: str) -> tuple[Optional[str], Optional[str], str]:
     pref = (pref or "auto").lower()
     if pref == "auto":
-        ok, reason = _ivyea_agent_available()
-        if ok:
-            return IVYEA_AGENT_RUNNER, None, ""
-        runner, runner_bin = _resolve_runner()
-        if runner and runner_bin:
-            return runner, runner_bin, ""
-        return None, None, reason or f"no runner available; tried {IVYEA_AGENT_RUNNER}, {', '.join(RUNNER_ORDER)}"
+        # 默认用 hermes：它是 IvyeaOps 已经配好 skill(~/.hermes/skills seed) + 数据源 MCP
+        # (sorftime / sif_mcp，hermes_config_sync 写入 ~/.hermes/config.yaml) 的 runner。
+        # 审计走它才能拿到 skill 的 11 板块+结尾 JSON 结构指导 + 真实数据 → 前端才能解析出
+        # 结构化报告。ivyea-agent 无 skill/数据源 → 纯推断 + 无 JSON → “未能解析结构化数据”。
+        # 可在设置 audit_default_runner 改；选定 runner 不可用时按下面顺序兜底。
+        from app.core import hub_settings as _hs
+        default = (str(_hs.get("audit_default_runner") or "").strip().lower()) or "hermes"
+        order: list[str] = []
+        for r in [default, IVYEA_AGENT_RUNNER, *RUNNER_ORDER]:
+            if r and r not in order:
+                order.append(r)
+        last_reason = ""
+        for cand in order:
+            if cand == IVYEA_AGENT_RUNNER:
+                ok, reason = _ivyea_agent_available()
+                if ok:
+                    return IVYEA_AGENT_RUNNER, None, ""
+                last_reason = reason
+            else:
+                rb = _find_bin(cand)
+                if rb:
+                    return cand, rb, ""
+        return None, None, last_reason or f"no runner available; tried {', '.join(order)}"
     if pref == IVYEA_AGENT_RUNNER:
         ok, reason = _ivyea_agent_available()
         return (IVYEA_AGENT_RUNNER, None, "") if ok else (None, None, reason)
@@ -310,8 +326,8 @@ def runner_status() -> List[Dict[str, Any]]:
     """Report availability of the embedded IvyeaAgent plus legacy CLI runners."""
     ivyea_ok, ivyea_reason = _ivyea_agent_available()
     cli_rows = _cli_runner_status()
-    cli_auto = next((row.get("auto_resolved_to") for row in cli_rows if row.get("name") == "auto"), None)
-    auto_target = IVYEA_AGENT_RUNNER if ivyea_ok else cli_auto
+    # auto 显示与真实解析一致（默认 hermes，见 _resolve_audit_runner）。
+    auto_target = _resolve_audit_runner("auto")[0]
     return [
         {
             "name": "auto",
@@ -328,7 +344,8 @@ def runner_status() -> List[Dict[str, Any]]:
             "path": ivyea_agent.base_url(),
             "reason": None if ivyea_ok else ivyea_reason,
         },
-        *[row for row in cli_rows if row.get("name") != "auto"],
+        # ivyea-agent 上面已单列（内置 HTTP），从 CLI 行里剔除，避免选择器重复。
+        *[row for row in cli_rows if row.get("name") not in ("auto", IVYEA_AGENT_RUNNER)],
     ]
 
 

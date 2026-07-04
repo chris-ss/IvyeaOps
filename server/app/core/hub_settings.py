@@ -214,6 +214,9 @@ _DEFAULTS: Dict[str, Any] = {
     "claude_projects_dir": "",   # /root/.claude/projects (jsonl token logs)
     "hermes_node_bin": "",       # /root/.hermes/node/bin (PATH augment for spawns)
     "bun_bin": "",               # /root/.bun/bin (gbrain depends on bun)
+    # ASIN/广告审计的默认执行智能体（选择器里 "auto" 解析到它）。默认 hermes——它是
+    # IvyeaOps 配好 skill + 数据源 MCP 的 runner，审计才能出结构化报告。空=hermes。
+    "audit_default_runner": "hermes",
 }
 
 _ENV_MAP: Dict[str, str] = {
