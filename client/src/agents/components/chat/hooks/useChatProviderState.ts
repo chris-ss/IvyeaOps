@@ -65,6 +65,18 @@ type ChangeActiveModelApiResponse = {
   };
 };
 
+// A single-provider synthetic project (Ivyea Agent / Hermes 会话 / Antigravity):
+// all its sessions belong to one non-claude provider and the claude `sessions`
+// bucket is empty. Regular code projects return null (don't force a provider).
+const deriveSyntheticProjectProvider = (project: Project | null): LLMProvider | null => {
+  if (!project) return null;
+  if ((project.sessions?.length ?? 0) > 0) return null;
+  if ((project.ivyeaSessions?.length ?? 0) > 0) return 'ivyea';
+  if ((project.hermesSessions?.length ?? 0) > 0) return 'hermes';
+  if ((project.agySessions?.length ?? 0) > 0) return 'agy';
+  return null;
+};
+
 export function useChatProviderState({ selectedSession, selectedProject }: UseChatProviderStateArgs) {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
@@ -95,6 +107,20 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   const [ivyeaModel, setIvyeaModel] = useState<string>(() => {
     return localStorage.getItem('ivyea-model') || FALLBACK_DEFAULT_MODEL.ivyea;
   });
+
+  // Keep the reactive provider in sync with the opened session / project so the
+  // composer placeholder + message avatar show the right agent immediately.
+  // (Previously the ws handler only updated localStorage live → the correct
+  // agent/icon appeared only after a refresh re-read it; new ivyea sessions
+  // showed Claude until then.) A new session under a single-provider synthetic
+  // project (Ivyea Agent / Hermes) derives its provider from that project.
+  useEffect(() => {
+    const sessionProvider = (selectedSession?.__provider as LLMProvider | undefined) || undefined;
+    const next = sessionProvider || deriveSyntheticProjectProvider(selectedProject);
+    if (next) {
+      setProvider((prev) => (prev === next ? prev : next));
+    }
+  }, [selectedSession, selectedProject]);
 
   const [providerModelCatalog, setProviderModelCatalog] = useState<
     Partial<Record<LLMProvider, ProviderModelsDefinition>>

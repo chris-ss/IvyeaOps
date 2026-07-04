@@ -750,6 +750,7 @@ export function useProjectsState({
           const opencodeSessions = project.opencodeSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const hermesSessions = project.hermesSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const agySessions = project.agySessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
+          const ivyeaSessions = project.ivyeaSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
 
           const removedFromProject = (
             sessions.length !== (project.sessions?.length ?? 0)
@@ -759,6 +760,7 @@ export function useProjectsState({
             || opencodeSessions.length !== (project.opencodeSessions?.length ?? 0)
             || hermesSessions.length !== (project.hermesSessions?.length ?? 0)
             || agySessions.length !== (project.agySessions?.length ?? 0)
+            || ivyeaSessions.length !== (project.ivyeaSessions?.length ?? 0)
           );
 
           if (!removedFromProject) {
@@ -774,6 +776,7 @@ export function useProjectsState({
             opencodeSessions,
             hermesSessions,
             agySessions,
+            ivyeaSessions,
           };
 
           const totalSessions = Math.max(0, Number(project.sessionMeta?.total ?? 0) - 1);
