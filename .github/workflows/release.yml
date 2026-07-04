@@ -117,7 +117,14 @@ jobs:
           test -f "$STAGE/client/dist/index.html"   # 确保预构建前端进了包
           # Ship IvyeaAgent source so install.sh / install-components.ps1 install it
           # OFFLINE from the bundle (no git/proxy failures at the user's end).
-          AGENT_REF="${IVYEA_AGENT_REF:-main}"
+          AGENT_REF="${IVYEA_AGENT_REF:-}"
+          if [ -z "$AGENT_REF" ]; then
+            # 默认打包 ivyea-agent 的**最新 release tag**(可复现、总是已发布版本),
+            # 而非 main HEAD(可能含未发布 WIP)。API 拿不到则回退 main。
+            AGENT_REF=$(curl -fsSL "https://api.github.com/repos/Hector-xue/ivyea-agent/releases/latest" 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('tag_name') or '')" 2>/dev/null)
+            [ -z "$AGENT_REF" ] && AGENT_REF="main"
+          fi
+          echo "bundling ivyea-agent ref: $AGENT_REF"
           git clone --depth 1 --branch "$AGENT_REF" https://github.com/Hector-xue/ivyea-agent.git "$STAGE/agent" \
             || git clone --depth 1 https://github.com/Hector-xue/ivyea-agent.git "$STAGE/agent"
           rm -rf "$STAGE/agent/.git"
@@ -189,7 +196,12 @@ jobs:
           python -m pip install -r server/requirements.txt
           # Bundle IvyeaAgent INTO the exe so the 免-Python package needs no
           # separate pip/Python/git install — the #1 deploy-failure source.
-          $agentRef = if ($env:IVYEA_AGENT_REF) { $env:IVYEA_AGENT_REF } else { "main" }
+          # 默认打包 ivyea-agent 的最新 release tag(可复现、总是已发布版本);API 失败回退 main。
+          $agentRef = if ($env:IVYEA_AGENT_REF) { $env:IVYEA_AGENT_REF } else {
+            try { (Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/Hector-xue/ivyea-agent/releases/latest").tag_name } catch { "main" }
+          }
+          if (-not $agentRef) { $agentRef = "main" }
+          Write-Host "bundling ivyea-agent ref: $agentRef"
           python -m pip install "git+https://github.com/Hector-xue/ivyea-agent.git@$agentRef"
           python -c "import ivyea_agent; print('bundling IvyeaAgent', ivyea_agent.__version__)"
           # Build the PyInstaller arg list. --collect-all winpty bundles pywinpty's
@@ -302,7 +314,14 @@ jobs:
           python -m pip install --upgrade pip wheel pyinstaller
           python -m pip install -r server/requirements.txt
           # Bundle IvyeaAgent into the .app so it needs no separate install.
-          AGENT_REF="${IVYEA_AGENT_REF:-main}"
+          AGENT_REF="${IVYEA_AGENT_REF:-}"
+          if [ -z "$AGENT_REF" ]; then
+            # 默认打包 ivyea-agent 的**最新 release tag**(可复现、总是已发布版本),
+            # 而非 main HEAD(可能含未发布 WIP)。API 拿不到则回退 main。
+            AGENT_REF=$(curl -fsSL "https://api.github.com/repos/Hector-xue/ivyea-agent/releases/latest" 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('tag_name') or '')" 2>/dev/null)
+            [ -z "$AGENT_REF" ] && AGENT_REF="main"
+          fi
+          echo "bundling ivyea-agent ref: $AGENT_REF"
           python -m pip install "git+https://github.com/Hector-xue/ivyea-agent.git@${AGENT_REF}"
           python -c "import ivyea_agent; print('bundling IvyeaAgent', ivyea_agent.__version__)"
           # --windowed → a self-contained IvyeaOps.app (Python embedded, no install
