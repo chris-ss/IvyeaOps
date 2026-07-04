@@ -88,6 +88,7 @@ export const createSessionViewModel = (
     isOpenCodeSession: session.__provider === 'opencode',
     isHermesSession: session.__provider === 'hermes',
     isAgySession: session.__provider === 'agy',
+    isIvyeaSession: session.__provider === 'ivyea',
     isActive: diffInMinutes < 10,
     sessionName: getSessionName(session, t),
     sessionTime: getSessionTime(session),
@@ -136,7 +137,12 @@ export const getAllSessions = (project: Project): SessionWithProvider[] => {
     __provider: 'agy' as const,
   }));
 
-  return [...mainSessions, ...cursorSessions, ...codexSessions, ...geminiSessions, ...opencodeSessions, ...hermesSessions, ...agySessions].sort(
+  const ivyeaSessions = (project.ivyeaSessions || []).map((session) => ({
+    ...session,
+    __provider: 'ivyea' as const,
+  }));
+
+  return [...mainSessions, ...cursorSessions, ...codexSessions, ...geminiSessions, ...opencodeSessions, ...hermesSessions, ...agySessions, ...ivyeaSessions].sort(
     (a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
   );
 };

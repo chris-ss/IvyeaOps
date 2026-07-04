@@ -65,6 +65,7 @@ export type SessionViewModel = {
   isOpenCodeSession: boolean;
   isHermesSession?: boolean;
   isAgySession?: boolean;
+  isIvyeaSession?: boolean;
   isActive: boolean;
   sessionName: string;
   sessionTime: string;

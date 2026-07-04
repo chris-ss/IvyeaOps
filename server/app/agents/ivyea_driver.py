@@ -54,6 +54,41 @@ def get_active() -> list[str]:
     return list(_active_sessions.keys())
 
 
+def read_history(session_id: str) -> dict:
+    """Read an ivyea session transcript (~/.ivyea/sessions/<id>.json) into the
+    agents message shape, so clicking a history session loads its conversation.
+    Empty result if the file is missing/unreadable (mirrors hermes_driver)."""
+    from datetime import datetime, timezone
+    empty = {"messages": [], "total": 0, "hasMore": False, "offset": 0, "limit": None}
+    safe = "".join(c for c in str(session_id) if c.isalnum() or c in "_-")
+    if not safe:
+        return empty
+    path = os.path.join(os.path.expanduser("~/.ivyea/sessions"), f"{safe}.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = (json.load(fh).get("messages") or [])
+    except (OSError, ValueError):
+        return empty
+    out: list[dict] = []
+    for m in raw:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        if role not in ("user", "assistant"):     # 跳过 system 人设 / tool 事件
+            continue
+        content = m.get("content")
+        if isinstance(content, list):
+            content = "\n".join(
+                p.get("text", "") for p in content
+                if isinstance(p, dict) and isinstance(p.get("text"), str))
+        if not isinstance(content, str) or not content.strip():
+            continue
+        out.append(create_normalized_message(
+            kind="text", role=role, content=content, sessionId=session_id, provider=PROVIDER,
+            timestamp=datetime.now(timezone.utc).isoformat()))
+    return {"messages": out, "total": len(out), "hasMore": False, "offset": 0, "limit": None}
+
+
 async def abort_session(session_id: str) -> bool:
     s = _active_sessions.get(session_id)
     if not s:

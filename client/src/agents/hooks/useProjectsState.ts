@@ -64,7 +64,8 @@ const projectsHaveChanges = (
       serialize(nextProject.geminiSessions) !== serialize(prevProject.geminiSessions) ||
       serialize(nextProject.opencodeSessions) !== serialize(prevProject.opencodeSessions) ||
       serialize(nextProject.hermesSessions) !== serialize(prevProject.hermesSessions) ||
-      serialize(nextProject.agySessions) !== serialize(prevProject.agySessions)
+      serialize(nextProject.agySessions) !== serialize(prevProject.agySessions) ||
+      serialize(nextProject.ivyeaSessions) !== serialize(prevProject.ivyeaSessions)
     );
   });
 };
@@ -104,6 +105,7 @@ const getProjectSessions = (project: Project): ProjectSession[] => {
     ...(project.opencodeSessions ?? []),
     ...(project.hermesSessions ?? []),
     ...(project.agySessions ?? []),
+    ...(project.ivyeaSessions ?? []),
   ];
 };
 
@@ -154,6 +156,7 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
       opencodeSessions: mergeSessionProviderLists(incomingProject.opencodeSessions ?? [], previousProject.opencodeSessions ?? []),
       hermesSessions: mergeSessionProviderLists(incomingProject.hermesSessions ?? [], previousProject.hermesSessions ?? []),
       agySessions: mergeSessionProviderLists(incomingProject.agySessions ?? [], previousProject.agySessions ?? []),
+      ivyeaSessions: mergeSessionProviderLists(incomingProject.ivyeaSessions ?? [], previousProject.ivyeaSessions ?? []),
     };
 
     const totalSessions = Number(incomingProject.sessionMeta?.total ?? previousLoadedCount);
@@ -169,7 +172,7 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
 
 const mergeProjectSessionPage = (
   existingProject: Project,
-  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'opencodeSessions' | 'hermesSessions' | 'agySessions' | 'sessionMeta'>,
+  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'opencodeSessions' | 'hermesSessions' | 'agySessions' | 'ivyeaSessions' | 'sessionMeta'>,
 ): Project => {
   const mergedProject: Project = {
     ...existingProject,
@@ -180,6 +183,7 @@ const mergeProjectSessionPage = (
     opencodeSessions: mergeSessionProviderLists(existingProject.opencodeSessions ?? [], sessionsPage.opencodeSessions ?? []),
     hermesSessions: mergeSessionProviderLists(existingProject.hermesSessions ?? [], sessionsPage.hermesSessions ?? []),
     agySessions: mergeSessionProviderLists(existingProject.agySessions ?? [], sessionsPage.agySessions ?? []),
+    ivyeaSessions: mergeSessionProviderLists(existingProject.ivyeaSessions ?? [], sessionsPage.ivyeaSessions ?? []),
   };
 
   const totalSessions = Number(sessionsPage.sessionMeta?.total ?? existingProject.sessionMeta?.total ?? 0);
@@ -609,6 +613,21 @@ export function useProjectsState({
         }
         if (shouldUpdateSession) {
           setSelectedSession({ ...agySession, __provider: 'agy' });
+        }
+        return;
+      }
+
+      const ivyeaSession = project.ivyeaSessions?.find((session) => session.id === sessionId);
+      if (ivyeaSession) {
+        const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
+        const shouldUpdateSession =
+          selectedSession?.id !== sessionId || selectedSession.__provider !== 'ivyea';
+
+        if (shouldUpdateProject) {
+          setSelectedProject(project);
+        }
+        if (shouldUpdateSession) {
+          setSelectedSession({ ...ivyeaSession, __provider: 'ivyea' });
         }
         return;
       }

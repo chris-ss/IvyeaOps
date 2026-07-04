@@ -36,6 +36,9 @@ _CODEX_HOME = Path.home() / ".codex"
 # Hermes sessions have no project cwd, so group them under one synthetic project.
 _HERMES_PROJECT = str(Path.home() / ".hermes" / "sessions")
 _HERMES_PROJECT_NAME = "Hermes 会话"
+# IvyeaAgent sessions (~/.ivyea/sessions/*.json) likewise have no project cwd.
+_IVYEA_PROJECT = str(Path.home() / ".ivyea" / "sessions")
+_IVYEA_PROJECT_NAME = "Ivyea Agent"
 _UNTITLED = "Untitled Claude Session"
 
 
@@ -426,6 +429,107 @@ def index_hermes_session(session_id: str, name: Optional[str] = None) -> bool:
         return False
 
 
+def synchronize_ivyea() -> int:
+    """Index IvyeaAgent chat sessions by scanning ~/.ivyea/sessions/*.json.
+
+    IvyeaAgent stores one JSON per session: {id, created, updated, model,
+    messages:[{role,content}...], usage}. It has no project cwd, so group all
+    under one synthetic project (mirrors hermes). Filter out IvyeaOps' own
+    internal ivyea calls (e.g. ASIN 审计 via HTTP with persist=True) by their
+    system-prompt marker so only real interactive chats show in the sidebar.
+    """
+    sessions_dir = Path.home() / ".ivyea" / "sessions"
+    if not sessions_dir.is_dir():
+        return 0
+    cutoff = time.time() - 14 * 86400
+    recent = sorted(
+        (p for p in sessions_dir.glob("*.json") if p.stat().st_mtime >= cutoff),
+        key=lambda p: p.stat().st_mtime, reverse=True)[:200]
+    # IvyeaOps-internal ivyea calls (audit / news / deep-analysis / bridge tools)
+    # are automated, not user chats. Some set an internal system prompt (HTTP path);
+    # others invoke via `ivyea chat -p` where the internal instruction lands in the
+    # first USER message. Match either, so only real interactive chats show.
+    _INTERNAL = (
+        "IvyeaOps 内置", "ASIN 深度审计", "亚马逊跨境电商市场分析专家",
+        "amazon-asin-cosmo-rufus-audit", "资讯主编", "深度市场诊断",
+        "市场调研报告，请基于内容", "IvyeaOps Web 知识库",
+    )
+
+    def _text(m: dict) -> str:
+        c = m.get("content")
+        if isinstance(c, list):
+            c = " ".join(p.get("text", "") for p in c
+                         if isinstance(p, dict) and isinstance(p.get("text"), str))
+        return c if isinstance(c, str) else ""
+
+    processed = 0
+    with db_conn() as conn:
+        for fp in recent:
+            try:
+                d = json.loads(fp.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            sid = d.get("id") or d.get("session_id")
+            if not isinstance(sid, str) or not sid:
+                continue
+            msgs = d.get("messages") or []
+            # Title = first user message (skip the system persona message).
+            name = ""
+            for m in msgs:
+                if isinstance(m, dict) and m.get("role") == "user":
+                    t = _text(m).strip()
+                    if t:
+                        name = t
+                        break
+            if not name:
+                continue  # no user turn → not a real chat
+            # Scan system prompt + first user message for internal markers.
+            scan_blob = name[:400] + " " + " ".join(
+                _text(m)[:400] for m in msgs
+                if isinstance(m, dict) and m.get("role") == "system")
+            if any(marker in scan_blob for marker in _INTERNAL):
+                continue
+            name = _normalize_session_name(name, _IVYEA_PROJECT_NAME)
+            created = _to_iso(d.get("created"))
+            updated = _to_iso(d.get("updated")) or created
+            existing = repos.get_session_by_id(conn, sid)
+            if existing and existing["isArchived"]:
+                continue
+            repos.create_session(conn, sid, "ivyea", _IVYEA_PROJECT, name, created, updated, str(fp))
+            processed += 1
+        row = repos.get_project_by_path(conn, _IVYEA_PROJECT)
+        if row and (row["custom_project_name"] or "") != _IVYEA_PROJECT_NAME:
+            repos.update_custom_project_name_by_id(conn, row["project_id"], _IVYEA_PROJECT_NAME)
+    return processed
+
+
+def index_ivyea_session(session_id: str, name: Optional[str] = None) -> bool:
+    """Index ONE ivyea session immediately (so a fresh chat shows without waiting
+    for the throttled full sync). `name` = the user's first prompt (title)."""
+    sid = "".join(c for c in str(session_id) if c.isalnum() or c in "_-")
+    if not sid:
+        return False
+    json_path = Path.home() / ".ivyea" / "sessions" / f"{sid}.json"
+    path_str = str(json_path) if json_path.exists() else None
+    title = _normalize_session_name(name, "") if name else None
+    try:
+        with db_conn() as conn:
+            existing = repos.get_session_by_id(conn, sid)
+            if existing and existing["isArchived"]:
+                return False
+            final_name = title or (existing["custom_name"] if existing else None) or _IVYEA_PROJECT_NAME
+            now_iso = datetime.now(timezone.utc).isoformat()
+            created = existing["created_at"] if existing and existing["created_at"] else now_iso
+            repos.create_session(conn, sid, "ivyea", _IVYEA_PROJECT, final_name, created, now_iso, path_str)
+            row = repos.get_project_by_path(conn, _IVYEA_PROJECT)
+            if row and (row["custom_project_name"] or "") != _IVYEA_PROJECT_NAME:
+                repos.update_custom_project_name_by_id(conn, row["project_id"], _IVYEA_PROJECT_NAME)
+        return True
+    except Exception:
+        logger.exception("index_ivyea_session failed for %s", session_id)
+        return False
+
+
 def maybe_synchronize(min_interval: float = 3.0) -> int:
     """Throttled full sync (default once per 3s), tracked in scan_state."""
     now = time.time()
@@ -445,6 +549,10 @@ def maybe_synchronize(min_interval: float = 3.0) -> int:
             n += synchronize_codex()
         except Exception:
             logger.exception("codex sync failed")  # best-effort; never block claude
+        try:
+            n += synchronize_ivyea()   # cheap file scan of ~/.ivyea/sessions
+        except Exception:
+            logger.exception("ivyea sync failed")  # best-effort
         # hermes sync spawns the hermes CLI (~1s), so throttle it separately (60s).
         try:
             with db_conn() as conn:

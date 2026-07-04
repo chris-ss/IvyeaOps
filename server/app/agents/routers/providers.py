@@ -51,7 +51,7 @@ def _opts(values: list[str]) -> dict:
 # REAL configured/live model list (claude ~/.claude/settings, hermes
 # ~/.hermes/config.yaml, codex its config) the user already maintains, instead
 # of a hardcoded guess.
-_PROVIDER_TO_AGENT = {"claude": "claude", "codex": "codex", "hermes": "hermes", "agy": "antigravity"}
+_PROVIDER_TO_AGENT = {"claude": "claude", "codex": "codex", "hermes": "hermes", "agy": "antigravity", "ivyea": "ivyea"}
 
 
 def _agent_models(provider: str) -> Optional[dict]:

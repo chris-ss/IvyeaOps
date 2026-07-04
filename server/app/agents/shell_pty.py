@@ -120,6 +120,10 @@ def _build_command(data: dict) -> str:
         # Antigravity CLI is unknown/uninstalled here; open a plain shell rather
         # than wrongly launching claude.
         return initial or "bash"
+    if provider == "ivyea":
+        if has_session and session_id and _SAFE_SESSION_ID_RE.match(session_id):
+            return f'ivyea chat --resume "{session_id}"'
+        return "ivyea chat"
     command = initial or "claude"
     return f'claude --resume "{session_id}" || claude' if (has_session and session_id) else command
 
@@ -538,7 +542,8 @@ class ShellConnection:
             welcome = f"\x1b[36mStarting terminal in: {project_path}\x1b[0m\r\n"
         else:
             names = {"cursor": "Cursor", "codex": "Codex", "gemini": "Gemini",
-                     "opencode": "OpenCode", "hermes": "Hermes", "agy": "Antigravity"}
+                     "opencode": "OpenCode", "hermes": "Hermes", "agy": "Antigravity",
+                     "ivyea": "Ivyea Agent"}
             pname = names.get(provider, "Claude")
             welcome = (f"\x1b[36mResuming {pname} session {session_id} in: {project_path}\x1b[0m\r\n"
                        if has_session else f"\x1b[36mStarting new {pname} session in: {project_path}\x1b[0m\r\n")
