@@ -59,10 +59,25 @@ class PipeCDP {
     }
   }
 
-  send(method, params = {}, sessionId = "") {
+  send(method, params = {}, sessionId = "", timeout = 15_000) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        reject(new Error(
+          `CDP request timed out after ${timeout}ms (${method}): ${this.stderr.slice(-2000)}`,
+        ));
+      }, timeout);
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       const message = { id, method, params };
       if (sessionId) message.sessionId = sessionId;
       this.input.write(`${JSON.stringify(message)}\0`);
@@ -279,7 +294,7 @@ async function run() {
     assert.deepEqual(browserErrors, []);
     process.stdout.write("knowledge governance browser E2E passed\n");
   } finally {
-    try { chrome.kill("SIGTERM"); } catch {}
+    try { chrome.kill("SIGKILL"); } catch {}
     await rm(profile, { recursive: true, force: true });
   }
 }
