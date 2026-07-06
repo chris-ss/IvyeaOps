@@ -8,7 +8,8 @@
     "dev": "vite --host 127.0.0.1 --port 5174",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "test:e2e:knowledge": "node e2e/knowledge-governance.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

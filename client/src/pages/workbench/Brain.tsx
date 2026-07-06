@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "../../components/ConfirmDialog";
 import BrainMarkdown from "./BrainMarkdown";
 import SheetSelect from "../../components/SheetSelect";
+import KnowledgeGovernancePanel from "./KnowledgeGovernance";
 import {
   brainChatCreate,
   brainChatGet,
@@ -33,9 +34,10 @@ import {
   type BrainUploadResponse,
 } from "../../api/client";
 
-type Tab = "chat" | "upload" | "search" | "pages" | "templates" | "overview" | "settings";
+type Tab = "governance" | "chat" | "upload" | "search" | "pages" | "templates" | "overview" | "settings";
 
 const TABS: { key: Tab; label: string }[] = [
+  { key: "governance", label: "治理中心" },
   { key: "chat", label: "对话" },
   { key: "upload", label: "上传" },
   { key: "search", label: "搜索" },
@@ -572,28 +574,30 @@ export default function Brain() {
       <div className="ptitle">/ 知识库工作台</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <span className="tag tg">GBRAIN COMPAT</span>
-        {!isMobile && <span style={{ color: "var(--t2)", fontSize: 11 }}>上传 / 对话 / 编辑本地知识库：保留原 GBrain 工作流；右下角 IvyeaAgent 可一键迁移 ~/brain 到新知识库</span>}
-        <button className="tbtn" onClick={() => { loadOverview(); loadFiles(); loadUploads(); loadChat(); }} style={{ marginLeft: "auto" }}>刷新</button>
+        <span className="tag tg">{tab === "governance" ? "IVYEA KNOWLEDGE" : "GBRAIN COMPAT"}</span>
+        {!isMobile && <span style={{ color: "var(--t2)", fontSize: 11 }}>{tab === "governance" ? "官方来源审核、覆盖、时效、质量和冲突治理" : "上传 / 对话 / 编辑本地知识库：保留原 GBrain 工作流；右下角 IvyeaAgent 可一键迁移 ~/brain 到新知识库"}</span>}
+        {tab !== "governance" && <button className="tbtn" onClick={() => { loadOverview(); loadFiles(); loadUploads(); loadChat(); }} style={{ marginLeft: "auto" }}>刷新</button>}
       </div>
 
-      {err && <div style={{ marginBottom: 10 }}><MiniAlert kind="bad">{err}</MiniAlert></div>}
-      {overview?.ready && overview.ready.version_compatible === false && (
+      {err && tab !== "governance" && <div style={{ marginBottom: 10 }}><MiniAlert kind="bad">{err}</MiniAlert></div>}
+      {tab !== "governance" && overview?.ready && overview.ready.version_compatible === false && (
         <div style={{ marginBottom: 10 }}><MiniAlert kind="bad">{overview.ready.hint || "GBrain 版本不兼容，知识库未就绪。"}请到「系统配置 → 系统状态」对 GBrain 执行「安装/修复」（会清掉旧版本并装回兼容版）。</MiniAlert></div>
       )}
-      {overview?.ready && overview.ready.db_ready && overview.ready.actions?.length > 0 && (
+      {tab !== "governance" && overview?.ready && overview.ready.db_ready && overview.ready.actions?.length > 0 && (
         <div style={{ marginBottom: 10 }}><MiniAlert kind="ok">已自动配置：{overview.ready.actions.join("；")}。</MiniAlert></div>
       )}
-      {overview?.ready && overview.ready.db_ready && !overview.ready.embed_ready && overview.ready.hint && (
+      {tab !== "governance" && overview?.ready && overview.ready.db_ready && !overview.ready.embed_ready && overview.ready.hint && (
         <div style={{ marginBottom: 10 }}><MiniAlert kind="info">{overview.ready.hint}</MiniAlert></div>
       )}
-      {flash && <div style={{ marginBottom: 10 }}><MiniAlert kind="info"><pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--font)" }}>{flash}</pre></MiniAlert></div>}
-      {noEmbed && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">未配置 Embedding：当前以关键词检索为主（功能正常）。如需语义检索，<a href="/hub-settings" style={{ color: "var(--acc)" }}>前往系统配置 → 智能体 → 知识库语义检索 →</a> 选择服务商（Ollama 本地免费）。</MiniAlert></div>}
+      {flash && tab !== "governance" && <div style={{ marginBottom: 10 }}><MiniAlert kind="info"><pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--font)" }}>{flash}</pre></MiniAlert></div>}
+      {tab !== "governance" && noEmbed && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">未配置 Embedding：当前以关键词检索为主（功能正常）。如需语义检索，<a href="/hub-settings" style={{ color: "var(--acc)" }}>前往系统配置 → 智能体 → 知识库语义检索 →</a> 选择服务商（Ollama 本地免费）。</MiniAlert></div>}
       {chatStatus && !chatStatus.configured && tab === "chat" && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">Hermes 对话不可用：没有找到 hermes CLI。上传、搜索、页面编辑仍可用。</MiniAlert></div>}
 
       <div className="tabs" style={{ overflowX: "auto" }}>
         {TABS.map((t) => <button key={t.key} className={"tab" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
+
+      {tab === "governance" && <KnowledgeGovernancePanel />}
 
       {tab === "chat" && (
         <>

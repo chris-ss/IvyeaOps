@@ -137,6 +137,144 @@ export type KnowledgeDirectoryImport = {
   };
 };
 
+export type KnowledgeReviewStatus = "pending" | "approved" | "rejected" | "superseded";
+
+export type KnowledgeChange = {
+  event_id: string;
+  id: string;
+  title?: string;
+  url?: string;
+  checked_at?: string;
+  content_hash?: string;
+  diff?: string;
+  authority_tier?: string;
+  evidence_class?: string;
+  category?: string;
+  topics?: string[];
+  marketplaces?: string[];
+  locales?: string[];
+  review_status: KnowledgeReviewStatus;
+  reviewed_at?: string;
+  reviewer?: string;
+  reviewer_source?: string;
+  review_identity_verified?: boolean;
+  review_note?: string;
+  published?: boolean;
+  published_at?: string;
+  published_card_id?: string;
+  ready_for_import_draft?: boolean;
+};
+
+export type KnowledgeCoverageRequirement = {
+  domain: string;
+  marketplace: string;
+  status: "strong" | "review_due" | "governed" | "synthesis_only" | "gap" | string;
+  covered: boolean;
+  primary_current: boolean;
+  card_ids: string[];
+  source_urls: string[];
+};
+
+export type KnowledgeGovernance = {
+  ok: boolean;
+  healthy: boolean;
+  summary: {
+    pending_reviews: number;
+    approved_not_published: number;
+    published_changes?: number;
+    coverage_gaps: number;
+    stale_cards: number;
+    monitor_errors: number;
+    monitor_overdue: number;
+    conflicts: number;
+    unverified_approved?: number;
+  };
+  reviews: { summary: Record<string, number>; changes: KnowledgeChange[] };
+  coverage: {
+    summary: Record<string, number>;
+    requirements: KnowledgeCoverageRequirement[];
+    policy?: string;
+  };
+  freshness: {
+    summary: {
+      cards: number;
+      card_freshness: Record<string, number>;
+      monitor_sources: number;
+      monitor_status: Record<string, number>;
+    };
+    cards_requiring_review: any[];
+    sources: any[];
+  };
+  conflicts: any[];
+};
+
+export type KnowledgeQuality = {
+  ok: boolean;
+  quality: {
+    ok: boolean;
+    summary: {
+      cases: number;
+      passed: number;
+      failed: number;
+      pass_rate: number;
+      domains: Record<string, { cases: number; passed: number }>;
+    };
+    results: Array<{
+      id: string;
+      domain: string;
+      ok: boolean;
+      query: string;
+      ids: string[];
+      matched_ranks: Record<string, number | null>;
+      risk: string;
+      checks: Record<string, boolean>;
+    }>;
+  };
+};
+
+export type KnowledgeChangePacket = {
+  event: KnowledgeChange;
+  snapshot_excerpt: string;
+  snapshot_chars: number;
+  snapshot_truncated: boolean;
+  candidates: Array<KnowledgeCard & { category?: string; score: number; exact_source: boolean }>;
+  target: (KnowledgeCard & { body: string; license?: string }) | null;
+  selection_required: boolean;
+  publication_boundary: string;
+};
+
+export type KnowledgeEvidencePayload = {
+  authorized: boolean;
+  rights_confirmed: boolean;
+  kind: string;
+  marketplace: string;
+  title?: string;
+  source_url?: string;
+  content?: string;
+  exact_message?: string;
+  account_id?: string;
+  case_id?: string;
+  notification_id?: string;
+  order_id?: string;
+  claim_id?: string;
+  settlement_id?: string;
+  transaction_id?: string;
+  asin?: string;
+  sku?: string;
+  product_type?: string;
+  error_code?: string;
+  account_status?: string;
+  policy?: string;
+  program?: string;
+  report_type?: string;
+  record_type?: string;
+  currency?: string;
+  registration_stage?: string;
+  document_request?: string;
+  confirm?: boolean;
+  rebuild?: boolean;
+};
+
 export async function ivyeaAgentStatus() {
   const { data } = await api.get<IvyeaAgentStatus>("/ivyea-agent/status");
   return data;
@@ -284,6 +422,144 @@ export async function ivyeaKnowledgeSearch(q: string, limit = 8) {
 
 export async function ivyeaKnowledgeWatchlist() {
   const { data } = await api.get<{ ok: boolean; summary: any; sources: any[] }>("/ivyea-agent/knowledge/watchlist");
+  return data;
+}
+
+export async function ivyeaKnowledgeGovernance() {
+  const { data } = await api.get<KnowledgeGovernance>("/ivyea-agent/knowledge/governance");
+  return data;
+}
+
+export async function ivyeaKnowledgeCoverage() {
+  const { data } = await api.get<{ ok: boolean; coverage: KnowledgeGovernance["coverage"] }>(
+    "/ivyea-agent/knowledge/coverage",
+  );
+  return data;
+}
+
+export async function ivyeaKnowledgeFreshness() {
+  const { data } = await api.get<{ ok: boolean; freshness: KnowledgeGovernance["freshness"] }>(
+    "/ivyea-agent/knowledge/freshness",
+  );
+  return data;
+}
+
+export async function ivyeaKnowledgeQuality() {
+  const { data } = await api.get<KnowledgeQuality>("/ivyea-agent/knowledge/quality", { validateStatus: () => true });
+  return data;
+}
+
+export async function ivyeaKnowledgeChanges(status = "", limit = 100) {
+  const { data } = await api.get<{
+    ok: boolean;
+    summary: Record<string, number>;
+    changes: KnowledgeChange[];
+    review_required: boolean;
+  }>("/ivyea-agent/knowledge/changes", { params: { status, limit } });
+  return data;
+}
+
+export async function ivyeaKnowledgeReviews(eventId = "", limit = 100) {
+  const { data } = await api.get<{ ok: boolean; summary: any; reviews: any[] }>(
+    "/ivyea-agent/knowledge/reviews",
+    { params: { event_id: eventId, limit } },
+  );
+  return data;
+}
+
+export async function ivyeaKnowledgePublications(eventId = "", limit = 100) {
+  const { data } = await api.get<{ ok: boolean; summary: any; publications: any[] }>(
+    "/ivyea-agent/knowledge/publications",
+    { params: { event_id: eventId, limit } },
+  );
+  return data;
+}
+
+export async function ivyeaKnowledgeEvidence(limit = 100) {
+  const { data } = await api.get<{ ok: boolean; summary: any; evidence: any[] }>(
+    "/ivyea-agent/knowledge/evidence", { params: { limit } },
+  );
+  return data;
+}
+
+export async function ivyeaKnowledgeEvidenceDraft(payload: KnowledgeEvidencePayload) {
+  const { data } = await api.post<any>("/ivyea-agent/knowledge/evidence/draft", payload);
+  return data;
+}
+
+export async function ivyeaKnowledgeEvidenceApply(payload: KnowledgeEvidencePayload) {
+  const { data } = await api.post<any>("/ivyea-agent/knowledge/evidence/apply", payload);
+  return data;
+}
+
+export async function ivyeaKnowledgeReviewChange(params: {
+  eventId: string;
+  decision: Exclude<KnowledgeReviewStatus, "pending">;
+  reviewer?: string;
+  note?: string;
+  confirm: boolean;
+}) {
+  const { data } = await api.post<any>("/ivyea-agent/knowledge/changes/review", {
+    event_id: params.eventId,
+    decision: params.decision,
+    reviewer: params.reviewer || "local-operator",
+    note: params.note || "",
+    confirm: params.confirm,
+  });
+  return data;
+}
+
+export async function ivyeaKnowledgeChangePacket(eventId: string, cardId = "") {
+  const { data } = await api.get<{ ok: boolean; packet: KnowledgeChangePacket }>(
+    `/ivyea-agent/knowledge/changes/${encodeURIComponent(eventId)}/packet`,
+    { params: { card_id: cardId } },
+  );
+  return data;
+}
+
+export async function ivyeaKnowledgeChangeDraft(params: {
+  eventId: string;
+  cardId?: string;
+  newCardId?: string;
+  title?: string;
+  body: string;
+}) {
+  const { data } = await api.post<any>("/ivyea-agent/knowledge/changes/draft", {
+    event_id: params.eventId,
+    card_id: params.cardId || "",
+    new_card_id: params.newCardId || "",
+    title: params.title || "",
+    body: params.body,
+  });
+  return data;
+}
+
+export async function ivyeaKnowledgeChangeApply(params: {
+  eventId: string;
+  cardId?: string;
+  newCardId?: string;
+  title?: string;
+  body: string;
+  confirm: boolean;
+  rebuild?: boolean;
+}) {
+  const { data } = await api.post<any>("/ivyea-agent/knowledge/changes/apply", {
+    event_id: params.eventId,
+    card_id: params.cardId || "",
+    new_card_id: params.newCardId || "",
+    title: params.title || "",
+    body: params.body,
+    confirm: params.confirm,
+    rebuild: params.rebuild !== false,
+  }, { timeout: 120000 });
+  return data;
+}
+
+export async function ivyeaKnowledgeSync(sourceIds: string[] = [], force = false) {
+  const { data } = await api.post<any>("/ivyea-agent/knowledge/sync", {
+    source_ids: sourceIds,
+    force,
+  }, { timeout: 120000 });
   return data;
 }
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import os
 import shutil
 import socket
@@ -37,7 +39,7 @@ class IvyeaAgentUnavailable(IvyeaAgentError):
 def base_url() -> str:
     """Return the configured local IvyeaAgent base URL."""
     from app.core import hub_settings
-    raw = (str(hub_settings.get("ivyea_agent_url") or "") or os.getenv("IVYEA_AGENT_URL") or DEFAULT_BASE_URL).strip()
+    raw = (os.getenv("IVYEA_AGENT_URL") or str(hub_settings.get("ivyea_agent_url") or "") or DEFAULT_BASE_URL).strip()
     if not raw:
         raw = DEFAULT_BASE_URL
     if "://" not in raw:
@@ -610,6 +612,109 @@ def retrieval_sync() -> dict[str, Any]:
 
 def knowledge_watchlist() -> dict[str, Any]:
     return request_json("GET", "/v1/knowledge/watchlist")
+
+
+def knowledge_governance() -> dict[str, Any]:
+    return request_json("GET", "/v1/knowledge/governance")
+
+
+def knowledge_coverage() -> dict[str, Any]:
+    return request_json("GET", "/v1/knowledge/coverage")
+
+
+def knowledge_freshness() -> dict[str, Any]:
+    return request_json("GET", "/v1/knowledge/freshness")
+
+
+def knowledge_quality() -> dict[str, Any]:
+    return request_json("GET", "/v1/knowledge/quality", timeout=max(_timeout(), 60.0))
+
+
+def knowledge_changes(limit: int = 50, status: str = "") -> dict[str, Any]:
+    params = {"limit": max(1, min(int(limit or 50), 500))}
+    if status:
+        params["status"] = status
+    return request_json("GET", f"/v1/knowledge/changes?{urllib.parse.urlencode(params)}")
+
+
+def knowledge_reviews(limit: int = 100, event_id: str = "") -> dict[str, Any]:
+    params = {"limit": max(1, min(int(limit or 100), 1000))}
+    if event_id:
+        params["event_id"] = event_id
+    return request_json("GET", f"/v1/knowledge/reviews?{urllib.parse.urlencode(params)}")
+
+
+def knowledge_publications(limit: int = 100, event_id: str = "") -> dict[str, Any]:
+    params = {"limit": max(1, min(int(limit or 100), 1000))}
+    if event_id:
+        params["event_id"] = event_id
+    return request_json("GET", f"/v1/knowledge/publications?{urllib.parse.urlencode(params)}")
+
+
+def knowledge_versions(card_id: str = "", limit: int = 100) -> dict[str, Any]:
+    params: dict[str, Any] = {"limit": limit}
+    if card_id:
+        params["card_id"] = card_id
+    return request_json("GET", f"/v1/knowledge/versions?{urllib.parse.urlencode(params)}")
+
+
+def knowledge_version_rollback(payload: dict[str, Any]) -> dict[str, Any]:
+    return request_json("POST", "/v1/knowledge/versions/rollback", payload)
+
+
+def knowledge_evidence(limit: int = 100) -> dict[str, Any]:
+    return request_json("GET", f"/v1/knowledge/evidence?{urllib.parse.urlencode({'limit': limit})}")
+
+
+def knowledge_evidence_schema() -> dict[str, Any]:
+    return request_json("GET", "/v1/knowledge/evidence/schema")
+
+
+def knowledge_evidence_draft(payload: dict[str, Any]) -> dict[str, Any]:
+    return request_json("POST", "/v1/knowledge/evidence/draft", payload)
+
+
+def knowledge_evidence_apply(payload: dict[str, Any]) -> dict[str, Any]:
+    return request_json("POST", "/v1/knowledge/evidence/apply", payload, timeout=max(_timeout(), 120.0))
+
+
+def knowledge_review_change(payload: dict[str, Any]) -> dict[str, Any]:
+    signed = dict(payload)
+    token = _token()
+    if token and signed.get("reviewer_source") == "ops_authenticated_admin":
+        timestamp = str(int(time.time()))
+        material = "|".join([
+            str(signed.get("event_id") or ""),
+            str(signed.get("decision") or ""),
+            str(signed.get("reviewer") or ""),
+            timestamp,
+        ])
+        signed["identity_assertion"] = {
+            "timestamp": timestamp,
+            "signature": hmac.new(token.encode("utf-8"), material.encode("utf-8"), hashlib.sha256).hexdigest(),
+        }
+    signed.pop("identity_verified", None)
+    return request_json("POST", "/v1/knowledge/changes/review", signed)
+
+
+def knowledge_change_packet(event_id: str, card_id: str = "") -> dict[str, Any]:
+    safe_event = urllib.parse.quote(str(event_id or ""), safe="")
+    query = ""
+    if card_id:
+        query = "?" + urllib.parse.urlencode({"card_id": card_id})
+    return request_json("GET", f"/v1/knowledge/changes/{safe_event}/packet{query}")
+
+
+def knowledge_change_draft(payload: dict[str, Any]) -> dict[str, Any]:
+    return request_json("POST", "/v1/knowledge/changes/draft", payload)
+
+
+def knowledge_change_apply(payload: dict[str, Any]) -> dict[str, Any]:
+    return request_json("POST", "/v1/knowledge/changes/apply", payload, timeout=max(_timeout(), 120.0))
+
+
+def knowledge_sync(payload: dict[str, Any]) -> dict[str, Any]:
+    return request_json("POST", "/v1/knowledge/sync", payload, timeout=max(_timeout(), 120.0))
 
 
 def knowledge_cards(limit: int = 200) -> dict[str, Any]:

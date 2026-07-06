@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import threading as _threading
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -103,6 +104,39 @@ class KnowledgeImportDirectoryBody(BaseModel):
     max_file_bytes: int = Field(default=5 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
 
 
+class KnowledgeReviewBody(BaseModel):
+    event_id: str = Field(..., min_length=1, max_length=120)
+    decision: str = Field(..., pattern="^(approved|rejected|superseded)$")
+    reviewer: str = Field(default="local-operator", max_length=80)
+    note: str = Field(default="", max_length=1000)
+    confirm: bool = False
+
+
+class KnowledgeVersionRollbackBody(BaseModel):
+    card_id: str = Field(..., min_length=1, max_length=240)
+    version_id: str = Field(..., min_length=1, max_length=120)
+    confirm: bool = False
+    rebuild: bool = True
+
+
+class KnowledgeChangeDraftBody(BaseModel):
+    event_id: str = Field(..., min_length=1, max_length=120)
+    card_id: str = Field(default="", max_length=240)
+    new_card_id: str = Field(default="", max_length=240)
+    title: str = Field(default="", max_length=500)
+    body: str = Field(default="", max_length=500000)
+
+
+class KnowledgeChangeApplyBody(KnowledgeChangeDraftBody):
+    confirm: bool = False
+    rebuild: bool = True
+
+
+class KnowledgeSyncBody(BaseModel):
+    source_ids: list[str] = Field(default_factory=list, max_length=100)
+    force: bool = False
+
+
 class OpsToolsListBody(BaseModel):
     module: str = Field(default="", max_length=80)
     query: str = Field(default="", max_length=500)
@@ -181,8 +215,6 @@ def agent_version() -> dict[str, Any]:
         "available": svc.availability().get("available", False),
     }
 
-
-import threading as _threading
 
 _UPGRADE_LOCK = _threading.Lock()
 _UPGRADE_STATE: dict[str, Any] = {"phase": "idle", "percent": 0, "before": "", "after": "",
@@ -314,6 +346,133 @@ def retrieval_sync() -> dict[str, Any]:
 @router.get("/knowledge/watchlist")
 def knowledge_watchlist() -> dict[str, Any]:
     return _call(svc.knowledge_watchlist)
+
+
+@router.get("/knowledge/governance")
+def knowledge_governance() -> dict[str, Any]:
+    return _call(svc.knowledge_governance)
+
+
+@router.get("/knowledge/coverage")
+def knowledge_coverage() -> dict[str, Any]:
+    return _call(svc.knowledge_coverage)
+
+
+@router.get("/knowledge/freshness")
+def knowledge_freshness() -> dict[str, Any]:
+    return _call(svc.knowledge_freshness)
+
+
+@router.get("/knowledge/quality")
+def knowledge_quality() -> dict[str, Any]:
+    return _call(svc.knowledge_quality)
+
+
+@router.get("/knowledge/changes")
+def knowledge_changes(
+    limit: int = Query(50, ge=1, le=500),
+    status: str = Query(default="", pattern="^(|pending|approved|rejected|superseded)$"),
+) -> dict[str, Any]:
+    return _call(svc.knowledge_changes, limit, status)
+
+
+@router.get("/knowledge/reviews")
+def knowledge_reviews(
+    limit: int = Query(100, ge=1, le=1000), event_id: str = Query(default="", max_length=120),
+) -> dict[str, Any]:
+    return _call(svc.knowledge_reviews, limit, event_id)
+
+
+@router.get("/knowledge/publications")
+def knowledge_publications(
+    limit: int = Query(100, ge=1, le=1000), event_id: str = Query(default="", max_length=120),
+) -> dict[str, Any]:
+    return _call(svc.knowledge_publications, limit, event_id)
+
+
+@router.get("/knowledge/versions")
+def knowledge_versions(
+    card_id: str = Query(default="", max_length=240), limit: int = Query(100, ge=1, le=1000),
+) -> dict[str, Any]:
+    return _call(svc.knowledge_versions, card_id, limit)
+
+
+@router.get("/knowledge/evidence")
+def knowledge_evidence(limit: int = Query(100, ge=1, le=1000)) -> dict[str, Any]:
+    return _call(svc.knowledge_evidence, limit)
+
+
+@router.get("/knowledge/evidence/schema")
+def knowledge_evidence_schema() -> dict[str, Any]:
+    return _call(svc.knowledge_evidence_schema)
+
+
+@router.get("/knowledge/changes/{event_id}/packet")
+def knowledge_change_packet(
+    event_id: str, card_id: str = Query(default="", max_length=240),
+) -> dict[str, Any]:
+    return _call(svc.knowledge_change_packet, event_id, card_id)
+
+
+@router.post("/knowledge/changes/review")
+def knowledge_review_change(
+    body: KnowledgeReviewBody, _admin: str = Depends(require_admin),
+) -> dict[str, Any]:
+    payload = _payload(body)
+    payload["reviewer"] = _admin
+    payload["reviewer_source"] = "ops_authenticated_admin"
+    return _call(svc.knowledge_review_change, payload)
+
+
+@router.post("/knowledge/versions/rollback")
+def knowledge_version_rollback(
+    body: KnowledgeVersionRollbackBody, _admin: str = Depends(require_admin),
+) -> dict[str, Any]:
+    payload = _payload(body)
+    payload["actor"] = _admin
+    payload["actor_source"] = "ops_authenticated_admin"
+    return _call(svc.knowledge_version_rollback, payload)
+
+
+@router.post("/knowledge/evidence/draft")
+def knowledge_evidence_draft(
+    body: dict[str, Any], _admin: str = Depends(require_admin),
+) -> dict[str, Any]:
+    payload = dict(body)
+    payload["actor"] = _admin
+    payload["actor_source"] = "ops_authenticated_admin"
+    return _call(svc.knowledge_evidence_draft, payload)
+
+
+@router.post("/knowledge/evidence/apply")
+def knowledge_evidence_apply(
+    body: dict[str, Any], _admin: str = Depends(require_admin),
+) -> dict[str, Any]:
+    payload = dict(body)
+    payload["actor"] = _admin
+    payload["actor_source"] = "ops_authenticated_admin"
+    return _call(svc.knowledge_evidence_apply, payload)
+
+
+@router.post("/knowledge/changes/draft")
+def knowledge_change_draft(
+    body: KnowledgeChangeDraftBody, _admin: str = Depends(require_admin),
+) -> dict[str, Any]:
+    return _call(svc.knowledge_change_draft, _payload(body))
+
+
+@router.post("/knowledge/changes/apply")
+def knowledge_change_apply(
+    body: KnowledgeChangeApplyBody, _admin: str = Depends(require_admin),
+) -> dict[str, Any]:
+    return _call(svc.knowledge_change_apply, _payload(body))
+
+
+@router.post("/knowledge/sync")
+def knowledge_sync(
+    body: KnowledgeSyncBody, _admin: str = Depends(require_admin),
+) -> dict[str, Any]:
+    return _call(svc.knowledge_sync, _payload(body))
 
 
 @router.get("/knowledge/cards")

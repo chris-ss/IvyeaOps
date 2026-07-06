@@ -21,7 +21,7 @@ Listing 制作、AI 生图、市场调研、深度分析、广告优化（含领
 
 - **技术栈**：后端 FastAPI（Python）+ 前端 React / Vite（TypeScript），后端直接托管前端构建产物。
 - **预构建发行包**：`IvyeaOps.zip` 已含前端 `client/dist` 与 Windows Python 3.12 后端依赖 wheels；`IvyeaOps-Windows-x64.zip` 额外内置后端 `IvyeaOpsServer.exe`，Windows 可免 Python / Node；`IvyeaOps-macOS.zip` 解压得到 **`IvyeaOps.app`（自包含、内嵌 Python，双击即用）**，macOS 可免 Python / Node。
-- **内置 Agent**：默认安装 IvyeaAgent，提供右下角会话入口、知识库上传、搜索和本地检索；可在「系统配置 → IvyeaAgent → 检查并更新」一键升级；Hermes / GBrain / Ollama 仅作为旧兼容组件保留。
+- **内置 Agent**：默认安装 IvyeaAgent，提供右下角会话入口、知识库上传、搜索和本地检索；知识库工作台新增治理中心，支持官方变更审核、覆盖/时效看板、41 项持续评测、冲突检查、账户证据脱敏导入和二次确认发布；管理员审核身份通过本地 Agent token 签名，未验证批准不能发布；可在「系统配置 → IvyeaAgent → 检查并更新」一键升级；Hermes / GBrain / Ollama 仅作为旧兼容组件保留。
 - **支持平台**：Linux / macOS（完整，含 `.app` 免环境包）· Windows（除 PTY 终端外完整；Windows x64 有免 Python 包）。
   - macOS 首次双击 `IvyeaOps.app` 若被 Gatekeeper 拦截（未签名），右键 →「打开」一次即可；浏览器会自动开到 http://127.0.0.1:8001 。
 - **默认端口**：`8001`（`http://127.0.0.1:8001`）。

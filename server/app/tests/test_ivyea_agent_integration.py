@@ -122,8 +122,36 @@ def test_knowledge_update_bridge_paths(ctx, monkeypatch):
         return {"ok": True, "path": path}
 
     monkeypatch.setattr(svc, "request_json", fake_request)
+    monkeypatch.setattr(svc, "_token", lambda: "shared-test-token")
 
     assert svc.knowledge_watchlist()["path"] == "/v1/knowledge/watchlist"
+    assert svc.knowledge_governance()["path"] == "/v1/knowledge/governance"
+    assert svc.knowledge_coverage()["path"] == "/v1/knowledge/coverage"
+    assert svc.knowledge_freshness()["path"] == "/v1/knowledge/freshness"
+    assert svc.knowledge_quality()["path"] == "/v1/knowledge/quality"
+    assert svc.knowledge_changes(limit=5, status="pending")["path"] == "/v1/knowledge/changes?limit=5&status=pending"
+    assert svc.knowledge_reviews(limit=6, event_id="chg-1")["path"] == "/v1/knowledge/reviews?limit=6&event_id=chg-1"
+    assert svc.knowledge_publications(limit=7)["path"] == "/v1/knowledge/publications?limit=7"
+    assert svc.knowledge_versions("user.card", limit=8)["path"] == "/v1/knowledge/versions?limit=8&card_id=user.card"
+    assert svc.knowledge_version_rollback({"card_id": "user.card", "version_id": "kv-1"})["path"] == "/v1/knowledge/versions/rollback"
+    assert svc.knowledge_evidence(limit=9)["path"] == "/v1/knowledge/evidence?limit=9"
+    assert svc.knowledge_evidence_schema()["path"] == "/v1/knowledge/evidence/schema"
+    assert svc.knowledge_evidence_draft({"kind": "tax_report"})["path"] == "/v1/knowledge/evidence/draft"
+    assert svc.knowledge_evidence_apply({"kind": "tax_report", "confirm": True})["path"] == "/v1/knowledge/evidence/apply"
+    assert svc.knowledge_review_change({"event_id": "chg-1", "decision": "approved"})["path"] == "/v1/knowledge/changes/review"
+    review_payload = next(payload for method, path, payload in calls if path == "/v1/knowledge/changes/review")
+    assert "identity_assertion" not in review_payload  # reviewer source is required before signing
+    assert svc.knowledge_review_change({
+        "event_id": "chg-1", "decision": "approved", "reviewer": "admin",
+        "reviewer_source": "ops_authenticated_admin", "identity_verified": True,
+    })["path"] == "/v1/knowledge/changes/review"
+    signed_review = [payload for method, path, payload in calls if path == "/v1/knowledge/changes/review"][-1]
+    assert len(signed_review["identity_assertion"]["signature"]) == 64
+    assert "identity_verified" not in signed_review
+    assert svc.knowledge_change_packet("chg-1", "card.1")["path"] == "/v1/knowledge/changes/chg-1/packet?card_id=card.1"
+    assert svc.knowledge_change_draft({"event_id": "chg-1", "body": "draft"})["path"] == "/v1/knowledge/changes/draft"
+    assert svc.knowledge_change_apply({"event_id": "chg-1", "body": "draft", "confirm": True})["path"] == "/v1/knowledge/changes/apply"
+    assert svc.knowledge_sync({"force": True})["path"] == "/v1/knowledge/sync"
     assert svc.knowledge_cards(limit=5)["path"] == "/v1/knowledge/cards?limit=5"
     assert svc.knowledge_search("否词", limit=4)["path"].startswith("/v1/knowledge/search?")
     assert svc.knowledge_files(limit=9)["path"] == "/v1/knowledge/files?limit=9"
@@ -195,6 +223,111 @@ def test_knowledge_update_routes_forward_payload(ctx, monkeypatch):
     assert seen["draft"]["tags"] == ["budget"]
     assert seen["apply"]["confirm"] is True
     assert seen["apply"]["rebuild"] is False
+
+
+def test_knowledge_governance_routes_forward_payload(ctx, monkeypatch):
+    svc, router = ctx
+    seen = {}
+    monkeypatch.setattr(svc, "knowledge_governance", lambda: {"ok": True, "summary": {"pending_reviews": 2}})
+    monkeypatch.setattr(svc, "knowledge_coverage", lambda: {"ok": True, "coverage": {"requirements": []}})
+    monkeypatch.setattr(svc, "knowledge_freshness", lambda: {"ok": True, "freshness": {"sources": []}})
+    monkeypatch.setattr(svc, "knowledge_quality", lambda: {"ok": True, "quality": {"summary": {"cases": 15}}})
+    monkeypatch.setattr(svc, "knowledge_changes", lambda limit=50, status="": {
+        "ok": True, "summary": {"changes": limit}, "status": status, "changes": [],
+    })
+    monkeypatch.setattr(svc, "knowledge_reviews", lambda limit=100, event_id="": {
+        "ok": True, "summary": {"reviews": limit}, "event_id": event_id, "reviews": [],
+    })
+    monkeypatch.setattr(svc, "knowledge_publications", lambda limit=100, event_id="": {
+        "ok": True, "summary": {"publications": limit}, "event_id": event_id, "publications": [],
+    })
+    monkeypatch.setattr(svc, "knowledge_versions", lambda card_id="", limit=100: {
+        "ok": True, "summary": {"versions": limit}, "card_id": card_id, "versions": [],
+    })
+    monkeypatch.setattr(svc, "knowledge_evidence", lambda limit=100: {
+        "ok": True, "summary": {"evidence": limit}, "evidence": [],
+    })
+    monkeypatch.setattr(svc, "knowledge_evidence_schema", lambda: {"ok": True, "schema": {"type": "object"}})
+    monkeypatch.setattr(svc, "knowledge_change_packet", lambda event_id, card_id="": {
+        "ok": True, "packet": {"event": {"event_id": event_id}, "target": {"id": card_id}},
+    })
+
+    def review(payload):
+        seen["review"] = payload
+        return {"ok": True, "reviewed": payload["confirm"]}
+
+    def draft(payload):
+        seen["draft"] = payload
+        return {"ok": True, "draft_ready": bool(payload["body"])}
+
+    def apply(payload):
+        seen["apply"] = payload
+        return {"ok": True, "applied": payload["confirm"]}
+
+    def sync(payload):
+        seen["sync"] = payload
+        return {"ok": True, "summary": {"selected": len(payload["source_ids"])}}
+
+    def rollback(payload):
+        seen["rollback"] = payload
+        return {"ok": True, "rolled_back": payload["confirm"]}
+
+    def evidence_draft(payload):
+        seen["evidence_draft"] = payload
+        return {"ok": True, "draft_ready": True}
+
+    def evidence_apply(payload):
+        seen["evidence_apply"] = payload
+        return {"ok": True, "applied": payload.get("confirm") is True}
+
+    monkeypatch.setattr(svc, "knowledge_review_change", review)
+    monkeypatch.setattr(svc, "knowledge_change_draft", draft)
+    monkeypatch.setattr(svc, "knowledge_change_apply", apply)
+    monkeypatch.setattr(svc, "knowledge_sync", sync)
+    monkeypatch.setattr(svc, "knowledge_version_rollback", rollback)
+    monkeypatch.setattr(svc, "knowledge_evidence_draft", evidence_draft)
+    monkeypatch.setattr(svc, "knowledge_evidence_apply", evidence_apply)
+
+    assert router.knowledge_governance()["summary"]["pending_reviews"] == 2
+    assert router.knowledge_coverage()["coverage"]["requirements"] == []
+    assert router.knowledge_freshness()["freshness"]["sources"] == []
+    assert router.knowledge_quality()["quality"]["summary"]["cases"] == 15
+    assert router.knowledge_changes(limit=8, status="pending")["status"] == "pending"
+    assert router.knowledge_reviews(limit=9, event_id="chg-1")["event_id"] == "chg-1"
+    assert router.knowledge_publications(limit=10, event_id="")["summary"]["publications"] == 10
+    assert router.knowledge_versions(card_id="user.card", limit=11)["summary"]["versions"] == 11
+    assert router.knowledge_evidence(limit=12)["summary"]["evidence"] == 12
+    assert router.knowledge_evidence_schema()["schema"]["type"] == "object"
+    assert router.knowledge_change_packet("chg-1", "card-1")["packet"]["target"]["id"] == "card-1"
+    review_body = router.KnowledgeReviewBody(
+        event_id="chg-1", decision="approved", reviewer="qa", note="verified", confirm=True,
+    )
+    assert router.knowledge_review_change(review_body, _admin="admin")["reviewed"] is True
+    rollback_body = router.KnowledgeVersionRollbackBody(
+        card_id="user.card", version_id="kv-1", confirm=True, rebuild=False,
+    )
+    assert router.knowledge_version_rollback(rollback_body, _admin="admin")["rolled_back"] is True
+    assert router.knowledge_evidence_draft({"kind": "tax_report"}, _admin="admin")["draft_ready"] is True
+    assert router.knowledge_evidence_apply(
+        {"kind": "tax_report", "confirm": True}, _admin="admin",
+    )["applied"] is True
+    draft_body = router.KnowledgeChangeDraftBody(event_id="chg-1", card_id="card-1", body="draft")
+    assert router.knowledge_change_draft(draft_body, _admin="admin")["draft_ready"] is True
+    apply_body = router.KnowledgeChangeApplyBody(
+        event_id="chg-1", card_id="card-1", body="draft", confirm=True, rebuild=False,
+    )
+    assert router.knowledge_change_apply(apply_body, _admin="admin")["applied"] is True
+    assert router.knowledge_sync(router.KnowledgeSyncBody(source_ids=["source-1"], force=True), _admin="admin")["ok"] is True
+    assert seen["review"]["decision"] == "approved"
+    assert seen["review"]["reviewer"] == "admin"
+    assert seen["review"]["reviewer_source"] == "ops_authenticated_admin"
+    assert "identity_verified" not in seen["review"]
+    assert seen["rollback"]["actor"] == "admin"
+    assert seen["rollback"]["actor_source"] == "ops_authenticated_admin"
+    assert seen["evidence_draft"]["actor"] == "admin"
+    assert seen["evidence_apply"]["actor_source"] == "ops_authenticated_admin"
+    assert seen["apply"]["rebuild"] is False
+    assert seen["sync"]["source_ids"] == ["source-1"]
 
 
 def test_knowledge_upload_route_encodes_file(ctx, monkeypatch):
