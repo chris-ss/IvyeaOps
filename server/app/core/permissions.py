@@ -22,7 +22,7 @@ MODULE_CATALOG: List[Dict[str, object]] = [
     {"key": "tools",     "label": "分析工具",        "sensitive": False},
     {"key": "skill-hub", "label": "Skill 中心",      "sensitive": False},
     {"key": "agents",    "label": "智能体会话",      "sensitive": True},
-    {"key": "brain",     "label": "旧 GBrain 知识库", "sensitive": True},
+    {"key": "brain",     "label": "知识库工作台",     "sensitive": True},
     {"key": "terminal",  "label": "服务器终端",      "sensitive": True},
     {"key": "servmon",   "label": "服务器监控",      "sensitive": True},
     {"key": "news",      "label": "资讯",            "sensitive": False},

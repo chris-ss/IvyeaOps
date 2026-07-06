@@ -121,7 +121,7 @@ function safePathFromSlug(slug: string): string {
 function getInitialTab(): Tab {
   const p = new URLSearchParams(window.location.search);
   const t = p.get("tab") as Tab | null;
-  return TABS.some((x) => x.key === t) ? (t as Tab) : "chat";
+  return TABS.some((x) => x.key === t) ? (t as Tab) : "governance";
 }
 
 export default function Brain() {

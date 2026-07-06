@@ -81,6 +81,7 @@ const NAV: NavSection[] = [
     items: [
       { to: "/assistant", icon: "⊡", label: "AI 问答" },
       { to: "/imagegen", icon: "▦", label: "AI 生图" },
+      { to: "/brain?tab=governance", icon: "▤", label: "知识库工作台", admin: true, key: "brain" },
       { to: "/agents", icon: "◉", label: "外部智能体", admin: true, key: "agents" },
       { to: "/terminal", icon: "▶", label: "服务器终端", admin: true, key: "terminal" },
       { to: "/servmon", icon: "⊙", label: "服务器监控", admin: true, key: "servmon" },
