@@ -697,7 +697,32 @@ def _hermes_env() -> dict[str, str]:
     return env
 
 
+def ivyea_chat_available() -> bool:
+    """True when the local IvyeaAgent brain can answer knowledge chat turns."""
+    try:
+        from app.services import ivyea_agent_service as _ia
+        return _ia.chat_available()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def chat_model_status() -> dict[str, Any]:
+    # Front door: the governed IvyeaAgent brain (built-in Amazon knowledge base).
+    if ivyea_chat_available():
+        try:
+            from app.services import ivyea_agent_service as _ia
+            health = _ia.availability().get("health") or {}
+            model = str((health.get("model") or {}).get("label") or "IvyeaAgent")
+        except Exception:  # noqa: BLE001
+            model = "IvyeaAgent"
+        return {
+            "configured": True,
+            "provider": "ivyea-agent",
+            "base_url": "",
+            "model": model,
+            "hermes_bin": "",
+            "mode": "ivyea-agent",
+        }
     if hermes_available():
         try:
             hermes = _hermes_bin()
@@ -792,10 +817,27 @@ def _global_answer_sync(prompt: str) -> str:
     return (asyncio.run(_ai.generate_text(prompt))).strip()
 
 
+def _last_user_text(messages: list[dict[str, str]]) -> str:
+    for m in reversed(messages):
+        if m.get("role") == "user" and (m.get("content") or "").strip():
+            return str(m["content"]).strip()
+    return _messages_to_hermes_prompt(messages)
+
+
 def _call_llm(messages: list[dict[str, str]]) -> str:
+    # Front door: the governed IvyeaAgent brain grounds the answer in its own
+    # built-in Amazon knowledge base. Degrade to Hermes / the unified global text
+    # chain only when the local IvyeaAgent service is unavailable or empty.
+    if ivyea_chat_available():
+        try:
+            from app.services import ivyea_agent_service as _ia
+            resp = _ia.chat({"message": _last_user_text(messages), "plan_mode": True, "persist": False})
+            text = str((resp or {}).get("text") or "").strip()
+            if text:
+                return text
+        except Exception:  # noqa: BLE001 — degrade to fallbacks below
+            pass
     prompt = _messages_to_hermes_prompt(messages)
-    # Prefer Hermes when present; on a missing/empty/failed answer, degrade to the
-    # unified global text chain so chat works without any local agent CLI.
     if hermes_available():
         try:
             out = _hermes_chat_text(prompt)
@@ -805,7 +847,7 @@ def _call_llm(messages: list[dict[str, str]]) -> str:
             pass  # fall through to the global chain
     answer = _global_answer_sync(prompt)
     if not answer:
-        raise BrainChatError("未能生成回答：请安装 Hermes，或在「系统配置 → 全局兜底大模型」配置一个文本模型。")
+        raise BrainChatError("未能生成回答：请确认 IvyeaAgent 服务在运行，或在「系统配置 → 全局兜底大模型」配置一个文本模型。")
     return answer
 
 
@@ -935,11 +977,15 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def begin_chat_turn(session_id: str, content: str, regenerate: bool = False, category: str | None = None) -> dict[str, Any]:
+def begin_chat_turn(session_id: str, content: str, regenerate: bool = False, category: str | None = None, retrieve: bool = True) -> dict[str, Any]:
     """Prepare a streaming turn: persist the user message (or, for regenerate,
     reuse the last user question and drop the stale answer), retrieve citations
     (optionally scoped to a knowledge category), and build the hermes prompt.
-    Returns {user_message, prompt, citations}."""
+    Returns {user_message, prompt, citations, question}.
+
+    When ``retrieve`` is False the legacy GBrain citation search and the hermes
+    prompt are skipped: the raw question is handed to the IvyeaAgent brain, which
+    grounds the answer in its own governed Amazon knowledge base."""
     init_db()
     current = get_session(session_id)["session"]
     user_msg: dict[str, Any] | None = None
@@ -973,9 +1019,13 @@ def begin_chat_turn(session_id: str, content: str, regenerate: bool = False, cat
                 auto_title = msg.replace("\n", " ").strip()[:40] or "对话"
                 conn.execute("UPDATE brain_chat_sessions SET title = ? WHERE id = ?", (auto_title, session_id))
 
-    citations = _search_citations(msg, category)
-    prompt = _messages_to_hermes_prompt(_build_prompt(msg, citations, str(current.get("mode") or "knowledge")))
-    return {"user_message": user_msg, "prompt": prompt, "citations": citations, "regenerated": regenerate}
+    if retrieve:
+        citations = _search_citations(msg, category)
+        prompt = _messages_to_hermes_prompt(_build_prompt(msg, citations, str(current.get("mode") or "knowledge")))
+    else:
+        citations = []
+        prompt = msg
+    return {"user_message": user_msg, "prompt": prompt, "citations": citations, "question": msg, "regenerated": regenerate}
 
 
 def commit_chat_answer(session_id: str, answer: str, citations: list[dict[str, Any]]) -> dict[str, Any]:
