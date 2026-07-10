@@ -42,7 +42,6 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "upload", label: "上传" },
   { key: "search", label: "搜索" },
   { key: "pages", label: "页面" },
-  { key: "templates", label: "亚马逊模板" },
   { key: "overview", label: "概览" },
   { key: "settings", label: "设置" },
 ];
@@ -257,6 +256,9 @@ export default function Brain() {
   const stats = overview?.stats;
   const embedOn = overview && (overview.embed_configured ?? overview.openai_configured);
   const noEmbed = overview && !embedOn;
+  // The front door is IvyeaAgent; the legacy GBrain readiness/embedding notices
+  // (Ollama, gbrain bin, version-compat) only matter when we've degraded to it.
+  const legacyGbrainMode = chatStatus?.provider !== "ivyea-agent";
 
   const openFile = useCallback(async (path: string) => {
     if (!path) return;
@@ -574,24 +576,24 @@ export default function Brain() {
       <div className="ptitle">/ 知识库工作台</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <span className="tag tg">{tab === "governance" ? "IVYEA KNOWLEDGE" : "GBRAIN COMPAT"}</span>
-        {!isMobile && <span style={{ color: "var(--t2)", fontSize: 11 }}>{tab === "governance" ? "官方来源审核、覆盖、时效、质量和冲突治理" : "上传 / 对话 / 编辑本地知识库：保留原 GBrain 工作流；右下角 IvyeaAgent 可一键迁移 ~/brain 到新知识库"}</span>}
+        <span className="tag tg">IVYEA KNOWLEDGE</span>
+        {!isMobile && <span style={{ color: "var(--t2)", fontSize: 11 }}>{tab === "governance" ? "官方来源审核、覆盖、时效、质量和冲突治理" : "对话 / 搜索 / 上传均由 IvyeaAgent 内置知识库承载；仍有旧 ~/brain 内容可在右下角 IvyeaAgent 一键迁移进来"}</span>}
         {tab !== "governance" && <button className="tbtn" onClick={() => { loadOverview(); loadFiles(); loadUploads(); loadChat(); }} style={{ marginLeft: "auto" }}>刷新</button>}
       </div>
 
       {err && tab !== "governance" && <div style={{ marginBottom: 10 }}><MiniAlert kind="bad">{err}</MiniAlert></div>}
-      {tab !== "governance" && overview?.ready && overview.ready.version_compatible === false && (
+      {legacyGbrainMode && tab !== "governance" && overview?.ready && overview.ready.version_compatible === false && (
         <div style={{ marginBottom: 10 }}><MiniAlert kind="bad">{overview.ready.hint || "GBrain 版本不兼容，知识库未就绪。"}请到「系统配置 → 系统状态」对 GBrain 执行「安装/修复」（会清掉旧版本并装回兼容版）。</MiniAlert></div>
       )}
-      {tab !== "governance" && overview?.ready && overview.ready.db_ready && overview.ready.actions?.length > 0 && (
+      {legacyGbrainMode && tab !== "governance" && overview?.ready && overview.ready.db_ready && overview.ready.actions?.length > 0 && (
         <div style={{ marginBottom: 10 }}><MiniAlert kind="ok">已自动配置：{overview.ready.actions.join("；")}。</MiniAlert></div>
       )}
-      {tab !== "governance" && overview?.ready && overview.ready.db_ready && !overview.ready.embed_ready && overview.ready.hint && (
+      {legacyGbrainMode && tab !== "governance" && overview?.ready && overview.ready.db_ready && !overview.ready.embed_ready && overview.ready.hint && (
         <div style={{ marginBottom: 10 }}><MiniAlert kind="info">{overview.ready.hint}</MiniAlert></div>
       )}
       {flash && tab !== "governance" && <div style={{ marginBottom: 10 }}><MiniAlert kind="info"><pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--font)" }}>{flash}</pre></MiniAlert></div>}
-      {tab !== "governance" && noEmbed && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">未配置 Embedding：当前以关键词检索为主（功能正常）。如需语义检索，<a href="/hub-settings" style={{ color: "var(--acc)" }}>前往系统配置 → 智能体 → 知识库语义检索 →</a> 选择服务商（Ollama 本地免费）。</MiniAlert></div>}
-      {chatStatus && !chatStatus.configured && tab === "chat" && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">Hermes 对话不可用：没有找到 hermes CLI。上传、搜索、页面编辑仍可用。</MiniAlert></div>}
+      {legacyGbrainMode && tab !== "governance" && noEmbed && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">未配置 Embedding：当前以关键词检索为主（功能正常）。如需语义检索，<a href="/hub-settings" style={{ color: "var(--acc)" }}>前往系统配置 → 智能体 → 知识库语义检索 →</a> 选择服务商（Ollama 本地免费）。</MiniAlert></div>}
+      {chatStatus && !chatStatus.configured && tab === "chat" && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">对话引擎未就绪：请确认本机 IvyeaAgent 服务在运行，或在「系统配置 → 全局兜底大模型」配置一个文本模型。搜索、上传、页面仍可用。</MiniAlert></div>}
 
       <div className="tabs" style={{ overflowX: "auto" }}>
         {TABS.map((t) => <button key={t.key} className={"tab" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>{t.label}</button>)}
@@ -818,22 +820,29 @@ export default function Brain() {
 
       {tab === "overview" && (
         <div>
-          <div className="g4" style={{ marginBottom: 10 }}>
-            <Stat label="Pages" value={stats?.pages ?? "-"} tone="var(--acc)" />
-            <Stat label="Chunks" value={stats?.chunks ?? "-"} />
-            <Stat label="Embedded" value={stats?.embedded ?? "-"} tone={(stats?.embedded ?? 0) > 0 ? "var(--acc)" : "var(--amber)"} />
-            <Stat label="Files" value={files.length} />
-          </div>
-          <div className="g2">
-            <div className="card"><div className="ct">SYSTEM</div><table className="tbl"><tbody>
-              <tr><td>Brain Root</td><td>{overview?.brain_root || "（未就绪）"}</td></tr>
-              <tr><td>GBrain</td><td>{overview?.gbrain_bin || "（未就绪）"}</td></tr>
-              <tr><td>Search Mode</td><td>{overview?.search_mode ?? "-"}</td></tr>
-              <tr><td>Doctor</td><td>{overview?.doctor_status ?? "-"}</td></tr>
-              <tr><td>Git Dirty</td><td>{overview?.git_dirty ? <span className="cell-warn">有未提交改动</span> : <span className="cell-good">干净</span>}</td></tr>
-            </tbody></table></div>
-            <div className="card"><div className="ct">BY TYPE</div>{Object.entries(stats?.by_type ?? {}).length ? <table className="tbl"><tbody>{Object.entries(stats?.by_type ?? {}).map(([k, v]) => <tr key={k}><td>{k}</td><td>{v}</td></tr>)}</tbody></table> : <div style={{ color: "var(--t3)", fontSize: 11 }}>暂无类型统计</div>}</div>
-          </div>
+          {(() => {
+            const byCat: Record<string, number> = {};
+            for (const f of files) { const k = String((f as any).category || "其他"); byCat[k] = (byCat[k] || 0) + 1; }
+            const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+            return (
+              <>
+                <div className="g4" style={{ marginBottom: 10 }}>
+                  <Stat label="知识卡片" value={files.length} tone="var(--acc)" />
+                  <Stat label="分类" value={cats.length || "-"} />
+                  <Stat label="引擎" value={chatStatus?.provider === "ivyea-agent" ? "IvyeaAgent" : (chatStatus?.provider || "-")} tone="var(--acc)" />
+                  <Stat label="状态" value={chatStatus?.configured ? "已接入" : "不可用"} tone={chatStatus?.configured ? "var(--acc)" : "var(--amber)"} />
+                </div>
+                <div className="g2">
+                  <div className="card"><div className="ct">知识引擎</div><table className="tbl"><tbody>
+                    <tr><td>前门</td><td>{chatStatus?.provider === "ivyea-agent" ? <span className="cell-good">IvyeaAgent 内置知识库</span> : <span className="cell-warn">回退：{chatStatus?.provider || "未就绪"}</span>}</td></tr>
+                    <tr><td>对话 / 检索模型</td><td>{chatStatus?.model || "-"}</td></tr>
+                    <tr><td>治理</td><td><a onClick={() => setTab("governance")} style={{ color: "var(--acc)", cursor: "pointer" }}>治理中心 →</a></td></tr>
+                  </tbody></table></div>
+                  <div className="card"><div className="ct">按分类</div>{cats.length ? <table className="tbl"><tbody>{cats.map(([k, v]) => <tr key={k}><td>{k}</td><td>{v}</td></tr>)}</tbody></table> : <div style={{ color: "var(--t3)", fontSize: 11 }}>暂无卡片</div>}</div>
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -924,23 +933,20 @@ export default function Brain() {
 
       {tab === "settings" && (
         <div className="g2">
-          <div className="card"><div className="ct">PATHS</div><table className="tbl"><tbody>
-            <tr><td>Brain Root</td><td>{overview?.brain_root}</td></tr>
-            <tr><td>GBrain Bin</td><td>{overview?.gbrain_bin}</td></tr>
-            <tr><td>Embedding</td><td>
-              {embedOn
-                ? <span className="cell-good">已配置{overview?.embed_provider ? `（${overview.embed_provider}）` : ""}</span>
-                : <><span className="cell-warn">未配置（关键词检索）</span>
-                    <a href="/hub-settings" style={{ marginLeft: 8, color: "var(--acc)", fontSize: 11 }}>去配置 →</a></>}
-            </td></tr>
-            <tr><td>Hermes Chat</td><td>{chatStatus?.configured ? <span className="cell-good">已接入</span> : <span className="cell-warn">不可用</span>}</td></tr>
-            <tr><td>Chat Engine</td><td>{chatStatus?.model || "Hermes Agent"}</td></tr>
-            <tr><td>Hermes Bin</td><td>{chatStatus?.hermes_bin || "-"}</td></tr>
+          <div className="card"><div className="ct">知识引擎</div><table className="tbl"><tbody>
+            <tr><td>前门</td><td>{chatStatus?.provider === "ivyea-agent"
+              ? <span className="cell-good">IvyeaAgent 内置知识库</span>
+              : <span className="cell-warn">回退：{chatStatus?.provider || "未就绪"}</span>}</td></tr>
+            <tr><td>对话 / 检索模型</td><td>{chatStatus?.model || "-"}</td></tr>
+            <tr><td>知识卡片</td><td>{files.length} 张</td></tr>
+            <tr><td>状态</td><td>{chatStatus?.configured ? <span className="cell-good">已接入</span> : <span className="cell-warn">不可用</span>}</td></tr>
           </tbody></table></div>
-          <div className="card"><div className="ct">ACTIONS</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="tbtn" onClick={runDoctor} disabled={loading}>运行 Doctor</button>
-            <button className="tbtn" onClick={async () => { setLoading(true); try { const r = await brainImport(); setFlash(r.raw || "导入完成"); await loadOverview(); } catch (e: any) { setErr(e?.response?.data?.detail ?? e.message); } finally { setLoading(false); } }} disabled={loading}>重新导入知识库目录</button>
-          </div></div>
+          <div className="card"><div className="ct">治理与迁移</div>
+            <div style={{ color: "var(--t3)", fontSize: 11, lineHeight: 1.8, marginBottom: 10 }}>
+              知识卡的审核、覆盖、时效与冲突治理请到「治理中心」。旧 <code>~/brain</code> 内容可在右下角 IvyeaAgent 面板一键迁移进统一知识库。
+            </div>
+            <button className="tbtn" onClick={() => setTab("governance")}>前往治理中心</button>
+          </div>
         </div>
       )}
 

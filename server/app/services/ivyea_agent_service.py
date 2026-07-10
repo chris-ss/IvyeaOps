@@ -524,6 +524,51 @@ def chat_stream(payload: dict[str, Any]) -> Any:
     return request_stream("POST", "/v1/chat/stream", payload, timeout=max(_timeout(), 300.0))
 
 
+def chat_available() -> bool:
+    """True when the local IvyeaAgent service answers /v1/health.
+
+    Used by the knowledge-base chat to decide whether to route a turn through
+    the governed IvyeaAgent brain (its built-in Amazon knowledge base) instead
+    of the legacy Hermes/global fallback.
+    """
+    try:
+        return bool(availability().get("available"))
+    except Exception:  # noqa: BLE001 — availability must never raise into chat
+        return False
+
+
+def chat_stream_events(payload: dict[str, Any]) -> Any:
+    """Yield (event_name, data_dict) parsed from the /v1/chat/stream SSE bytes.
+
+    The IvyeaAgent service writes frames as ``event: <name>\\n data: <json>\\n\\n``
+    (see ivyea_agent/service.py:_sse_send). Heartbeat/comment lines (``:`` …) and
+    blank frames are skipped. This is a blocking generator (stdlib urllib); call
+    it from a worker thread when driving an async SSE response.
+    """
+    buffer = b""
+    for chunk in chat_stream(payload):
+        if not chunk:
+            continue
+        buffer += chunk
+        while b"\n\n" in buffer:
+            frame, buffer = buffer.split(b"\n\n", 1)
+            event = "message"
+            data_lines: list[str] = []
+            for line in frame.split(b"\n"):
+                if line.startswith(b"event:"):
+                    event = line[6:].strip().decode("utf-8", "replace")
+                elif line.startswith(b"data:"):
+                    data_lines.append(line[5:].strip().decode("utf-8", "replace"))
+            if not data_lines:
+                continue
+            raw = "\n".join(data_lines)
+            try:
+                data = json.loads(raw)
+            except Exception:  # noqa: BLE001 — tolerate non-JSON payloads
+                data = {"text": raw}
+            yield event, data
+
+
 def chat_sessions(limit: int = 20) -> dict[str, Any]:
     safe_limit = max(1, min(int(limit or 20), 100))
     return request_json("GET", f"/v1/chat/sessions?limit={safe_limit}")
@@ -725,6 +770,34 @@ def knowledge_cards(limit: int = 200) -> dict[str, Any]:
 def knowledge_search(query: str, limit: int = 8) -> dict[str, Any]:
     params = urllib.parse.urlencode({"q": query, "limit": max(1, min(int(limit or 8), 50))})
     return request_json("GET", f"/v1/knowledge/search?{params}")
+
+
+def knowledge_card(card_id: str) -> dict[str, Any]:
+    safe_id = urllib.parse.quote(str(card_id).strip(), safe="")
+    return request_json("GET", f"/v1/knowledge/cards/{safe_id}")
+
+
+def knowledge_card_update(card_id: str, title: str, body: str) -> dict[str, Any]:
+    """One-shot edit of a user knowledge card: /v1/knowledge/update/apply builds
+    the draft from body and applies it (confirm=True)."""
+    payload = {
+        "id": card_id,
+        "title": title or card_id,
+        "body": body,
+        "source_type": "user",
+        "confirm": True,
+        "rebuild": True,
+    }
+    return request_json("POST", "/v1/knowledge/update/apply", payload, timeout=max(_timeout(), 60.0))
+
+
+def knowledge_user_card_path(card_id: str) -> str:
+    """Resolve a user knowledge card id to its real relative file path (the card
+    detail endpoint returns null paths; the files listing carries them)."""
+    for row in (knowledge_files(limit=1000).get("cards") or []):
+        if row.get("id") == card_id:
+            return str(row.get("path") or "")
+    return ""
 
 
 def knowledge_files(limit: int = 500) -> dict[str, Any]:

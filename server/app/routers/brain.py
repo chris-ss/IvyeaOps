@@ -15,6 +15,7 @@ from app.core.proc import no_window_kwargs
 from app.core.security import require_user
 from app.services import brain_chat_service as bc
 from app.services import gbrain_service as gb
+from app.services import ivyea_agent_service as ia
 
 
 router = APIRouter(dependencies=[Depends(require_user)])
@@ -71,6 +72,111 @@ def _handle(fn, *args, **kwargs):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _ivyea_front_door() -> bool:
+    """The governed IvyeaAgent knowledge base is the front door for search and
+    pages; the legacy GBrain markdown store is only a fallback when the local
+    IvyeaAgent service is down."""
+    return bc.ivyea_chat_available()
+
+
+def _ia_search(query: str, mode: str) -> dict[str, Any]:
+    res = ia.knowledge_search(query, limit=12)
+    items: list[dict[str, Any]] = []
+    for r in (res.get("results") or []):
+        items.append({
+            "slug": r.get("id"),
+            "score": r.get("score", 0),
+            "snippet": r.get("snippet") or "",
+            "title": r.get("title") or "",
+            "source_url": r.get("source_url") or "",
+            "marketplaces": r.get("marketplaces") or [],
+        })
+    return {"mode": mode, "query": query, "raw": "", "items": items, "source": "ivyea-agent"}
+
+
+def _ia_page(slug: str) -> dict[str, Any]:
+    res = ia.knowledge_card(slug)
+    card = res.get("card") or {}
+    body = str(card.get("body") or "")
+    src = card.get("source_url") or ""
+    header = f"> 来源：{src}\n\n" if src else ""
+    return {"slug": slug, "content": (header + body) if body else body,
+            "title": card.get("title") or "", "source_url": src, "source": "ivyea-agent"}
+
+
+def _ia_list_files() -> dict[str, Any]:
+    res = ia.knowledge_cards(limit=1000)
+    files: list[dict[str, Any]] = []
+    for c in (res.get("cards") or []):
+        cid = c.get("id") or ""
+        files.append({
+            "path": cid,                       # card id doubles as the read key
+            "name": c.get("title") or cid,
+            "summary": (c.get("snippet") or "")[:100],
+            "size": 0,
+            "category": c.get("category") or "",
+            "scope": c.get("scope") or "",
+            "marketplaces": c.get("marketplaces") or [],
+        })
+    files.sort(key=lambda f: (str(f.get("category")), str(f.get("name"))))
+    return {"files": files, "source": "ivyea-agent"}
+
+
+def _ia_read_file(path: str) -> dict[str, Any]:
+    # The pages tab is an editor; return the raw card body (no injected "> 来源"
+    # header) so an edit round-trips cleanly through write_file.
+    res = ia.knowledge_card(path)
+    card = res.get("card") or {}
+    return {"path": path, "content": str(card.get("body") or ""),
+            "title": card.get("title") or "", "source_url": card.get("source_url") or "", "source": "ivyea-agent"}
+
+
+def _strip_source_header(text: str) -> str:
+    """Defensively drop a leading '> 来源：…' blockquote (added by _ia_page) if it
+    slipped into an edited body."""
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines) and (lines[i].startswith("> 来源：") or not lines[i].strip()):
+        if lines[i].startswith("> 来源："):
+            i += 1
+            while i < len(lines) and not lines[i].strip():
+                i += 1
+            return "\n".join(lines[i:])
+        i += 1
+    return text
+
+
+def _ia_upload_result(resp: dict[str, Any]) -> dict[str, Any]:
+    # With confirm=True the applied card lands under resp["apply"]["card"];
+    # otherwise only a draft/upload record exists.
+    apply = resp.get("apply") or {}
+    card = apply.get("card") or resp.get("card") or {}
+    up = resp.get("upload") or {}
+    card_id = card.get("id") or ""
+    saved = card.get("path") or card_id or up.get("extracted_path") or "已保存到 IvyeaAgent 知识库"
+    return {"saved_path": saved, "import_status": "ok", "card_id": card_id, "source": "ivyea-agent"}
+
+
+def _ia_upload_bytes(filename: str, data: bytes, title: str | None, category: str | None) -> dict[str, Any]:
+    import base64
+    payload = {
+        "filename": filename or "upload.txt",
+        "content_base64": base64.b64encode(data).decode("ascii"),
+        "title": (title or "").strip(),
+        "source_type": "user",
+        "tags": [category] if category else [],
+        "confirm": True,   # save + apply into the governed knowledge base in one step
+        "rebuild": True,
+    }
+    return _ia_upload_result(ia.knowledge_upload(payload))
+
+
+def _ia_ingest_text(text: str) -> dict[str, Any]:
+    first = next((ln.strip().lstrip("# ").strip() for ln in text.splitlines() if ln.strip()), "note")
+    stem = (first[:40] or "note")
+    return _ia_upload_bytes(f"{stem}.md", text.encode("utf-8"), title=first[:80], category="inbox")
+
+
 @router.get("/overview")
 def overview() -> dict[str, Any]:
     # Self-heal first: auto-init the DB + auto-wire Ollama embedding so the board
@@ -102,38 +208,97 @@ def doctor() -> dict[str, Any]:
 
 @router.post("/search")
 def search(body: SearchBody) -> dict[str, Any]:
+    if _ivyea_front_door():
+        try:
+            return _ia_search(body.query, body.mode)
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain search
+            pass
     return _handle(gb.search, body.query, body.mode)
 
 
 @router.get("/page/{slug:path}")
-def get_page(slug: str) -> dict[str, str]:
+def get_page(slug: str) -> dict[str, Any]:
+    if _ivyea_front_door():
+        try:
+            return _ia_page(slug)
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain page
+            pass
     return _handle(gb.get_page, slug)
 
 
 @router.post("/page")
-def get_page_post(body: PageBody) -> dict[str, str]:
+def get_page_post(body: PageBody) -> dict[str, Any]:
+    if _ivyea_front_door():
+        try:
+            return _ia_page(body.slug)
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain page
+            pass
     return _handle(gb.get_page, body.slug)
 
 
 @router.get("/files")
 def list_files() -> dict[str, Any]:
+    if _ivyea_front_door():
+        try:
+            return _ia_list_files()
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain file list
+            pass
     return _handle(gb.list_files)
 
 
 @router.get("/file")
 def read_file(path: str = Query(..., min_length=1, max_length=240)) -> dict[str, Any]:
+    # A card id (e.g. "policies.account_health_ca") has no path separator; a
+    # legacy GBrain file always does. Route card ids to the governed KB.
+    if _ivyea_front_door() and "/" not in path:
+        try:
+            return _ia_read_file(path)
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain read
+            pass
     return _handle(gb.read_file, path)
 
 
 @router.put("/file")
 def write_file(body: FileWriteBody, user: str = Depends(require_user)) -> dict[str, Any]:
     _ = user
+    # IvyeaAgent front door: card ids have no path separator. Route user-card
+    # edits through the governed update/apply flow; official (builtin) cards are
+    # not editable here — they go through the governance review/publish flow.
+    if _ivyea_front_door() and "/" not in body.path:
+        cid = body.path
+        if not cid.startswith("user."):
+            raise HTTPException(status_code=400, detail="这是 IvyeaAgent 官方治理知识卡，请在「治理中心」走审核发布流程编辑，不能直接改写。")
+        try:
+            title = (ia.knowledge_card(cid).get("card") or {}).get("title") or cid
+        except Exception:  # noqa: BLE001
+            title = cid
+        try:
+            resp = ia.knowledge_card_update(cid, title, _strip_source_header(body.content))
+        except ia.IvyeaAgentError as e:
+            raise HTTPException(status_code=400, detail=f"保存到 IvyeaAgent 失败：{e}") from e
+        if not resp.get("ok"):
+            raise HTTPException(status_code=400, detail=f"保存失败：{resp.get('result') or resp}")
+        return {"ok": True, "path": cid, "saved_path": cid, "source": "ivyea-agent"}
     return _handle(gb.write_file, body.path, body.content)
 
 
 @router.delete("/file")
 def delete_file(path: str = Query(..., min_length=1, max_length=240), user: str = Depends(require_user)) -> dict[str, Any]:
     _ = user
+    if _ivyea_front_door() and "/" not in path:
+        cid = path
+        if not cid.startswith("user."):
+            raise HTTPException(status_code=400, detail="IvyeaAgent 官方治理知识卡不能在此删除，请到「治理中心」处理。")
+        try:
+            real = ia.knowledge_user_card_path(cid)
+            if not real:
+                raise HTTPException(status_code=404, detail="未找到该用户知识卡对应的文件，无法删除。")
+            resp = ia.knowledge_delete_file(real)
+        except ia.IvyeaAgentError as e:
+            raise HTTPException(status_code=400, detail=f"从 IvyeaAgent 删除失败：{e}") from e
+        if not resp.get("ok"):
+            raise HTTPException(status_code=400, detail="删除失败。")
+        return {"ok": True, "removed": [cid], "removed_card_ids": resp.get("removed_card_ids") or [cid], "source": "ivyea-agent"}
     return _handle(gb.delete_file, path)
 
 
@@ -155,6 +320,11 @@ async def upload_knowledge(
     import_after_save: bool = Form(True),
 ) -> dict[str, Any]:
     data = await file.read(bc.MAX_UPLOAD_BYTES + 1)
+    if _ivyea_front_door():
+        try:
+            return _ia_upload_bytes(file.filename or "upload.txt", data, title, category)
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain upload
+            pass
     return _handle(bc.upload_knowledge, file.filename or "upload", data, category, title, import_after_save)
 
 
@@ -165,6 +335,11 @@ def uploads(limit: int = Query(50, ge=1, le=100)) -> dict[str, Any]:
 
 @router.post("/ingest/text")
 def ingest_text(body: IngestTextBody) -> dict[str, Any]:
+    if _ivyea_front_door():
+        try:
+            return _ia_ingest_text(body.text)
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain ingest
+            pass
     return _handle(bc.ingest_pasted_text, body.text, body.import_after_save)
 
 
@@ -303,6 +478,39 @@ def _sse(evt: dict[str, Any]) -> str:
     return f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
 
 
+async def _bridge_ivyea_stream(question: str, session_id: str):
+    """Drive IvyeaAgent /v1/chat/stream (blocking, stdlib urllib) from a worker
+    thread and yield its (event, data) frames into the async SSE handler."""
+    q: asyncio.Queue = asyncio.Queue()
+    sentinel = object()
+    loop = asyncio.get_running_loop()
+
+    def _produce() -> None:
+        try:
+            payload = {
+                "message": question,
+                "session_id": session_id or "",
+                "plan_mode": True,   # read-only knowledge turn, no side effects
+                "persist": False,    # IvyeaOps owns session persistence
+            }
+            for event, data in ia.chat_stream_events(payload):
+                loop.call_soon_threadsafe(q.put_nowait, (event, data))
+        except Exception as exc:  # noqa: BLE001 — surface as an error frame
+            loop.call_soon_threadsafe(q.put_nowait, ("error", {"detail": str(exc)}))
+        finally:
+            loop.call_soon_threadsafe(q.put_nowait, sentinel)
+
+    task = loop.run_in_executor(None, _produce)
+    try:
+        while True:
+            item = await q.get()
+            if item is sentinel:
+                break
+            yield item
+    finally:
+        await task
+
+
 _STREAM_DEADLINE_S = int(__import__("os").environ.get("BRAIN_CHAT_HERMES_TIMEOUT", "180"))
 
 
@@ -312,8 +520,16 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
     start{user_message,citations} → token{text}* → done{assistant_message} | error{detail}."""
 
     async def gen():
+        # Front door: route the knowledge chat through the governed IvyeaAgent
+        # brain (its built-in Amazon knowledge base) when the local service is
+        # up; skip the legacy GBrain citation retrieval in that case. Hermes /
+        # the global text chain remain only as fallbacks when IvyeaAgent is down.
+        use_ivyea = bc.ivyea_chat_available()
         try:
-            turn = bc.begin_chat_turn(session_id, body.content, regenerate=body.regenerate, category=body.category)
+            turn = bc.begin_chat_turn(
+                session_id, body.content, regenerate=body.regenerate,
+                category=body.category, retrieve=not use_ivyea,
+            )
         except (gb.GBrainError, bc.BrainChatError) as e:
             yield _sse({"type": "error", "detail": str(e)})
             return
@@ -330,10 +546,36 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
 
         parts: list[str] = []
         timed_out = False
-        engine = ""  # which engine actually produced the answer: hermes | global
+        engine = ""  # which engine produced the answer: ivyea-agent | hermes | global
 
-        # Prefer Hermes (token-by-token) when its agent venv is present.
-        if bc.hermes_available():
+        # 1) IvyeaAgent brain (token-by-token over the local bridge).
+        if use_ivyea:
+            try:
+                async for event, data in _bridge_ivyea_stream(turn.get("question") or body.content, session_id):
+                    if event == "token":
+                        text = str(data.get("text") or "")
+                        if text:
+                            parts.append(text)
+                            yield _sse({"type": "token", "text": text})
+                    elif event == "event":
+                        # tool/thinking narration — keep the SSE connection warm
+                        # during a long agent turn without polluting the answer.
+                        yield ":hb\n\n"
+                    elif event == "final":
+                        full = str(data.get("text") or "")
+                        if full and not "".join(parts).strip():
+                            parts.append(full)
+                            yield _sse({"type": "token", "text": full})
+                    elif event == "error":
+                        # degrade to the global chain below (do not surface yet)
+                        break
+                if "".join(parts).strip():
+                    engine = "ivyea-agent"
+            except Exception:  # noqa: BLE001 — degrade to fallbacks below
+                pass
+
+        # 2) Hermes (only when IvyeaAgent is unavailable), token-by-token.
+        if not "".join(parts).strip() and not use_ivyea and bc.hermes_available():
             spec = bc.stream_spec(turn["prompt"])
             proc = None
             try:
@@ -387,16 +629,16 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
                     except Exception:
                         pass
 
-        if "".join(parts).strip():
+        if not engine and "".join(parts).strip():
             engine = "hermes"
 
         # Fall back to the unified global text chain (DeepSeek → Apimart → 全局兜底
-        # 大模型) when Hermes is absent or produced nothing — so the knowledge-base
-        # chat works without any local agent CLI, and an empty Hermes reply still
-        # yields an answer.
+        # 大模型) when IvyeaAgent/Hermes are absent or produced nothing — so the
+        # knowledge-base chat still answers without any local agent.
         if not "".join(parts).strip():
+            fallback_prompt = turn.get("prompt") or (turn.get("question") or body.content)
             try:
-                async for chunk in bc.stream_global_answer(turn["prompt"]):
+                async for chunk in bc.stream_global_answer(fallback_prompt):
                     parts.append(chunk)
                     yield _sse({"type": "token", "text": chunk})
                 timed_out = False
@@ -404,12 +646,12 @@ async def chat_message_stream(session_id: str, body: ChatStreamBody):
                     engine = "global"
             except Exception as e:  # noqa: BLE001
                 if not "".join(parts).strip():
-                    yield _sse({"type": "error", "detail": f"对话失败（Hermes 不可用，全局兜底也失败）：{e}"})
+                    yield _sse({"type": "error", "detail": f"对话失败（IvyeaAgent 与全局兜底均不可用）：{e}"})
                     return
 
         answer = "".join(parts)
         if not answer.strip():
-            yield _sse({"type": "error", "detail": "未能生成回答：请安装 Hermes，或在「系统配置 → 全局兜底大模型」配置一个文本模型。"})
+            yield _sse({"type": "error", "detail": "未能生成回答：请确认 IvyeaAgent 服务在运行，或在「系统配置 → 全局兜底大模型」配置一个文本模型。"})
             return
         try:
             assistant = bc.commit_chat_answer(session_id, answer, turn["citations"])
