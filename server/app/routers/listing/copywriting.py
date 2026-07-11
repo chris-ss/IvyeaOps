@@ -284,7 +284,7 @@ async def run_copy_pipeline(*, marketplace: str, product_type: str, asins: list[
 
     report(2, "正在生成文案（Hermes → 全局兜底 → Codex → Claude）…")
     prompt = _build_listing_prompt(marketplace, product_type, product_notes, vision_result, competitor_result)
-    result_text = await _call_ai(prompt, max_tokens=4096, web_search=False)
+    result_text = await _call_ai(prompt, web_search=False)
     if not str(result_text or "").strip():
         raise RuntimeError("AI 未返回内容，请稍后重试")
 

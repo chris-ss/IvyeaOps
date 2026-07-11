@@ -97,6 +97,11 @@ export interface PlanImage {
   slot: string;
   role: string;
   shot_type: string;
+  product_presence?: "hero" | "supporting" | "environmental" | "absent";
+  layout?: string;
+  subline?: string | null;
+  big_number?: string | null;
+  template_url?: string;
   buyer_question?: string;
   selling_point?: string | null;
   evidence?: string;
@@ -130,6 +135,7 @@ export interface PlanQuality {
 
 export interface Plan {
   deliverable: "gallery" | "aplus";
+  planner?: "ai" | "fallback" | "";
   style?: { direction?: string; palette?: string; lighting?: string; accent_color?: string } | null;
   product_profile?: { category_family?: string; object_behavior?: string; fidelity_anchors?: string[] } | null;
   product_lock?: string;

@@ -49,11 +49,14 @@ class ReviewRenderReq(BaseModel):
     layout_blueprint: str = ""
     eyebrow: str = ""
     headline: str = ""
+    subline: str = ""
+    big_number: str = ""
     callout: str = ""
     supporting_text: str = ""
     proof: str = ""
     source_url: str = ""
     show_product: bool = True
+    product_presence: str = "supporting"   # hero|supporting|environmental|absent
     product_fidelity_anchors: list[str] = []
 
 
@@ -81,6 +84,129 @@ _TEXT_ZONES = {
     "bottom-left", "bottom-center", "bottom-right",
 }
 _LAYOUT_STYLES = {"editorial", "minimal", "split", "proof", "grid"}
+
+# ─── 产品出场光谱（对标优秀 3C 套图：产品不必张张当主角）────────────────────
+# hero: 产品主体 55-75% 画幅；supporting: 25-40% 与场景/面板共存；
+# environmental: ≤15% 融入真实场景讲故事；absent: 产品不出现（成果样片/对比/纯规格）。
+_PRESENCES = {"hero", "supporting", "environmental", "absent"}
+_PRESENCE_SCALE = {"hero": 0.65, "supporting": 0.32, "environmental": 0.10, "absent": 0.0}
+_PRESENCE_DEFAULT_BY_TYPE = {
+    "white_main": "hero", "in_box": "hero", "detail": "supporting",
+    "hero_feature": "supporting", "lifestyle": "environmental",
+    "comparison": "absent", "specs": "supporting", "trust": "environmental",
+    "aplus_banner": "supporting",
+}
+
+# ─── 版式家族（从 DJI/Anker 级 3C 套图语法提炼；服务端编译成确定性段落）──────
+_LAYOUT_FAMILIES = {
+    "white_main", "poster_hero", "result_showcase", "split_compare", "spec_grid",
+    "scenario_mosaic", "human_context", "in_box_flatlay", "detail_macro", "trust_close",
+}
+_LAYOUT_DEFAULT_BY_TYPE = {
+    "white_main": "white_main", "hero_feature": "poster_hero", "lifestyle": "human_context",
+    "detail": "detail_macro", "comparison": "split_compare", "specs": "spec_grid",
+    "in_box": "in_box_flatlay", "trust": "trust_close", "aplus_banner": "poster_hero",
+}
+
+_LAYOUT_PROMPTS = {
+    "white_main": (
+        "Pure #FFFFFF seamless Amazon main image. The complete product fills 80-90% of the frame, "
+        "perfectly lit studio photography with a soft natural contact shadow. No text, no graphics, no props."
+    ),
+    "poster_hero": (
+        "Premium brand poster layout: a clean title band across the {text_zone} area holds the headline in large "
+        "confident type with the subline beneath it in one quiet line{big_number_clause}. The remaining canvas is a "
+        "single striking commercial visual for this selling point{presence_clause}. Deliberate negative space, "
+        "one clear focal point, editorial balance — designed like a top-tier consumer electronics brand page."
+    ),
+    "result_showcase": (
+        "Outcome-first layout: the canvas is dominated by a beautiful, realistic example of what this product "
+        "category delivers ({scene}), presented like professionally captured content{big_number_clause}. Title band "
+        "in the {text_zone} area with the headline and subline. The physical product itself stays out of frame — "
+        "the result is the hero."
+    ),
+    "split_compare": (
+        "Two-panel comparison layout: the canvas splits into two equal side-by-side panels showing the same subject "
+        "under the two contrasted conditions, with a small rounded corner tag on each panel and a subtle divider"
+        "{big_number_clause}. Headline and subline sit in a title band across the {text_zone} area. Both panels are "
+        "realistic photographic content, identical framing, only the contrasted condition differs."
+    ),
+    "spec_grid": (
+        "Dark premium spec-panel layout: a 2x2 (or 1+2) grid of rounded rectangular panels on a deep neutral "
+        "background. Each panel pairs one oversized statistic in bold type with a short caption; one panel may hold "
+        "a small angled product render{big_number_clause}. Headline across the {text_zone} area. Clean, technical, "
+        "high-contrast — like a flagship electronics brand's spec sheet."
+    ),
+    "scenario_mosaic": (
+        "Use-case mosaic layout: one wide primary panel plus two smaller panels beneath it, each a realistic "
+        "photograph of a different real usage scenario ({scene}), each with a tiny corner label chip. Headline and "
+        "subline in a title band across the {text_zone} area{presence_clause}."
+    ),
+    "human_context": (
+        "Authentic in-use photograph: a real person naturally using the product in {scene}. The environment and the "
+        "human moment dominate the frame{presence_clause}; believable posture, natural light, honest scale. Title "
+        "band with headline and subline in the {text_zone} area kept visually calm."
+    ),
+    "in_box_flatlay": (
+        "What's-in-the-box flat lay: every included item arranged neatly on a clean seamless background with even "
+        "spacing and soft shadows, the main unit largest{presence_clause}. Small caption under each item is allowed "
+        "only if listed in the copy contract. Headline across the {text_zone} area."
+    ),
+    "detail_macro": (
+        "Macro craftsmanship shot: an extreme close crop of the real product detail that proves this selling point, "
+        "shallow depth of field, tactile material realism{presence_clause}{big_number_clause}. Headline and subline "
+        "in the {text_zone} area over calm negative space."
+    ),
+    "trust_close": (
+        "Trust closing layout: a warm, reassuring real-life scene ({scene}) that summarises the ownership "
+        "experience{presence_clause}, with a restrained row of small outlined badges only for claims present in the "
+        "copy contract. Headline and subline in the {text_zone} area."
+    ),
+}
+
+# ─── 内置精品套图叙事库（借鉴优秀 3C 卖家；采不到竞品套图时的骨架）───────────
+# 每项: (shot_type, presence, layout, 角色)
+_GALLERY_NARRATIVES = {
+    "rigid_device": [
+        ("white_main", "hero", "white_main", "主图"),
+        ("hero_feature", "supporting", "poster_hero", "核心利益"),
+        ("comparison", "absent", "split_compare", "成果对比"),
+        ("specs", "supporting", "spec_grid", "规格一览"),
+        ("lifestyle", "environmental", "human_context", "真实使用"),
+        ("detail", "supporting", "detail_macro", "关键细节"),
+        ("trust", "absent", "scenario_mosaic", "多场景信任"),
+        ("in_box", "hero", "in_box_flatlay", "包装清单"),
+    ],
+    "soft_goods": [
+        ("white_main", "hero", "white_main", "主图"),
+        ("hero_feature", "supporting", "poster_hero", "核心利益"),
+        ("detail", "supporting", "detail_macro", "材质细节"),
+        ("lifestyle", "environmental", "human_context", "真实使用"),
+        ("comparison", "absent", "split_compare", "效果对比"),
+        ("specs", "supporting", "spec_grid", "规格尺寸"),
+        ("trust", "environmental", "trust_close", "信任收口"),
+        ("in_box", "hero", "in_box_flatlay", "套装内容"),
+    ],
+    "spatial_gear": [
+        ("white_main", "hero", "white_main", "主图"),
+        ("lifestyle", "environmental", "human_context", "真实场景"),
+        ("hero_feature", "supporting", "poster_hero", "核心利益"),
+        ("specs", "absent", "spec_grid", "规格容量"),
+        ("detail", "supporting", "detail_macro", "结构细节"),
+        ("comparison", "absent", "split_compare", "环境对比"),
+        ("trust", "environmental", "scenario_mosaic", "多场景信任"),
+        ("in_box", "hero", "in_box_flatlay", "包装清单"),
+    ],
+}
+_GALLERY_NARRATIVES["category_specific"] = _GALLERY_NARRATIVES["rigid_device"]
+_APLUS_NARRATIVE = [
+    ("aplus_banner", "supporting", "poster_hero", "品牌首屏"),
+    ("hero_feature", "absent", "result_showcase", "核心利益"),
+    ("lifestyle", "environmental", "human_context", "使用方式"),
+    ("detail", "supporting", "detail_macro", "技术/细节"),
+    ("trust", "absent", "scenario_mosaic", "信任收口"),
+]
+
 _LAYOUT_BLUEPRINTS = {
     "white_bundle", "media_proof_split", "connectivity_diagram",
     "environmental_proof", "coverage_diagram", "speed_comparison",
@@ -278,6 +404,164 @@ def _set_colour_prompt(style: dict, shot_type: str) -> str:
     )
 
 
+# ─── Render Prompt 编译器 ─────────────────────────────────────────────────────
+# LLM 只产出紧凑的结构字段（presence/layout/headline/…），最终生图提示词由这里
+# 确定性编译。好处：① 策划输出体积降一个量级，截断绝迹；② 版式语言/保真规则/
+# 文案合同集中可控，不再依赖模型每次自由发挥出 250 词长文。
+
+def _presence_clause(presence: str, product_scale: float) -> str:
+    if presence == "hero":
+        return (
+            "; the exact reference product is the dominant subject, "
+            f"filling roughly {int(product_scale * 100)}% of the frame"
+        )
+    if presence == "supporting":
+        return (
+            "; the exact reference product appears clearly but shares the stage, "
+            f"occupying roughly {int(product_scale * 100)}% of the frame"
+        )
+    if presence == "environmental":
+        return (
+            "; the exact reference product appears small and natural within the scene, "
+            f"around {max(5, int(product_scale * 100))}% of the frame — the story is the environment, not the device"
+        )
+    return ""  # absent：版式模板自身已声明产品不出现
+
+
+def _compile_layout_section(image: dict) -> str:
+    layout = str(image.get("layout") or "")
+    if layout not in _LAYOUT_FAMILIES:
+        layout = _LAYOUT_DEFAULT_BY_TYPE.get(str(image.get("shot_type") or ""), "poster_hero")
+    presence = str(image.get("product_presence") or "supporting")
+    scale = _clamped_float(image.get("product_scale"), _PRESENCE_SCALE.get(presence, 0.32), 0.04, 0.9)
+    big_number = _clean_text(image.get("big_number"))
+    template = _LAYOUT_PROMPTS.get(layout, _LAYOUT_PROMPTS["poster_hero"])
+    body = template.format(
+        text_zone=str(image.get("text_zone") or "top-center"),
+        scene=_clean_text(image.get("scene")) or "a realistic category-appropriate setting",
+        presence_clause=_presence_clause(presence, scale),
+        big_number_clause=(
+            f", anchored by the oversized statistic \"{big_number}\" as a bold graphic element"
+            if big_number else ""
+        ),
+    )
+    extras = []
+    concept = _clean_text(image.get("visual_concept"))
+    if concept:
+        extras.append(f"Creative concept: {concept}.")
+    camera = _clean_text(image.get("camera_direction"))
+    if camera:
+        extras.append(f"Camera and composition: {camera}.")
+    return f"Layout family: {layout}. {body} " + " ".join(extras)
+
+
+def _compile_presence_section(image: dict, product_profile: dict, product_lock: str) -> str:
+    presence = str(image.get("product_presence") or "supporting")
+    anchors = ", ".join(
+        _clean_text(v) for v in (product_profile.get("fidelity_anchors") or []) if _clean_text(v)
+    ) or "silhouette, proportions, colour, material, visible construction, markings"
+    behaviour = _clean_text(product_profile.get("object_behavior")) or "category-specific physical behaviour"
+    lock = f"{_clean_text(product_lock)}. " if _clean_text(product_lock) else ""
+    if presence == "absent":
+        return (
+            "The physical product does NOT appear in this image. Do not sneak the device, its packaging or its "
+            "accessories into the frame. This image shows the outcome, comparison, scenario or information the "
+            "buyer cares about — a standard practice on premium listings. Keep every visual physically plausible."
+        )
+    accessory_rule = (
+        "Include every item that belongs to the purchased set, arranged deliberately."
+        if str(image.get("shot_type")) == "in_box" else
+        "Show ONLY the primary product itself. Do NOT carry packaging, memory cards, cables, manuals or any "
+        "loose accessory items from the reference photo into this scene — the reference may be a bundle shot; "
+        "everything except the main unit is reference noise here."
+    )
+    treatment = _clean_text(image.get("product_treatment"))
+    treatment_rule = f"Product treatment: {treatment}. " if treatment else ""
+    return (
+        f"REFERENCE IMAGE 1 is the only immutable product truth. {lock}"
+        f"Preserve exactly: {anchors}. Physical behaviour: {behaviour}. {treatment_rule}{accessory_rule} "
+        "Change only the environment, camera, composition, lighting and supporting design. Do not redesign, "
+        "recolour, relabel, simplify or add parts. Existing logos, labels and printed markings on the product "
+        "must remain unchanged."
+    )
+
+
+def _compile_copy_section(image: dict, plan_style: dict) -> str:
+    if not image.get("text_on_image"):
+        return (
+            "This artwork intentionally contains no added marketing copy. Do not render headlines, captions, "
+            "letters, numbers, badges, icons, diagrams, app UI or watermarks."
+        )
+    exact_copy = {
+        key: value for key, value in (
+            ("eyebrow", image.get("eyebrow")), ("headline", image.get("headline")),
+            ("subline", image.get("subline")), ("callout", image.get("callout")),
+            ("supporting_text", image.get("supporting_text")),
+            ("big_number", image.get("big_number")), ("proof", image.get("proof")),
+        ) if _clean_text(value)
+    }
+    contract = json.dumps(exact_copy, ensure_ascii=False)
+    return (
+        f"This is final pixel artwork. Render every string in this JSON exactly once and character-for-character: "
+        f"{contract}. Do not translate, paraphrase, abbreviate, add, omit or repeat any character. "
+        f"Type system: {plan_style.get('type_system')}. Hierarchy: headline dominant, subline one quiet line "
+        "beneath it, big_number oversized as a graphic anchor when present, other strings small. Keep all type "
+        "inside an 8% safe margin, high contrast, unobstructed, readable at mobile thumbnail size. The typography "
+        "is part of the designed composition, never a pasted caption."
+    )
+
+
+def _compile_render_prompt(image: dict, plan_style: dict, product_profile: dict,
+                           plan: dict, deliverable: str) -> str:
+    """从结构字段确定性编译最终生图提示词。
+
+    用户手改过的 render_prompt 会被保留为开头的自定义描述（剥掉旧 [SECTION] 后的
+    余文），其余全部按当前字段重编译——改字段永远生效，改提示词也不丢。
+    """
+    existing = str(image.get("render_prompt") or "")
+    base = existing
+    for name in ("SHOT DESIGN", "PRODUCT IDENTITY LOCK", "PRODUCT PRESENCE", "SET COLOR SYSTEM",
+                 "USER CREATIVE DIRECTION", "FINAL ARTWORK COPY", "OUTPUT SAFETY"):
+        base = re.sub(rf"\s*\[{re.escape(name)}\].*?\[/{re.escape(name)}\]\s*", " ", base, flags=re.I | re.S)
+    base = _ground_render_prompt(base)
+    if not base:
+        size = str(image.get("size") or ("1464x600" if deliverable == "aplus" else "1600x1600"))
+        base = (
+            f"Create one finished, commercially polished Amazon {'A+ module' if deliverable == 'aplus' else 'listing image'} "
+            f"on a {size} canvas. Photorealistic materials, believable light and physics, restrained premium design."
+        )
+    creative_brief = _clean_text(plan.get("creative_brief"))
+    language = _clean_text(plan.get("language")) or "en"
+    prompt = base
+    prompt = _replace_prompt_section(prompt, "SHOT DESIGN", _compile_layout_section(image))
+    prompt = _replace_prompt_section(
+        prompt, "PRODUCT PRESENCE",
+        _compile_presence_section(image, product_profile, str(plan.get("product_lock") or "")),
+    )
+    prompt = _replace_prompt_section(
+        prompt, "SET COLOR SYSTEM", _set_colour_prompt(plan_style, str(image.get("shot_type") or "")),
+    )
+    prompt = _replace_prompt_section(
+        prompt, "USER CREATIVE DIRECTION",
+        (
+            f"Highest-priority creative requirement after product identity, factual accuracy and marketplace rules: "
+            f"{creative_brief}. Follow it for audience, mood, scene, emphasis, exclusions and design character. "
+            if creative_brief else
+            "No additional manual creative requirement was supplied; follow the product-specific set direction. "
+        ) + f"The requested language for added artwork copy is {language}.",
+    )
+    if image.get("text_on_image"):
+        prompt = _remove_legacy_textless_directions(prompt)
+    prompt = _replace_prompt_section(prompt, "FINAL ARTWORK COPY", _compile_copy_section(image, plan_style))
+    prompt = _replace_prompt_section(
+        prompt, "OUTPUT SAFETY",
+        "Do not invent additional copy, claims, certifications, logos, labels, icons, badges, diagrams, app UI or "
+        "watermarks. The exact public copy in FINAL ARTWORK COPY is the only added text allowed. Product labels "
+        "already visible on the reference product are part of the product and must remain unchanged.",
+    )
+    return prompt
+
+
 def _infer_layout_blueprint(item: dict, index: int, shot_type: str) -> str:
     explicit = str(item.get("layout_blueprint") or "").strip()
     if explicit in _LAYOUT_BLUEPRINTS:
@@ -459,6 +743,75 @@ Do not design image slots, do not copy the collected gallery's composition, and 
     return _normalise_product_visual_profile(parsed, fallback)
 
 
+_VISION_BATCH = 4
+
+
+async def _analyze_reference_templates(scrape_data: dict) -> list[dict]:
+    """把采集到的竞品套图逐张逆向成可复用的版式语法（借鉴优秀卖家，通道 2）。
+
+    只提取可迁移的销售任务与版式结构（presence/layout/视觉结构），从不复制像素、
+    品牌与文案。产出喂给策划器作参考语法，并可为对应卡绑定 template_url 走
+    双参考生图（REFERENCE 2 = 仅版式模板）。
+    """
+    refs = _reference_images(scrape_data)[:8]
+    if len(refs) < 4 or not has_vision():
+        return []
+    images: list[tuple[int, str]] = []
+    for index, url in enumerate(refs, 1):
+        data_uri = await _img_datauri_from_url(url)
+        if data_uri:
+            images.append((index, data_uri))
+    story: list[dict] = []
+    allowed_types = _SHOT_TYPES - {"aplus_banner"}
+    for offset in range(0, len(images), _VISION_BATCH):
+        batch = images[offset:offset + _VISION_BATCH]
+        indices = [item[0] for item in batch]
+        prompt = f"""你是电商视觉总监。下面是某优秀亚马逊卖家套图中的原始第 {indices[0]}–{indices[-1]} 张。
+逐张反推设计逻辑，不评价产品好坏。只返回 JSON：
+{{"templates":[{{"index":1,"role":"简短中文角色","shot_type":"white_main|hero_feature|lifestyle|detail|comparison|specs|in_box|trust",
+"product_presence":"hero|supporting|environmental|absent","layout":"white_main|poster_hero|result_showcase|split_compare|spec_grid|scenario_mosaic|human_context|in_box_flatlay|detail_macro|trust_close",
+"buyer_question":"这张图回答的购买问题","visual_structure":"主体位置/大小、镜头类型、分栏或网格、背景层次、标题区位置","text_zone":"top-left|top-center|top-right|center-left|center-right|bottom-left|bottom-center|bottom-right"}}]}}
+要求：index 必须使用原始序号 {indices}；识别图片实际内容；product_presence 按产品在画面中的真实占比判断
+（产品不在画面=absent，产品很小=environmental）；忽略图中品牌文案措辞，只提取可迁移的销售任务和版式结构。"""
+        try:
+            parsed = _strip_json(await _collect_vision(prompt, [item[1] for item in batch])) or {}
+        except Exception:
+            parsed = {}
+        for item in parsed.get("templates", []) if isinstance(parsed, dict) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                index = int(item.get("index"))
+            except (TypeError, ValueError):
+                continue
+            if index not in indices:
+                continue
+            shot_type = str(item.get("shot_type") or "hero_feature").strip().lower()
+            if shot_type not in allowed_types:
+                shot_type = "hero_feature"
+            presence = str(item.get("product_presence") or "").strip().lower()
+            if presence not in _PRESENCES:
+                presence = _PRESENCE_DEFAULT_BY_TYPE.get(shot_type, "supporting")
+            layout = str(item.get("layout") or "").strip().lower()
+            if layout not in _LAYOUT_FAMILIES:
+                layout = _LAYOUT_DEFAULT_BY_TYPE.get(shot_type, "poster_hero")
+            text_zone = str(item.get("text_zone") or "top-center")
+            if text_zone not in _TEXT_ZONES:
+                text_zone = "top-center"
+            story.append({
+                "index": index,
+                "url": refs[index - 1] if 0 < index <= len(refs) else "",
+                "role": _clean_text(item.get("role"))[:24],
+                "shot_type": shot_type,
+                "product_presence": presence,
+                "layout": layout,
+                "buyer_question": _clean_text(item.get("buyer_question"))[:160],
+                "visual_structure": _clean_text(item.get("visual_structure"))[:500],
+                "text_zone": text_zone,
+            })
+    return sorted(story, key=lambda item: item["index"])
+
+
 # ─── 策略质检 ─────────────────────────────────────────────────────────────────
 
 def _creative_plan_quality(images: list[dict], deliverable: str) -> dict:
@@ -477,6 +830,16 @@ def _creative_plan_quality(images: list[dict], deliverable: str) -> dict:
             add("main_compliance", "首图必须是纯白底、无文字主图", "error")
         if not 5 <= len(images) <= 8:
             add("gallery_count", "商品套图建议保留 5–8 张", "warning")
+    presences = [str(img.get("product_presence") or "supporting") for img in images]
+    hero_count = sum(p == "hero" for p in presences)
+    if hero_count > 2:
+        add("presence_monotony", f"{hero_count} 张都以产品为绝对主体，构图同质化——优秀套图的产品大特写不超过 2 张", "error")
+    if deliverable == "gallery" and len(images) >= 5 and not any(p in ("absent", "environmental") for p in presences):
+        add("presence_no_story", "整套没有任何成果/场景叙事图（产品缺席或极小的画面），不符合优秀 3C 套图语法", "error")
+    layouts = [str(img.get("layout") or "") for img in images]
+    for layout in set(layouts):
+        if layout and layout != "white_main" and layouts.count(layout) > 2:
+            add("layout_repetition", f"版式 {layout} 使用了 {layouts.count(layout)} 次，建议不超过 2 次")
     seen_points: set[str] = set()
     seen_concepts: set[str] = set()
     seen_cameras: set[str] = set()
@@ -501,21 +864,26 @@ def _creative_plan_quality(images: list[dict], deliverable: str) -> dict:
             add("ai_aesthetic", f"第 {idx + 1} 张仍包含容易产生 AI 感的夸张场景词", "error")
         if len(str(image.get("headline") or "")) > 48:
             add("headline_length", f"第 {idx + 1} 张标题偏长，手机端可读性较差")
-        for field in ("headline", "eyebrow", "supporting_text", "proof", "callout"):
+        for field in ("headline", "subline", "big_number", "eyebrow", "supporting_text", "proof", "callout"):
             if _INTERNAL_PUBLIC_COPY_RE.search(str(image.get(field) or "")):
                 add("internal_copy", f"第 {idx + 1} 张把内部审核说明写进了消费者文案", "error")
                 break
         public_copy = [
             str(image.get(field) or "").strip()
-            for field in ("eyebrow", "headline", "callout", "supporting_text", "proof")
+            for field in ("eyebrow", "headline", "subline", "big_number", "callout", "supporting_text", "proof")
             if str(image.get(field) or "").strip()
         ]
         if image.get("text_on_image"):
             prompt = str(image.get("render_prompt") or "")
             if not public_copy:
                 add("missing_artwork_copy", f"第 {idx + 1} 张启用了图上文字但没有可生成的公开文案", "error")
-            elif "[FINAL ARTWORK COPY]" not in prompt or any(value not in prompt for value in public_copy):
-                add("copy_not_compiled", f"第 {idx + 1} 张公开文案尚未完整编译进最终生图提示词", "error")
+            else:
+                def _in_prompt(value: str) -> bool:
+                    # 文案合同以 JSON 形式编译进提示词，含引号/反斜杠的文案会被
+                    # 转义（2.0" → 2.0\"）——按转义后形态比对，避免误报。
+                    return value in prompt or json.dumps(value, ensure_ascii=False)[1:-1] in prompt
+                if "[FINAL ARTWORK COPY]" not in prompt or any(not _in_prompt(v) for v in public_copy):
+                    add("copy_not_compiled", f"第 {idx + 1} 张公开文案尚未完整编译进最终生图提示词", "error")
         if image.get("proof") and not _public_proof(image.get("proof")):
             add("invalid_public_proof", f"第 {idx + 1} 张的证明数字不是简短、可公开的事实", "error")
         expected_size = "1464x600" if deliverable == "aplus" else "1600x1600"
@@ -523,8 +891,15 @@ def _creative_plan_quality(images: list[dict], deliverable: str) -> dict:
             add("canvas_mismatch", f"第 {idx + 1} 张画布必须统一为 {expected_size}", "error")
         if image.get("asset_mode") != "generate":
             add("direct_generation_required", f"第 {idx + 1} 张未使用统一的模型直出策略", "error")
-        if not image.get("product_source_url"):
+        presence = str(image.get("product_presence") or ("absent" if image.get("show_product") is False else "supporting"))
+        if presence != "absent" and not image.get("product_source_url"):
             add("product_pending", f"第 {idx + 1} 张需要上传或采集的产品真值图，禁止无参考生成", "error")
+        headline_text = str(image.get("headline") or "").strip()
+        if headline_text and (
+            headline_text.endswith((":", "-", ",", "：")) or headline_text.startswith("[")
+            or re.search(r"\b(?:the|a|an|with|and|to|of|for)$", headline_text, re.I)
+        ):
+            add("headline_fragment", f"第 {idx + 1} 张标题是截断碎片（\"{headline_text[:30]}\"），必须是完整短语", "error")
         if image.get("requires_source"):
             add("missing_evidence", f"第 {idx + 1} 张依赖未提供的真实证据，应换成有事实支撑的直出画面", "error")
         if idx and not image.get("evidence"):
@@ -589,22 +964,31 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
     for i, it in enumerate(raw or []):
         if not isinstance(it, dict):
             continue
-        rp = _ground_render_prompt(str(it.get("render_prompt") or ""))
-        if not rp:
-            continue
         callout = _public_text(it.get("callout"), 90)
         headline = _public_text(it.get("headline"), 48)
+        subline = _public_text(it.get("subline"), 110)
         supporting_text = _public_text(it.get("supporting_text"), 90)
         eyebrow = _public_text(it.get("eyebrow"), 24)
+        big_number = _public_text(it.get("big_number"), 20)
         proof = _public_proof(it.get("proof"))
         stype = str(it.get("shot_type") or "").strip().lower()
         stype = _LEGACY_SHOT_TYPE.get(stype, stype)
         if stype not in _SHOT_TYPES:
             order = _APLUS_TYPE_ORDER if deliverable == "aplus" else _DEFAULT_TYPE_ORDER
             stype = order[i] if i < len(order) else "hero_feature"
-        # Direct-generation policy: every card is built around the verified
-        # product reference. Result-only fantasy scenes are no longer planned.
-        show_product = True
+        # 产品出场光谱：策划可指定 hero/supporting/environmental/absent；
+        # 不再强制每张图都以产品为主体（对标优秀 3C 套图语法）。
+        presence = str(it.get("product_presence") or "").strip().lower()
+        if presence not in _PRESENCES:
+            presence = _PRESENCE_DEFAULT_BY_TYPE.get(stype, "supporting")
+        layout = str(it.get("layout") or "").strip().lower()
+        if layout not in _LAYOUT_FAMILIES:
+            layout = _LAYOUT_DEFAULT_BY_TYPE.get(stype, "poster_hero")
+        if layout == "white_main":
+            presence = "hero"
+        if layout in {"result_showcase"}:
+            presence = "absent"
+        show_product = presence != "absent"
         text_zone = str(it.get("text_zone") or it.get("text_pos") or "top-left")
         if text_zone not in _TEXT_ZONES:
             text_zone = "top-left"
@@ -616,7 +1000,8 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
         if deliverable == "gallery" and i == 0:
             role = "主图"
         text_on_image = bool(it.get(
-            "text_on_image", bool(callout or headline or supporting_text or eyebrow or proof),
+            "text_on_image",
+            bool(callout or headline or subline or supporting_text or eyebrow or proof or big_number),
         )) and not (deliverable == "gallery" and i == 0)
         opportunity = profile_opportunities[i % len(profile_opportunities)] if profile_opportunities else f"product-specific {stype}"
         interaction = profile_interactions[i % len(profile_interactions)] if profile_interactions else "natural real-world use"
@@ -625,83 +1010,7 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
         product_treatment = _clean_text(it.get("product_treatment")) or (
             f"{_clean_text(product_profile.get('form_and_scale')) or 'accurate real-world scale and orientation'}; {interaction}"
         )
-        asset_mode = "generate"
-        anchor_text = ", ".join(profile_anchors) or "silhouette, proportions, colour, material, visible construction, markings and included quantity"
-        behaviour = _clean_text(product_profile.get("object_behavior")) or "category-specific physical behaviour"
-        treatment = product_treatment
-        product_lock = _clean_text(plan.get("product_lock"))
-        rp = _replace_prompt_section(
-            rp,
-            "PRODUCT IDENTITY LOCK",
-            f"REFERENCE IMAGE 1 is the only immutable product truth. {product_lock + '. ' if product_lock else ''}"
-            f"Preserve exactly: {anchor_text}. Physical behaviour: {behaviour}. Product treatment: "
-            f"{treatment or 'natural real-world orientation, scale and contact'}. Change only the environment, camera, "
-            "composition, lighting, supporting design and explicitly requested artwork copy. Do not redesign, recolour, "
-            "relabel, simplify, crop away, add or remove any product part, "
-            "opening, control, accessory or unit. Preserve existing logos, labels and printed product markings exactly where visible.",
-        )
-        layout_direction = (
-            f"Build a deliberate {layout_style} hierarchy with the primary copy group in the {text_zone} area and keep "
-            "that area visually calm enough for immediate reading."
-            if text_on_image else
-            "Use the full canvas for a clean product-led composition with no reserved caption or empty text plate."
-        )
-        rp = _replace_prompt_section(
-            rp,
-            "SHOT DESIGN",
-            f"Role: {role}; shot type: {stype}; product-specific visual concept: {visual_concept}. "
-            f"Camera and composition: {camera_direction}. Scene: {_clean_text(it.get('scene')) or opportunity}. "
-            f"Physical product interaction: {product_treatment}. {layout_direction}",
-        )
-        rp = _replace_prompt_section(rp, "SET COLOR SYSTEM", _set_colour_prompt(plan_style, stype))
-        rp = _replace_prompt_section(
-            rp,
-            "USER CREATIVE DIRECTION",
-            (
-                f"Highest-priority creative requirement after product identity, factual accuracy and marketplace rules: "
-                f"{creative_brief}. Follow it for audience, mood, scene, emphasis, exclusions and design character. "
-                if creative_brief else
-                "No additional manual creative requirement was supplied; follow the product-specific set direction. "
-            ) + f"The requested language for added artwork copy is {artwork_language}.",
-        )
-        if text_on_image:
-            rp = _remove_legacy_textless_directions(rp)
-            exact_copy = {
-                key: value for key, value in (
-                    ("eyebrow", eyebrow), ("headline", headline), ("callout", callout),
-                    ("supporting_text", supporting_text), ("proof", proof),
-                ) if value
-            }
-            copy_contract = json.dumps(exact_copy, ensure_ascii=False)
-            rp = _replace_prompt_section(
-                rp,
-                "FINAL ARTWORK COPY",
-                f"This is final pixel artwork, not a blank background. Render every string in this JSON exactly once and "
-                f"character-for-character: {copy_contract}. Do not translate, paraphrase, abbreviate, add, omit or repeat any "
-                f"character. Use {plan_style.get('type_system')} with clean commercial kerning and a clear hierarchy: eyebrow "
-                f"small, headline dominant, supporting text secondary, proof prominent only when present. Place the complete "
-                f"copy group in the {text_zone} zone using the {layout_style} layout language. Keep all type inside an 8% safe "
-                "margin, high contrast, unobstructed, correctly spelled and readable at mobile thumbnail size. Integrate the "
-                "typography into the composition as intentional final design, never as a pasted caption or placeholder.",
-            )
-        else:
-            rp = _replace_prompt_section(
-                rp,
-                "FINAL ARTWORK COPY",
-                "This artwork intentionally contains no added marketing copy. Do not render headlines, captions, letters, "
-                "numbers, badges, icons, diagrams, app UI or watermarks.",
-            )
-        rp = _replace_prompt_section(
-            rp,
-            "OUTPUT SAFETY",
-            "Do not invent additional copy, claims, certifications, logos, labels, icons, badges, diagrams, app UI or "
-            "watermarks. The exact public copy in FINAL ARTWORK COPY is the only added text allowed. Product labels and "
-            "markings already visible in the reference are part of the immutable product and must remain unchanged.",
-        )
-        background_prompt = ""
         expected_size = "1464x600" if deliverable == "aplus" else "1600x1600"
-        layout_blueprint = ""
-        panel_prompts: list[str] = []
         graphic_labels = [
             _public_text(value, 34) for value in (it.get("graphic_labels") or [])
             if _public_text(value, 34)
@@ -725,6 +1034,8 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
             "slot": str(it.get("slot") or (("main" if i == 0 else f"sub{len(clean)}") if deliverable == "gallery" else f"aplus_{len(clean) + 1}")),
             "role": role,
             "shot_type": stype,
+            "product_presence": presence,
+            "layout": layout,
             "show_product": show_product,
             "angle": str(it.get("angle") or ""),
             "scene": str(it.get("scene") or ""),
@@ -732,6 +1043,8 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
             "buyer_question": str(it.get("buyer_question") or ""),
             "evidence": str(it.get("evidence") or ""),
             "headline": headline,
+            "subline": subline,
+            "big_number": big_number,
             "callout": callout,
             "supporting_text": supporting_text,
             "eyebrow": eyebrow,
@@ -740,8 +1053,8 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
             "text_pos": text_zone,  # legacy consumer alias
             "text_zone": text_zone,
             "layout_style": layout_style,
-            "layout_blueprint": layout_blueprint,
-            "panel_prompts": panel_prompts,
+            "layout_blueprint": "",
+            "panel_prompts": [],
             "graphic_labels": graphic_labels,
             "theme": str(it.get("theme") or "auto"),
             "accent_color": accent_color,
@@ -749,20 +1062,21 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
             "visual_concept": visual_concept,
             "camera_direction": camera_direction,
             "product_treatment": product_treatment,
-            "asset_mode": asset_mode,
+            "asset_mode": "generate",
             "manual_template": False,
             "requires_source": False,
             "source_requirement": "使用上传图优先的产品真值参考；仅允许改变场景、镜头、构图、光线、辅助设计和指定图上文案",
             "source_url": "",
             "product_source_url": str(it.get("product_source_url") or ""),
-            "template_url": "",
+            "template_url": str(it.get("template_url") or ""),
             "template_index": 0,
             "template_analysis": None,
-            "background_prompt": background_prompt,
-            "product_scale": _clamped_float(it.get("product_scale"), .52, .24, .72),
+            "background_prompt": "",
+            "product_scale": _clamped_float(
+                it.get("product_scale"), _PRESENCE_SCALE.get(presence, 0.32), 0.0, 0.9),
             "acceptance_criteria": [str(v) for v in (it.get("acceptance_criteria") or []) if str(v).strip()][:6],
             "size": expected_size,
-            "render_prompt": rp,
+            "render_prompt": str(it.get("render_prompt") or ""),
             "base_url": base_url,
             "final_url": final_url,
             "versions": versions,
@@ -775,11 +1089,44 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
         })
     if clean and deliverable == "gallery":  # 第一张永远是纯白底无字主图
         clean[0].update(slot="main", role="主图", shot_type="white_main", show_product=True,
-                        text_on_image=False, callout=None, headline=None, supporting_text=None,
+                        product_presence="hero", layout="white_main", product_scale=0.85,
+                        text_on_image=False, callout=None, headline=None, subline=None,
+                        big_number=None, supporting_text=None,
                         eyebrow=None, proof=None, text_zone="top-left", text_pos="top-left",
                         layout_style="minimal", layout_blueprint="",
                         panel_prompts=[], graphic_labels=[], requires_source=False, asset_mode="generate",
                         source_requirement="以上传或采集主图为不可变产品真值，模型直接生成合规纯白底主图")
+    # ── 构图配额：防止"张张都是产品大特写"的同质化 ─────────────────────────
+    # hero 上限 2（含 white_main）；≥5 张的整套至少 1 张 absent/environmental。
+    hero_indexes = [idx for idx, card in enumerate(clean) if card["product_presence"] == "hero"]
+    for idx in hero_indexes[2:]:
+        clean[idx]["product_presence"] = "supporting"
+        clean[idx]["product_scale"] = _PRESENCE_SCALE["supporting"]
+    if len(clean) >= 5 and not any(
+        card["product_presence"] in ("absent", "environmental") for card in clean
+    ):
+        # 把最适合"成果/对比"叙事的一张转成 absent（优先 comparison/specs/trust）
+        for prefer in ("comparison", "specs", "trust", "lifestyle"):
+            for idx, card in enumerate(clean):
+                if idx and card["shot_type"] == prefer and not card.get("final_url"):
+                    card["product_presence"] = "absent"
+                    card["show_product"] = False
+                    card["layout"] = "result_showcase" if prefer != "specs" else "spec_grid"
+                    card["product_scale"] = 0.0
+                    break
+            else:
+                continue
+            break
+    # ── 统一编译最终生图提示词（结构字段 → 确定性 prompt）──────────────────
+    plan_ctx = {
+        "creative_brief": creative_brief,
+        "language": artwork_language,
+        "product_lock": str(plan.get("product_lock") or "").strip(),
+    }
+    for card in clean:
+        card["render_prompt"] = _compile_render_prompt(
+            card, plan_style, product_profile, plan_ctx, deliverable,
+        )
     clean = clean[:target_count] if target_count and target_count > 0 else clean[:8]
     normalized = {
         "deliverable": deliverable,
@@ -793,7 +1140,8 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
         "template_mode": False,
         "product_source_url": str(plan.get("product_source_url") or ""),
         "template_images": [],
-        "template_story": [],
+        "template_story": plan.get("template_story") if isinstance(plan.get("template_story"), list) else [],
+        "planner": str(plan.get("planner") or ""),
         "images": clean,
         "set_qa": plan.get("set_qa") if isinstance(plan.get("set_qa"), dict) else None,
     }
@@ -805,18 +1153,33 @@ def _normalize_shot_plan(plan: dict, target_count: int, deliverable: str = "gall
 
 def _bind_reference_templates(plan: dict, project_id: str, scrape_data: dict,
                               deliverable: str) -> dict:
-    """Bind one uploaded-first product truth to every directly generated card."""
+    """给每张卡绑定产品真值（presence≠absent 时），并按逆向学习结果绑版式模板。
+
+    - product_source_url：上传优先的白底产品真值；absent 卡不需要（产品不出现）。
+    - template_url：template_story 里 shot_type/layout 匹配的竞品图 → 渲染层走
+      双参考（REFERENCE 2 = 仅版式模板）。absent 卡不绑（无产品真值可当 REF 1）。
+    """
     product_source = _cached_white_product_source(scrape_data)
     images = plan.get("images") if isinstance(plan.get("images"), list) else []
+    story = plan.get("template_story") if isinstance(plan.get("template_story"), list) else []
     plan["product_source_url"] = product_source
-    plan["template_images"] = []
-    plan["template_story"] = []
-    plan["template_mode"] = False
+    plan["template_images"] = [t.get("url") for t in story if t.get("url")]
+    plan["template_mode"] = bool(plan["template_images"])
+    used_template_indexes: set[int] = set()
+
+    def _match_template(image: dict) -> dict | None:
+        for t in story:
+            if t.get("index") in used_template_indexes or not t.get("url"):
+                continue
+            if t.get("shot_type") == image.get("shot_type") or t.get("layout") == image.get("layout"):
+                return t
+        return None
 
     for image in images:
         if not isinstance(image, dict):
             continue
         previous_product = str(image.get("product_source_url") or "")
+        presence = str(image.get("product_presence") or "supporting")
 
         def invalidate_render() -> None:
             if image.get("final_url"):
@@ -831,22 +1194,36 @@ def _bind_reference_templates(plan: dict, project_id: str, scrape_data: dict,
             image["render_qa"] = None
             image["human_reviewed"] = False
 
-        # One production path only: whole-image generation from the immutable
-        # product truth. Existing renders survive a strategy migration; they are
-        # invalidated only when an already-bound truth source actually changes.
         image["asset_mode"] = "generate"
-        image["show_product"] = True
+        image["show_product"] = presence != "absent"
         image["requires_source"] = False
         image["source_url"] = ""
-        image["source_requirement"] = "以上传图优先的产品真值为高保真参考；仅改变场景、镜头、构图、光线、辅助设计和指定图上文案"
-        image["product_source_url"] = product_source
-        image["template_index"] = 0
-        image["template_url"] = ""
-        image["template_analysis"] = None
+        image["source_requirement"] = (
+            "产品不出现在本张画面（成果/对比/信息版式），文字与数字只能来自已确认文案"
+            if presence == "absent" else
+            "以上传图优先的产品真值为高保真参考；仅改变场景、镜头、构图、光线、辅助设计和指定图上文案"
+        )
+        image["product_source_url"] = "" if presence == "absent" else product_source
+        template = None
+        if presence != "absent" and str(image.get("shot_type")) != "white_main":
+            template = _match_template(image)
+        if template:
+            used_template_indexes.add(template.get("index"))
+            image["template_url"] = str(template.get("url") or "")
+            image["template_index"] = int(template.get("index") or 0)
+            image["template_analysis"] = {
+                "visual_structure": template.get("visual_structure", ""),
+                "role": template.get("role", ""),
+            }
+        else:
+            image["template_url"] = ""
+            image["template_index"] = 0
+            image["template_analysis"] = None
         image["layout_blueprint"] = ""
         image["panel_prompts"] = []
         image["manual_template"] = False
-        if image.get("final_url") and previous_product and previous_product != product_source:
+        if (image.get("final_url") and presence != "absent"
+                and previous_product and previous_product != product_source):
             invalidate_render()
 
     plan["quality"] = _creative_plan_quality(images, deliverable)
@@ -854,88 +1231,6 @@ def _bind_reference_templates(plan: dict, project_id: str, scrape_data: dict,
 
 
 # ─── 兜底方案（AI 不可用时依然给出可编辑整套）─────────────────────────────────
-
-def _slot_purpose(slot_id: str, label: str) -> str:
-    key = slot_id.lower()
-    if key == "main":
-        return "pure white Amazon main image, product centered, no text, shopper can inspect the full product"
-    if key.startswith("sub1"):
-        return "lifestyle scene showing the primary use case and buyer outcome"
-    if key.startswith("sub2"):
-        return "feature detail image with a clean reserved area for later benefit copy"
-    if key.startswith("sub3"):
-        return "size, scale, specification, or usage clarity image"
-    if key.startswith("sub4"):
-        return "multi-angle, structure, technology, or material detail image"
-    if key.startswith("sub5"):
-        return "package, accessories, kit contents, or value summary image"
-    if key.startswith("sub6"):
-        return "multi-scenario benefit summary image"
-    if "banner" in key:
-        return "Premium A+ hero banner with brand-level composition"
-    if "compare" in key or key.endswith("_4"):
-        return "A+ comparison, trust, specification, or advantage module"
-    if "brand" in key:
-        return "brand story and trust-building A+ module"
-    return f"{label or slot_id} product image module"
-
-
-def _fallback_image_prompt(
-    slot_id: str,
-    label: str,
-    size: str,
-    row,
-    scrape_data: dict,
-    analysis_data: dict,
-    color_scheme: str = "",
-    template_hint: str = "",
-) -> str:
-    src = _copy_source(row, scrape_data, analysis_data)
-    refs = _reference_images(scrape_data)
-    ref = refs[0] if refs else "no reference image available"
-    product_lock = _clean_text(
-        analysis_data.get("product_lock")
-        or f"{src['title']} exactly as shown in the reference image; keep the real shape, color, materials, proportions, logo placement, and included accessories unchanged."
-    )
-    features = src["usp"] + src["bullets"]
-    feature = _clean_text(features[0]) if features else _clean_text(src["description"] or src["title"])
-    canvas = size or ("1400x1400 or larger square" if slot_id == "main" else "configured slot size")
-    purpose = _slot_purpose(slot_id, label)
-    color_line = f" Use a {color_scheme} palette for backgrounds, props, lighting, and typography." if color_scheme else ""
-    template_line = f" Adapt this template direction without copying unsupported claims: {template_hint[:420]}." if template_hint else ""
-    text_rule = "no words, letters, numbers, badges, icons, UI overlays or watermarks"
-    return (
-        f"{product_lock} Reference: {ref}. Create a {purpose} for slot \"{label or slot_id}\". "
-        f"Target canvas: {canvas}; compose specifically for this size and orientation. "
-        f"Image goal: communicate {feature[:220]}. "
-        f"Use commercial Amazon product photography with accurate product rendering, controlled studio lighting, natural shadows, sharp focus, realistic materials, and clean premium composition.{color_line} "
-        f"Composition: product remains visually dominant, with deliberate low-detail negative space for later typography; render {text_rule}. "
-        f"For A+ desktop modules use a wide 1464x600 layout when requested; for mobile modules use a compact 600x450 layout when requested. "
-        f"Do not invent specs, certifications, accessories, colors, or features not present in the product data. {template_line}".strip()
-    )
-
-
-def _fallback_prompts_for_slots(row, scrape_data: dict, analysis_data: dict, slot_details: list[dict], color_scheme: str = "", template_hint: str = "") -> dict:
-    prompts = {}
-    for s in slot_details:
-        prompts[s["id"]] = _fallback_image_prompt(
-            s["id"],
-            s.get("label") or s["id"],
-            s.get("size") or "",
-            row,
-            scrape_data,
-            analysis_data,
-            color_scheme,
-            template_hint,
-        )
-    return {
-        "product_lock": analysis_data.get("product_lock") or _copy_source(row, scrape_data, analysis_data)["title"],
-        "visual_style": analysis_data.get("visual_style") or "Premium Amazon commercial photography with consistent product appearance.",
-        "prompts": prompts,
-        "fallback": True,
-        "warning": "AI 当前不可用，已用本地规则生成可编辑图片提示词；恢复后可重新智能生成。",
-    }
-
 
 def _color_directive(color_scheme: str, analysis_data: dict) -> str:
     """Color instruction shared by all prompt builders.
@@ -998,81 +1293,99 @@ def _auto_product_source(project_id: str, scrape_data: dict) -> str:
     return _cached_white_product_source(scrape_data)
 
 
+def _extract_fallback_copy(bullet: str) -> tuple[str, str, str]:
+    """从一条五点提取 (headline, subline, big_number)。
+
+    优先取 [Bold Header] / "HEADER:" 头部做标题（完整短语），正文首句截为副文案；
+    再用正则捞一个可作大数字锚的规格（0.1s / 36MP / IP66 / 120° …）。
+    老实现按词数硬切（前 6 词做标题）产出"[Trigger Speed]: A"式碎片，禁止回归。
+    """
+    text = _clean_text(bullet)
+    headline, body = "", text
+    m = re.match(r"^\[([^\]]{2,40})\]\s*:?\s*(.*)$", text)
+    if not m:
+        m = re.match(r"^([A-Z][A-Z0-9 &/\-]{2,34})\s*[:：]\s*(.*)$", text)
+    if m:
+        headline = _clean_text(m.group(1)).title() if m.group(1).isupper() else _clean_text(m.group(1))
+        body = _clean_text(m.group(2))
+    else:
+        first = re.split(r"[.。;；]", text, 1)[0]
+        words = first.split()
+        if len(words) <= 5:
+            headline = first
+    subline = ""
+    if body:
+        first_clause = re.split(r"[.。;；]", body, 1)[0]
+        words = first_clause.split()
+        subline = " ".join(words[:14]).rstrip(",，")
+        if len(words) > 14:
+            subline = ""  # 截不出完整短句就宁可不要
+    number = ""
+    nm = re.search(
+        r"\b(IP\d{2}|\d+(?:\.\d+)?\s?(?:MP|K|fps|s|sec|ft|m|mm|°|%|GB|TB|h|hr|min|mAh|W|Hz|x|X)\b[\w/]*)",
+        text,
+    )
+    if nm:
+        number = _clean_text(nm.group(1))[:16]
+    return headline[:48], subline[:110], number
+
+
 def _shot_plan_fallback(row, scrape_data: dict, analysis_data: dict, target_count: int,
                         color_scheme: str, deliverable: str = "gallery",
                         product_profile: Optional[dict] = None) -> dict:
-    """LLM JSON unparsable → build a usable structured plan from the deterministic
-    slot helpers so the user still gets a set (never a hard error)."""
+    """LLM 策划不可用时的确定性方案：按内置精品叙事库排布 presence/版式，
+    文案从五点结构化提取，提示词交给同一个编译器——兜底也不再千篇一律。"""
     deliverable = "aplus" if deliverable == "aplus" else "gallery"
     n = target_count if target_count and target_count > 0 else (5 if deliverable == "aplus" else 7)
-    slot_ids = (["main"] + [f"sub{i}" for i in range(1, n)] if deliverable == "gallery"
-                else [f"aplus_{i + 1}" for i in range(n)])
-    fallback_size = "1464x600" if deliverable == "aplus" else "1600x1600"
-    details = [{"id": s, "label": s, "size": fallback_size} for s in slot_ids]
-    try:
-        prompts = _fallback_prompts_for_slots(row, scrape_data, analysis_data, details, color_scheme=color_scheme)["prompts"]
-    except Exception:
-        prompts = {}
-    bullets = [ln[2:] for ln in _approved_copy(row).splitlines() if ln.startswith("- ")][:n]
+    bullets = [ln[2:] for ln in _approved_copy(row).splitlines() if ln.startswith("- ")]
+    if not bullets:
+        src_copy = _copy_source(row, scrape_data, analysis_data)
+        bullets = src_copy["usp"] + src_copy["bullets"]
     profile = product_profile if isinstance(product_profile, dict) and product_profile else _fallback_product_visual_profile(
         _build_product_context(row, scrape_data, analysis_data)
     )
-    opportunities = [str(value) for value in (profile.get("visual_opportunities") or []) if str(value).strip()]
-    scenes = [str(value) for value in (profile.get("scene_families") or []) if str(value).strip()]
-    interactions = [str(value) for value in (profile.get("natural_interactions") or []) if str(value).strip()]
-    anchors = [str(value) for value in (profile.get("fidelity_anchors") or []) if str(value).strip()]
-    avoid = [str(value) for value in (profile.get("avoid") or []) if str(value).strip()]
+    behaviour = _clean_text(profile.get("object_behavior")) or "category_specific"
+    narrative = (_APLUS_NARRATIVE if deliverable == "aplus"
+                 else _GALLERY_NARRATIVES.get(behaviour, _GALLERY_NARRATIVES["category_specific"]))
+    steps = list(narrative[:n])
+    while len(steps) < n:
+        steps.append(("hero_feature", "supporting", "poster_hero", f"卖点 {len(steps)}"))
+    scenes = [str(v) for v in (profile.get("scene_families") or []) if str(v).strip()]
+    opportunities = [str(v) for v in (profile.get("visual_opportunities") or []) if str(v).strip()]
     camera_directions = [
-        "eye-level environmental hero with a clear foreground-to-background path",
+        "eye-level environmental view with a clear foreground-to-background path",
         "close tactile three-quarter view with selective depth of field",
         "honest human-scale use view with natural contact and posture",
-        "overhead or orthographic configuration view only when physically useful",
         "quiet editorial wide shot with asymmetrical negative space",
         "macro construction detail anchored to the complete product context",
-        "alternate-side use view that does not repeat the hero angle",
+        "slightly elevated view with clear spatial hierarchy",
+        "alternate-side view that does not repeat the hero angle",
     ]
     imgs = []
-    for i, s in enumerate(slot_ids):
-        sp = bullets[i - 1] if i > 0 and i - 1 < len(bullets) else None
-        order = _APLUS_TYPE_ORDER if deliverable == "aplus" else _DEFAULT_TYPE_ORDER
-        stype = order[i] if i < len(order) else "hero_feature"
-        has_copy = bool(sp) and (deliverable == "aplus" or i > 0)
-        role = (_APLUS_ROLES if deliverable == "aplus" else _DEFAULT_ROLES)[
-            min(i, len(_APLUS_ROLES if deliverable == "aplus" else _DEFAULT_ROLES) - 1)
-        ]
-        headline = " ".join(sp.split()[:6]) if has_copy else None
-        callout = " ".join(sp.split()[6:14]) if has_copy and len(sp.split()) > 6 else None
-        base_prompt = str(prompts.get(s) or (
-            "Realistic ecommerce product photograph in a physically plausible everyday setting, "
-            "natural materials, restrained color, soft directional light, accurate scale and contact shadow, "
-            "a deliberate commercial layout with clear information hierarchy, no stylized effects or levitating objects."
-        ))
-        opportunity = opportunities[i % len(opportunities)] if opportunities else "category-specific primary use"
-        visual_concept = f"{opportunity} for {role}"
-        scene = scenes[i % len(scenes)] if scenes else "a real category-appropriate environment"
-        interaction = interactions[i % len(interactions)] if interactions else "normal real-world use"
-        camera = camera_directions[i % len(camera_directions)]
-        identity = ", ".join(anchors[:6]) or "silhouette, proportions, colour, material and visible construction"
-        avoid_text = ", ".join(avoid[:4]) or "invented features, impossible physics and decorative AI effects"
-        rp = _ground_render_prompt(
-            f"{base_prompt} Product family: {profile.get('category_family') or 'consumer product'}; physical behaviour: "
-            f"{profile.get('object_behavior') or 'category-specific'}. Visual concept: {opportunity}. Scene: {scene}. "
-            f"Natural interaction: {interaction}. Camera: {camera}. Reproduce the reference product without changing "
-            f"{identity}. Avoid {avoid_text}. Leave enough visual calm for an integrated, readable final design."
-        )
+    copy_cursor = 0
+    for i, (stype, presence, layout, role) in enumerate(steps):
+        slot = ("main" if i == 0 else f"sub{i}") if deliverable == "gallery" else f"aplus_{i + 1}"
+        headline = subline = number = ""
+        sp = None
+        if not (deliverable == "gallery" and i == 0):
+            sp = bullets[copy_cursor % len(bullets)] if bullets else None
+            copy_cursor += 1
+            if sp:
+                headline, subline, number = _extract_fallback_copy(sp)
         imgs.append({
-            "slot": s, "role": role,
-            "shot_type": stype, "angle": "", "scene": "", "selling_point": sp,
-            "buyer_question": "", "evidence": sp or "",
-            "headline": headline, "callout": callout, "supporting_text": None,
-            "text_on_image": bool(headline or callout), "text_zone": "top-left",
-            "layout_style": "editorial", "composition": camera,
-            "visual_concept": visual_concept, "camera_direction": camera,
-            "product_treatment": f"{profile.get('form_and_scale') or 'Natural real-world scale'}; {interaction}",
-            "asset_mode": "generate", "requires_source": False,
-            "acceptance_criteria": ["产品外观与参考图一致", "尺度和阴影自然", "手机端文字可读"],
+            "slot": slot, "role": role, "shot_type": stype,
+            "product_presence": presence, "layout": layout,
+            "selling_point": _clean_text(sp) or None,
+            "evidence": _clean_text(sp),
+            "headline": headline or None, "subline": subline or None,
+            "big_number": number or None,
+            "text_on_image": bool(headline or subline or number),
+            "text_zone": "top-center",
+            "scene": scenes[i % len(scenes)] if scenes else "",
+            "visual_concept": (opportunities[i % len(opportunities)] if opportunities else f"{role} storytelling"),
+            "camera_direction": camera_directions[i % len(camera_directions)],
+            "acceptance_criteria": ["产品外观与参考图一致", "版式与整套统一", "手机端文字可读"],
             "size": "1464x600" if deliverable == "aplus" else "1600x1600",
-            "render_prompt": rp,
         })
     return _normalize_shot_plan({
         "images": imgs,
@@ -1153,11 +1466,21 @@ async def run_plan_image_set(project_id: str, body: PlanImageSetReq,
     except Exception:
         product_profile = _fallback_product_visual_profile(product_context)
     product_profile_text = json.dumps(product_profile, ensure_ascii=False, indent=2)
-    uploaded_count = len(scrape_data.get("uploaded_images", []) or [])
     img_sp = analysis_data.get("image_insights", "")
     approved = _approved_copy(row)
     color_directive = _color_directive(body.color_scheme, analysis_data)
     deliverable = "aplus" if body.deliverable == "aplus" else "gallery"
+    # 通道 2：竞品套图逆向学习。采到 ≥4 张（通常是优秀卖家的完整套图）且视觉可用
+    # 时，把每张的版式语法逆向出来喂给策划器——借结构，不借像素。
+    plan_template_story: list[dict] = []
+    if deliverable == "gallery" and len(_reference_images(scrape_data)) >= 4 and has_vision():
+        progress("templates", "逆向学习竞品套图版式…", 0.32)
+        try:
+            plan_template_story = await asyncio.wait_for(
+                _analyze_reference_templates(scrape_data), timeout=180,
+            )
+        except Exception:
+            plan_template_story = []
     max_count = 6 if deliverable == "aplus" else 8
     n = max(0, min(int(body.target_count or 0), max_count))
     count_rule = (
@@ -1171,144 +1494,99 @@ async def run_plan_image_set(project_id: str, body: PlanImageSetReq,
         "The first image is the Amazon white main image. The remaining images form a mobile-first sales story."
     )
 
+    behaviour = _clean_text(product_profile.get("object_behavior")) or "category_specific"
+    narrative = (_APLUS_NARRATIVE if deliverable == "aplus"
+                 else _GALLERY_NARRATIVES.get(behaviour, _GALLERY_NARRATIVES["category_specific"]))
+    narrative_text = "\n".join(
+        f"  {i + 1}. shot_type={s} · product_presence={p} · layout={l} · 角色={r}"
+        for i, (s, p, l, r) in enumerate(narrative[: n or len(narrative)])
+    )
+    template_story = plan_template_story or []
+    template_text = ""
+    if template_story:
+        template_text = "\n## COMPETITOR GALLERY GRAMMAR (reverse-engineered from a top seller — reuse the STRUCTURE, never the pixels/brand)\n" + "\n".join(
+            f"  {t.get('index')}. {t.get('role')} · {t.get('shot_type')} · presence≈{t.get('product_presence', 'supporting')} · {t.get('visual_structure', '')[:120]}"
+            for t in template_story[:8]
+        )
+
     prompt = f"""You are a senior ecommerce creative director planning a commercially usable Amazon {deliverable} set. {count_rule}
 
-This is a production brief, not a prompt-writing showcase. Every decision must be restrained, physically plausible,
-supported by product facts, and useful to a shopper. {deliverable_rules}
+Study how flagship 3C brands (DJI / Anker level) build galleries: only 1-2 images show the product as the dominant
+subject. The rest rotate the spotlight — outcome showcases, A/B comparisons, oversized spec numbers, real humans in
+real scenes, use-case mosaics — under ONE consistent title band, type system and palette. Plan that calibre of set.
 
 ## PRODUCT INFO
 {product_context}
 
-## APPROVED LISTING COPY (the source of truth for exact on-image text)
-{approved or "(none — derive concise callouts from the bullets/selling points above)"}
+## APPROVED LISTING COPY (the only source for exact on-image text and numbers)
+{approved or "(none — derive concise phrases from the bullets/selling points above; never invent numbers)"}
 
-## REFERENCE IMAGES
-{ref_text}
-The verified white-background image is the only product-identity truth. Other collected images are evidence for visible
-features and normal use only. Do not copy their composition, grid, camera angle, background, typography or gallery order.
-Design a new art direction from the current product's physical behaviour and buyer decisions.
-Uploaded product assets available: {uploaded_count}. Scraped ASIN references available: {len(ref_images)}.
-
-## PRODUCT VISUAL IDENTITY — STAGE 1 ANALYSIS
+## PRODUCT VISUAL IDENTITY
 {product_profile_text}
-Treat this profile as a physical design constraint. The category, object behaviour, material response, normal interaction,
-scale cues and fidelity anchors must drive every shot. A flexible textile must fold and compress naturally; an occupiable
-shelter must have credible footprint and interior scale; a precision device must preserve controls, openings and geometry.
-Do not reduce unrelated categories to the same product-on-pedestal composition.
 
-## VISUAL ANALYSIS (selling points / style / scenes from scraped + uploaded images)
+## VISUAL ANALYSIS OF COLLECTED IMAGES
 {img_sp or "(not available)"}
+{template_text}
 
-## STORY AND SHOT TYPES
-Use different jobs rather than repeating the product in the same pose:
-- white_main: pure #FFFFFF, complete purchased set, product fills 80–90%, no text (gallery image 1 only)
-- hero_feature: product in a restrained studio or plausible context, one primary benefit
-- lifestyle: product used naturally at correct scale; believable hand/body/environment relationships
-- detail: macro or close crop of a real visible material, control, interface, or construction detail
-- comparison: only when the supplied facts support a fair comparison; never fabricate a test result
-- specs: size, compatibility, capacity, or configuration using supplied facts
-- in_box: exact included items, no invented accessories
-- trust: care, material, certification, warranty, or brand close only when supported
-- aplus_banner: wide brand opening for A+ only
+## RECOMMENDED NARRATIVE SKELETON (adapt to the facts; reorder/replace when justified)
+{narrative_text}
 
-## DYNAMIC ART DIRECTION — STAGE 2
-- Invent a distinct visual concept for every image from the product profile and that image's buyer question.
-- Vary camera height, lens feel, crop, subject scale, depth, lighting logic and product interaction across the set.
-- Composition must follow the product: drape/fold/stack soft goods, show credible occupied scale and ground contact for
-  spatial gear, and use precise close views or operational handling for rigid devices.
-- Use one coherent brand world across the set without repeating one layout. The set should feel designed, not templated.
-- Design the typography and image as one final composition. Use clear type hierarchy, intentional alignment and enough
-  visual calm for legibility; avoid generic floating cards unless the requested design specifically needs one.
-- The model may integrate the exact reference product into a realistic scene. It may not redesign, relabel or simplify it.
-
-## USER CREATIVE DIRECTION — HIGHEST PRIORITY AFTER FACTS AND PRODUCT IDENTITY
-- Tone requested by the user: {body.visual_tone}.
-- Manual requirement: {body.brief or "none"}.
-- Follow the manual requirement for style, audience, mood, scenes, emphasis and exclusions. It may not override the exact
-  product reference, supplied facts, Amazon main-image rules or claim safety.
-
-## ART DIRECTION
-- Prefer a real studio, home, workplace, outdoors, or other category-appropriate location with ordinary materials.
-- Use believable perspective, product scale, contact shadow, reflection, depth of field, and time-of-day lighting.
-- Derive ONE product-specific set palette from the reference product's exact colours, material, category and positioning.
-  style.palette must define five concrete #RRGGBB colours with roles: background, surface, supporting tone, brand accent,
-  and deep neutral. Reuse that same colour grammar, white balance and lighting family in every image.
-- Apply the shared palette naturally to backgrounds, supporting surfaces, restrained props, ambient grade and typography.
-  Do not recolour the product and do not force all five colours into every frame. Gallery white_main keeps #FFFFFF.
-- Never use neon light trails, sci-fi spaces, holograms, floating glass panels, fantasy panoramas, impossible scene mashups,
-  levitating products, fake interfaces, or generic "cinematic luxury" decoration.
-- Product appearance, labels, ports, controls, proportions, color, texture, logo, accessories, and quantities must not change.
-
-## COPY AND EVIDENCE
-- Each image answers one buyer_question and cites an evidence string from the approved copy/product facts.
-- headline is 2–5 words; supporting_text is optional and no longer than 9 words. Do not paste a whole bullet.
-- evidence and source_requirement are INTERNAL production notes and must never appear on the artwork.
-- proof is optional PUBLIC copy and may only be a short numeric fact such as "8K/30fps", "120MP" or "2 Batteries".
-  Never put phrases such as "approved copy supports", "product facts", "image should" or claim-review explanations in proof.
-- For every non-main image with text_on_image=true, render_prompt must contain the final exact strings and instruct the
-  image model to draw them directly into the final pixels. Text is not added later by code.
-- Use the requested artwork language: {body.language}. Keep every public string concise so the image model can spell it reliably.
-- If a claim would require a sample, before/after, lab test, certificate, screenshot or measured proof that is not supplied,
-  omit that claim and design a different supported product-led image. AI must not generate fake evidence.
-- text_zone must be deliberately low-detail negative space: top-left/top-center/top-right/center-left/center-right/
-  bottom-left/bottom-center/bottom-right.
-
-## OUTPUT — valid JSON only
-{{"deliverable":"{deliverable}",
- "style":{{"direction":"product-specific art direction","palette":"background #RRGGBB; surface #RRGGBB; supporting tone #RRGGBB; brand accent #RRGGBB; deep neutral #RRGGBB","lighting":"one shared lighting family","materials":"category-specific real materials","type_system":"...","accent_color":"#RRGGBB"}},
- "story":"one sentence describing the set's sales narrative",
- "product_lock":"strict appearance description and explicit things that must not change",
- "images":[
-   {{"slot":"...","role":"...","shot_type":"...","buyer_question":"...","selling_point":"...",
-    "evidence":"exact supporting fact or approved-copy phrase","headline":"...","eyebrow":"...",
-    "supporting_text":"...","proof":"...","text_on_image":true,"text_zone":"top-left",
-    "layout_style":"editorial|minimal|split|proof|grid","theme":"auto","accent_color":"#RRGGBB",
-    "show_product":true,"angle":"...","scene":"...","composition":"...","asset_mode":"generate",
-    "visual_concept":"one category-specific art idea","camera_direction":"lens, height, crop, depth and subject scale",
-    "product_treatment":"how the unchanged product contacts, folds, mounts, opens, is occupied or is handled",
-    "requires_source":false,"source_requirement":"","acceptance_criteria":["...","..."],
-    "size":"{'1464x600' if deliverable == 'aplus' else '1600x1600'}",
-    "render_prompt":"180–280 words: final-pixel instruction containing exact product identity, category physics, scene, camera, light, shared design system, exact public copy strings, type hierarchy and placement"}}
- ]}}
-
-## HARD RULES
-- Every module uses asset_mode="generate", show_product=true and requires_source=false. The model directly generates the
-  whole image with the uploaded-first product truth attached at high input fidelity. Do not request source, composite,
-  template or blueprint modes.
-- Do not invent claims, certifications, dimensions, accessories, UI, screenshots, or results.
-- A generated image is not proof. Omit evidence-dependent modules that cannot be supported by supplied product facts.
-- Gallery white_main is also generated directly: pure #FFFFFF, complete product/set, no added text, with the same immutable
-  reference-product identity. in_box may only show quantities and accessories visibly supported by the reference/product facts.
-- Never use a fixed blueprint name, a collected-image template, a generic feature-card grid, or the same composition twice.
-- Each render_prompt must explicitly preserve the profile's fidelity anchors and describe believable category physics.
-- Write a genuinely different visual_concept, camera_direction and product_treatment for every module.
-- Every non-main render_prompt explicitly says the named public copy strings are the only added text, must appear exactly
-  once and character-for-character, and forbids all unrequested copy, invented claims, extra logos, badges and watermarks.
-- Gallery white_main remains the only forced text-free frame.
+## FIELD RULES
+- product_presence: hero (product dominant, ≤2 per set incl. the white main) | supporting (25-40% of frame) |
+  environmental (small in a real scene) | absent (product not in frame — outcome/comparison/spec panels).
+  At least one image must be absent or environmental. {deliverable_rules}
+- layout: white_main | poster_hero | result_showcase | split_compare | spec_grid | scenario_mosaic |
+  human_context | in_box_flatlay | detail_macro | trust_close. Do not use the same layout more than twice.
+- headline: a COMPLETE punchy phrase of 2-5 words (like "Stunning Low-Light Performance"). Never a truncated
+  sentence fragment. subline: one supporting line ≤14 words. big_number: an exact spec anchor from the approved
+  copy (e.g. "0.1s", "36MP", "IP66") or empty. proof: optional short public numeric fact.
+- evidence: the exact product fact this image relies on. Do not plan images whose claims have no supporting fact.
+- scene / visual_concept / camera_direction: ≤20 words each, concrete and different for every image.
+- text_zone: top-left|top-center|top-right|center-left|center-right|bottom-left|bottom-center|bottom-right.
+- Tone requested: {body.visual_tone}. Manual requirement (highest priority after facts): {body.brief or "none"}.
+  Artwork language: {body.language}.
 {color_directive}
-{_FIDELITY_RULE}
-"""
+
+## OUTPUT — return ONLY this JSON, no commentary. Keep every string SHORT; do not write long render prompts —
+the rendering pipeline compiles final image prompts from these fields.
+{{"style":{{"direction":"...","palette":"background #RRGGBB; surface #RRGGBB; supporting tone #RRGGBB; brand accent #RRGGBB; deep neutral #RRGGBB","lighting":"...","materials":"...","type_system":"...","accent_color":"#RRGGBB"}},
+ "story":"one sentence sales narrative",
+ "product_lock":"strict appearance description of the sellable product",
+ "images":[
+   {{"slot":"...","role":"...","shot_type":"...","product_presence":"hero|supporting|environmental|absent",
+    "layout":"...","buyer_question":"...","selling_point":"...","evidence":"...",
+    "headline":"...","subline":"...","big_number":"...","proof":"",
+    "scene":"...","visual_concept":"...","camera_direction":"...","text_zone":"top-center"}}
+ ]}}"""
+
     progress("plan", "AI 创意总监策划整套方案…", 0.4)
-    try:
-        # The shared provider chain may otherwise stack several 5–10 minute
-        # provider timeouts. A visual brief must resolve inside a sane budget;
-        # deterministic fallback remains editable and evidence-safe.
-        raw = await asyncio.wait_for(
-            _call_ai(prompt, max_tokens=4000, web_search=False),
-            timeout=240,
-        )
-    except (HTTPException, asyncio.TimeoutError):
-        raw = ""
+    parsed = None
+    for attempt in range(2):
+        try:
+            raw = await asyncio.wait_for(
+                _call_ai(prompt if attempt == 0 else (
+                    prompt + "\n\nREMINDER: your previous reply could not be parsed. "
+                    "Return ONLY the JSON object — no explanations, no markdown fences."
+                ), web_search=False),
+                timeout=240,
+            )
+        except (HTTPException, asyncio.TimeoutError):
+            raw = ""
+        parsed = _strip_json(raw)
+        if parsed and isinstance(parsed.get("images"), list) and parsed["images"]:
+            break
+        if attempt == 0 and handle:
+            handle.update(stage="plan", message="策划输出解析失败，重试一次…", progress=0.55)
+        parsed = None
     progress("compile", "编译与质检方案…", 0.85)
-    parsed = _strip_json(raw)
     used_fallback = True
     plan = None
-    if parsed and isinstance(parsed.get("images"), list) and parsed["images"]:
+    if parsed:
         parsed["product_profile"] = product_profile
         parsed["planning_mode"] = "adaptive_direct_text"
         parsed["creative_brief"] = body.brief
         parsed["language"] = body.language
-        parsed["template_story"] = []
+        parsed["template_story"] = template_story
         parsed["template_images"] = []
         plan = _normalize_shot_plan(parsed, n, deliverable)
         used_fallback = not plan["images"]
@@ -1318,12 +1596,11 @@ Use different jobs rather than repeating the product in the same pose:
         )
         plan["creative_brief"] = body.brief
         plan["language"] = body.language
-        plan["template_story"] = []
+        plan["template_story"] = template_story
         plan["template_images"] = []
-        # The deterministic fallback still compiles the user's manual brief and
-        # artwork language into every final prompt instead of silently dropping
-        # the highest-priority creative input when the planner is unavailable.
+        # 兜底同样把手动创意与语言编译进每张提示词，而不是静默丢弃最高优先级输入
         plan = _normalize_shot_plan(plan, n, deliverable)
+    plan["planner"] = "fallback" if used_fallback else "ai"
     plan = _bind_reference_templates(plan, project_id, scrape_data, deliverable)
     _persist_shot_plan(project_id, plan, deliverable)
     _persist_visual_anchor(project_id, row, {"product_lock": plan.get("product_lock"),
@@ -1374,7 +1651,8 @@ async def _render_vision_review(candidate: bytes, source: bytes | None, body: Re
         return {"available": False, "reason": "visual_review_provider_unconfigured"}
     expected_copy = {
         key: value for key, value in (
-            ("eyebrow", body.eyebrow), ("headline", body.headline), ("callout", body.callout),
+            ("eyebrow", body.eyebrow), ("headline", body.headline), ("subline", body.subline),
+            ("big_number", body.big_number), ("callout", body.callout),
             ("supporting_text", body.supporting_text), ("proof", body.proof),
         ) if str(value or "").strip()
     }
@@ -1387,6 +1665,8 @@ async def _render_vision_review(candidate: bytes, source: bytes | None, body: Re
            if source else "The single image below is the candidate listing image (no source reference supplied). ")
         + "Product fidelity is an identity check, not a general similarity score. OCR every added artwork string carefully.\n\n"
         f"Role: {body.role}; shot type: {body.shot_type}; product should appear: {body.show_product}; "
+        f"intended product presence: {body.product_presence} "
+        f"({'the product is intentionally small in a real scene — do not penalize its modest size, but its visible identity must still match the source' if body.product_presence == 'environmental' else 'the product is intentionally absent from this frame — treat any appearance of the device as an error' if body.product_presence == 'absent' else 'the product is a primary subject'}). "
         f"legacy structured blueprint: {body.layout_blueprint or 'none'}. "
         f"EXPECTED ADDED ARTWORK COPY (exact JSON): {json.dumps(expected_copy, ensure_ascii=False)}. "
         "Every expected string must appear exactly once, character-for-character, with no misspelling, paraphrase, "
@@ -1457,9 +1737,10 @@ async def review_render_core(project_id: str, body: ReviewRenderReq) -> dict:
                 "realism", "composition", "typography", "commercial_readiness",
             )]
             retry_notes = [*fatal, *improvements]
-            if source and body.show_product and product_fidelity < 92:
+            fidelity_floor = 80 if body.product_presence == "environmental" else 92
+            if source and body.show_product and product_fidelity < fidelity_floor:
                 issues.append({"code": "product_fidelity_failed", "severity": "error",
-                               "message": f"产品外观一致性 {product_fidelity}/100，低于硬门槛 92"})
+                               "message": f"产品外观一致性 {product_fidelity}/100，低于硬门槛 {fidelity_floor}"})
                 retry_notes.append(
                     "Rebuild the product from the source reference without changing silhouette, proportions, colour, material, visible construction, labels or part count."
                 )
@@ -1490,10 +1771,13 @@ async def review_render_core(project_id: str, body: ReviewRenderReq) -> dict:
             vision["retry_guidance"] = retry_notes[:6]
         else:
             fidelity_required = bool(source and body.show_product)
+            # 机审不可用不再一票否决：降级为人工复核门槛（勾选"已核对"即视为通过），
+            # 否则视觉 provider 断供时整个工作台会像之前那样被 70 分 error 卡死。
             issues.append({
                 "code": "product_fidelity_unverified" if fidelity_required else "visual_review_unavailable",
-                "severity": "error" if fidelity_required else "warning",
-                "message": "产品一致性复核未返回，生成图不能交付" if fidelity_required else "远程审美复核未返回，必须由人工完成审美复核",
+                "severity": "warning",
+                "message": ("产品一致性机审未运行，请务必人工核对产品外观后勾选「已核对」"
+                            if fidelity_required else "远程审美复核未返回，必须由人工完成审美复核"),
             })
     elif not source_locked:
         vision = {"available": False, "reason": "deterministic_quality_failure"}

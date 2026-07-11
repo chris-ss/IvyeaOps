@@ -1167,18 +1167,39 @@ def _openai_key() -> str:
     return str(val) if val else ""
 
 
-def _assistant_vision_cfg() -> tuple[str, str, str] | None:
-    """Return (provider, key, base_url) for the custom assistant if configured,
-    or None. Only providers known to support vision are returned."""
+def _assistant_vision_cfg() -> tuple[str, str, str, str] | None:
+    """Return (provider, key, base_url, model) for the custom assistant if
+    configured, or None. Only providers known to support vision are returned.
+
+    Vision model resolution: `assistant_vision_model` wins, else
+    `assistant_model`, else the OpenAI-compat default (gpt-4o). Needed because
+    OpenAI-compat gateways (openrouter etc.) require full model slugs — the
+    old hardcoded "gpt-4o" broke every non-OpenAI assistant."""
     from app.core import hub_settings
     provider = str(hub_settings.get("assistant_provider") or "").lower()
     key = str(hub_settings.get("assistant_api_key") or "")
     base = str(hub_settings.get("assistant_base_url") or "")
+    model = str(hub_settings.get("assistant_vision_model")
+                or hub_settings.get("assistant_model") or "").strip()
     VISION_CAPABLE = ("openai", "anthropic", "openrouter", "google", "together",
                       "custom", "apimart", "deepseek")
     if not key or provider not in VISION_CAPABLE:
         return None
-    return provider, key, base
+    return provider, key, base, model
+
+
+def _ivyea_agent_vision_available() -> bool:
+    """ivyea-agent 可作视觉 provider：serve 可达且主脑标记了视觉能力。"""
+    try:
+        from app.services import ivyea_agent_service as ivyea
+        avail = ivyea.availability()
+        if not avail.get("available"):
+            return False
+        caps = (((avail.get("health") or {}).get("model") or {}).get("capabilities") or {})
+        # 老版本 serve 不回 capabilities → 保守认为不可用（也不支持 images 参数）
+        return bool(caps.get("vision"))
+    except Exception:
+        return False
 
 
 def _vision_provider_chain() -> list[str]:
@@ -1187,17 +1208,23 @@ def _vision_provider_chain() -> list[str]:
     from app.core import hub_settings
     raw = str(hub_settings.get("vision_ai_providers") or "").strip()
     # apimart is image-GEN only (no vision/analysis), so it is NOT a vision
-    # provider — image understanding needs a real vision model (openai / the
-    # vision-capable global fallback).
-    valid = ("openai", "assistant")
-    order = [p.strip().lower() for p in (raw or "openai,assistant").split(",")
+    # provider — image understanding needs a real vision model (ivyea-agent /
+    # openai / the vision-capable global fallback).
+    valid = ("ivyea-agent", "openai", "assistant")
+    order = [p.strip().lower() for p in (raw or "ivyea-agent,openai,assistant").split(",")
              if p.strip().lower() in valid]
-    order = list(dict.fromkeys(order)) or ["openai", "assistant"]
+    order = list(dict.fromkeys(order)) or ["ivyea-agent", "openai", "assistant"]
+    # 用户配置里没提 ivyea-agent 的旧配置也自动获得 agent 视觉（排最前，与文本链
+    # 一致：agent 是本产品的一等 provider）。
+    if "ivyea-agent" not in order:
+        order.insert(0, "ivyea-agent")
 
     # Only keep providers that have credentials configured right now.
     available = []
     for p in order:
-        if p == "openai" and _openai_key():
+        if p == "ivyea-agent" and _ivyea_agent_vision_available():
+            available.append(p)
+        elif p == "openai" and _openai_key():
             available.append(p)
         elif p == "assistant" and _assistant_vision_cfg():
             available.append(p)
@@ -1262,9 +1289,12 @@ async def _stream_openai_vision(
 
     payload = {"model": model, "max_tokens": 8192,
                "messages": [{"role": "user", "content": content}], "stream": True}
+    # 与文本链同一约定：assistant_base_url 可能已含 /v1（openrouter 等），别重复拼。
+    base = base_url.rstrip("/")
+    url = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
     async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=30)) as client:
         async with client.stream(
-            "POST", f"{base_url.rstrip('/')}/v1/chat/completions", json=payload,
+            "POST", url, json=payload,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         ) as resp:
             resp.raise_for_status()
@@ -1281,6 +1311,62 @@ async def _stream_openai_vision(
                 text = (ev.get("choices") or [{}])[0].get("delta", {}).get("content", "")
                 if text:
                     yield text
+
+
+async def _stream_ivyea_agent_vision(prompt: str, images_b64: list[str]) -> AsyncGenerator[str, None]:
+    """ivyea-agent 作视觉 provider：serve /v1/chat/stream 带 images（v1.8.3+）。
+
+    persist=False —— 成图复核/图片分析属于内部管线调用，不进 agent 会话历史。
+    max_steps=1 —— 看图回答是单步任务，不需要 agent 工具循环。
+    """
+    from app.services import ivyea_agent_service as ivyea
+
+    status = await asyncio.to_thread(ivyea.ensure_available)
+    if not status.get("available"):
+        raise RuntimeError(status.get("error") or "IvyeaAgent 服务未连接")
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    token = ivyea._token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    payload = {
+        "message": prompt,
+        "images": [uri for uri in images_b64[:4] if str(uri).startswith("data:image/")],
+        "max_steps": 1,
+        "plan_mode": True,
+        "persist": False,
+        "inject_retrieval": False,
+    }
+    got_token = False
+    final_text = ""
+    event = "message"
+    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=15)) as client:
+        async with client.stream("POST", f"{ivyea.base_url()}/v1/chat/stream", json=payload, headers=headers) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line:
+                    event = "message"
+                    continue
+                if line.startswith("event:"):
+                    event = line[6:].strip() or "message"
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    data = json.loads(line[5:].strip() or "{}")
+                except Exception:
+                    continue
+                if event == "token":
+                    text = str(data.get("text") or "")
+                    if text:
+                        got_token = True
+                        yield text
+                elif event == "final":
+                    final_text = str(data.get("text") or "")
+                elif event == "error":
+                    raise RuntimeError(str(data.get("detail") or data.get("error") or data))
+    if not got_token and final_text:
+        yield final_text
 
 
 async def stream_vision(prompt: str, images_b64: list[str]) -> AsyncGenerator[tuple[str, str], None]:
@@ -1305,7 +1391,10 @@ async def stream_vision(prompt: str, images_b64: list[str]) -> AsyncGenerator[tu
     for provider in chain:
         try:
             got = False
-            if provider == "apimart":
+            if provider == "ivyea-agent":
+                label = "ivyea-agent"
+                gen = _stream_ivyea_agent_vision(prompt, images_b64)
+            elif provider == "apimart":
                 label = "claude"
                 gen = _stream_apimart_vision(prompt, images_b64)
             elif provider == "openai":
@@ -1315,13 +1404,15 @@ async def stream_vision(prompt: str, images_b64: list[str]) -> AsyncGenerator[tu
                 cfg = _assistant_vision_cfg()
                 if not cfg:
                     continue
-                _, key, base = cfg
+                _, key, base, model = cfg
                 label = "assistant"
                 # Anthropic-format providers go through Apimart-style; others use OpenAI compat.
                 if "anthropic" in cfg[0] or "apimart" in cfg[0]:
                     gen = _stream_apimart_vision(prompt, images_b64)
                 else:
-                    gen = _stream_openai_vision(prompt, images_b64, key, base or "https://api.openai.com")
+                    gen = _stream_openai_vision(prompt, images_b64, key,
+                                                base or "https://api.openai.com",
+                                                model=model or "gpt-4o")
 
             async for chunk in gen:
                 got = True

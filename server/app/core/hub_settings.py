@@ -46,6 +46,7 @@ _DEFAULTS: Dict[str, Any] = {
     # the default deepseek→apimart chain.
     "assistant_provider": "",     # deepseek | anthropic | openai | openrouter | ...
     "assistant_model": "",
+    "assistant_vision_model": "",  # 视觉复核用模型（缺省沿用 assistant_model）
     "assistant_api_key": "",
     "assistant_base_url": "",
     # IvyeaAgent local service — primary embedded agent/runtime. New installs

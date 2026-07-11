@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 
-async def _call_ai(prompt: str, max_tokens: int = 2000, web_search: bool = True) -> str:
+async def _call_ai(prompt: str, web_search: bool = True) -> str:
     """Generate text via the standard fallback chain:
     Hermes → 全局兜底大模型 → Codex → Claude.
 
