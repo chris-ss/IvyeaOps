@@ -7,6 +7,7 @@ import time
 from PIL import Image, ImageDraw
 
 from app.routers import listing as L
+from app.routers.listing import visuals as V
 
 
 def test_strip_json_variants():
@@ -242,12 +243,12 @@ def test_generated_product_fidelity_is_a_hard_review_gate(monkeypatch):
             "fatal_issues": [], "improvements": ["restore the exact seam layout"], "verdict": "pass",
         }}
 
-    monkeypatch.setattr(L, "_fetch_image_bytes", fake_fetch)
-    monkeypatch.setattr(L, "_render_vision_review", fake_review)
-    result = asyncio.run(L.review_render("p", L.ReviewRenderReq(
+    monkeypatch.setattr(V, "_fetch_image_bytes", fake_fetch)
+    monkeypatch.setattr(V, "_render_vision_review", fake_review)
+    result = asyncio.run(V.review_render_core("p", L.ReviewRenderReq(
         url="candidate", source_url="source", show_product=True,
         product_fidelity_anchors=["exact seam layout"],
-    ), _user="t"))
+    )))
     assert result["ready"] is False
     assert any(issue["code"] == "product_fidelity_failed" for issue in result["issues"])
     assert any("seam" in value for value in result["retry_guidance"])
@@ -403,11 +404,11 @@ def test_plan_image_set_structured(monkeypatch):
     async def fake_white_source(project_id, scrape_data):
         return "https://img/white-product.jpg", [{"url": "https://img/white-product.jpg", "ready": True}]
 
-    monkeypatch.setattr(L, "_call_ai", fake_call)
-    monkeypatch.setattr(L, "_analyze_product_visual_identity", fake_identity)
-    monkeypatch.setattr(L, "_detect_white_product_source", fake_white_source)
+    monkeypatch.setattr(V, "_call_ai", fake_call)
+    monkeypatch.setattr(V, "_analyze_product_visual_identity", fake_identity)
+    monkeypatch.setattr(V, "_detect_white_product_source", fake_white_source)
     try:
-        res = asyncio.run(L.plan_image_set(pid, L.PlanImageSetReq(target_count=0), _user="t"))
+        res = asyncio.run(V.run_plan_image_set(pid, L.PlanImageSetReq(target_count=0)))
         assert res["ok"] is True and res["fallback"] is False
         imgs = res["plan"]["images"]
         assert imgs[0]["slot"] == "main" and imgs[0]["text_on_image"] is False
@@ -490,12 +491,12 @@ def test_inexact_model_rendered_copy_is_a_hard_review_gate(monkeypatch):
             "fatal_issues": [], "improvements": ["Correct the headline spelling"], "verdict": "fail",
         }}
 
-    monkeypatch.setattr(L, "_fetch_image_bytes", fake_fetch)
-    monkeypatch.setattr(L, "_render_vision_review", fake_review)
-    result = asyncio.run(L.review_render("p", L.ReviewRenderReq(
+    monkeypatch.setattr(V, "_fetch_image_bytes", fake_fetch)
+    monkeypatch.setattr(V, "_render_vision_review", fake_review)
+    result = asyncio.run(V.review_render_core("p", L.ReviewRenderReq(
         url="candidate", source_url="source", show_product=True,
         headline="BUILT FOR RAIN", product_fidelity_anchors=["exact silhouette"],
-    ), _user="t"))
+    )))
     assert result["ready"] is False
     assert any(issue["code"] == "artwork_copy_failed" for issue in result["issues"])
     assert any("BUILT FOR RAIN" in value for value in result["retry_guidance"])
@@ -508,9 +509,9 @@ def test_plan_image_set_fallback_on_garbage(monkeypatch):
     async def fake_call(prompt, max_tokens=2000, web_search=True):
         return "I'm sorry, I can't produce that."
 
-    monkeypatch.setattr(L, "_call_ai", fake_call)
+    monkeypatch.setattr(V, "_call_ai", fake_call)
     try:
-        res = asyncio.run(L.plan_image_set(pid, L.PlanImageSetReq(target_count=5), _user="t"))
+        res = asyncio.run(V.run_plan_image_set(pid, L.PlanImageSetReq(target_count=5)))
         assert res["ok"] is True and res["fallback"] is True       # degraded, never errors
         assert len(res["plan"]["images"]) >= 1
         assert res["plan"]["images"][0]["slot"] == "main"
@@ -537,10 +538,10 @@ def test_aplus_plan_and_editor_state_persist_in_unified_creative_sets(monkeypatc
     async def fake_call(prompt, max_tokens=2000, web_search=True):
         return payload
 
-    monkeypatch.setattr(L, "_call_ai", fake_call)
+    monkeypatch.setattr(V, "_call_ai", fake_call)
     try:
-        result = asyncio.run(L.plan_image_set(
-            pid, L.PlanImageSetReq(target_count=1, deliverable="aplus"), _user="t",
+        result = asyncio.run(V.run_plan_image_set(
+            pid, L.PlanImageSetReq(target_count=1, deliverable="aplus"),
         ))
         assert result["plan"]["deliverable"] == "aplus"
         assert result["plan"]["images"][0]["shot_type"] == "aplus_banner"

@@ -22,7 +22,7 @@ const Terminal = lazy(() => import("./pages/workbench/Terminal"));
 const ServerMonitor = lazy(() => import("./pages/workbench/ServerMonitor"));
 const News = lazy(() => import("./pages/workbench/News"));
 const Brain = lazy(() => import("./pages/workbench/Brain"));
-const ListingWorkbench = lazy(() => import("./pages/workbench/ListingWorkbench"));
+const ListingWorkbench = lazy(() => import("./pages/workbench/listing/ListingWorkbench"));
 const Agents = lazy(() => import("./pages/workbench/Agents"));
 const Market = lazy(() => import("./pages/workbench/Market"));
 const Playbook = lazy(() => import("./pages/workbench/Playbook"));
