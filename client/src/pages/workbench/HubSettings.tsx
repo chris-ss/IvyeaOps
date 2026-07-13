@@ -791,6 +791,7 @@ const EMPTY: HubSettings = {
   hermes_fallback_api_key: "", hermes_fallback_base_url: "",
   assistant_provider: "", assistant_model: "", assistant_api_key: "", assistant_base_url: "",
   assistant_vision_model: "",
+  vision_provider: "", vision_model: "", vision_api_key: "", vision_base_url: "",
   ivyea_agent_url: "http://127.0.0.1:8765", ivyea_agent_token: "", ivyea_agent_auto_start: true,
   ivyea_agent_provider: "", ivyea_agent_model: "", ivyea_agent_api_key: "", ivyea_agent_base_url: "",
   image_model: "", image_api_key: "", image_base_url: "",
@@ -1042,7 +1043,7 @@ export default function HubSettings() {
         title="全局兜底大模型"
         dataTour="settings-fallback"
         desc={<>所有板块的统一文本出口，也是 AI 问答的默认模型。建议配置一个稳定的文本大模型；IvyeaAgent 主脑模型可在最上方单独指定。</>}
-        keys={["assistant_provider", "assistant_model", "assistant_api_key", "assistant_base_url", "assistant_vision_model"]}
+        keys={["assistant_provider", "assistant_model", "assistant_api_key", "assistant_base_url"]}
         vals={vals} onSave={save}
       >
         <LLMModelBlock
@@ -1052,14 +1053,25 @@ export default function HubSettings() {
           apiKeyKey="assistant_api_key" baseUrlKey="assistant_base_url"
           vals={vals} set={set}
         />
-        <div style={{ marginTop: 12 }}>
-          <Field label="视觉复核模型（可选）"
-            hint="Listing 成图质检、图片分析等看图任务使用；需为该 Provider 下支持图片输入的模型（如硅基流动 Qwen/Qwen3-VL-30B-A3B-Instruct）。留空则尝试用上面的文本模型看图；不配置时成图质检自动降级为人工复核。">
-            <input className="hs-input" value={vals.assistant_vision_model || ""}
-              onChange={(e) => set("assistant_vision_model", e.target.value)}
-              placeholder="Qwen/Qwen3-VL-30B-A3B-Instruct" />
-          </Field>
-        </div>
+      </Section>
+
+      {/* -- 核心 3.5: 视觉复核模型（与全局兜底独立） -- */}
+      <Section
+        title="视觉复核模型"
+        desc={<>看图任务专用：Listing 成图质检 + 按质检意见自动重画、图片视觉分析、竞品套图版式学习。
+          与上面的全局兜底<b>完全独立</b>——可以文本用一家、看图用另一家。需选支持图片输入的模型
+          （推荐硅基流动免费档 <code>Qwen/Qwen3-VL-30B-A3B-Instruct</code>，0 余额可用）。
+          不配置时成图质检自动降级为人工复核（勾选「已核对」即可交付），流程不会卡住。</>}
+        keys={["vision_provider", "vision_model", "vision_api_key", "vision_base_url"]}
+        vals={vals} onSave={save}
+      >
+        <LLMModelBlock
+          title="视觉大模型"
+          hint="模型必须支持图片输入（多模态）。"
+          providerKey="vision_provider" modelKey="vision_model"
+          apiKeyKey="vision_api_key" baseUrlKey="vision_base_url"
+          vals={vals} set={set}
+        />
       </Section>
 
       {/* -- 核心 4: 图片生成服务 -- */}

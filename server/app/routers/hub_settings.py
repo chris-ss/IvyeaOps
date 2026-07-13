@@ -20,6 +20,7 @@ _SECRET_KEYS: List[str] = [
     "hermes_api_key", "hermes_fallback_api_key", "gbrain_embed_api_key",
     "alert_app_secret", "alert_webhook", "openai_api_key",
     "ivyea_agent_token", "ivyea_agent_api_key", "lingxing_mcp_key", "lingxing_openapi_secret",
+    "vision_api_key",
 ]
 
 # Keys that, when changed, require syncing into Hermes config.

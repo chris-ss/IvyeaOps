@@ -1170,26 +1170,45 @@ def _openai_key() -> str:
     return str(val) if val else ""
 
 
-def _assistant_vision_cfg() -> tuple[str, str, str, str] | None:
-    """Return (provider, key, base_url, model) for the custom assistant if
-    configured, or None. Only providers known to support vision are returned.
+_VISION_CAPABLE_PROVIDERS = ("openai", "anthropic", "openrouter", "google", "together",
+                             "custom", "apimart", "deepseek",
+                             "siliconflow", "dashscope", "zhipu")
 
-    Vision model resolution: `assistant_vision_model` wins, else
-    `assistant_model`, else the OpenAI-compat default (gpt-4o). Needed because
-    OpenAI-compat gateways (openrouter etc.) require full model slugs — the
-    old hardcoded "gpt-4o" broke every non-OpenAI assistant."""
+
+def _assistant_vision_cfg() -> tuple[str, str, str, str] | None:
+    """Return (provider, key, base_url, model) for the configured vision
+    reviewer, or None.
+
+    独立视觉复核槽（vision_provider/vision_api_key/vision_base_url/vision_model）
+    优先——它与全局兜底彻底解耦，支持"文本兜底用 A 家、看图用 B 家"。
+    未配置时回退旧行为：全局兜底槽 + assistant_vision_model（或 assistant_model），
+    这样 2026-07 之前按 CONFIG.md 配置的用户无需迁移。
+    Base URL 为空时按 provider 预设解析（openrouter 等网关需要完整模型 slug，
+    不能再写死 gpt-4o）。"""
     from app.core import hub_settings
-    provider = str(hub_settings.get("assistant_provider") or "").lower()
-    key = str(hub_settings.get("assistant_api_key") or "")
-    base = str(hub_settings.get("assistant_base_url") or "")
-    model = str(hub_settings.get("assistant_vision_model")
-                or hub_settings.get("assistant_model") or "").strip()
-    VISION_CAPABLE = ("openai", "anthropic", "openrouter", "google", "together",
-                      "custom", "apimart", "deepseek",
-                      "siliconflow", "dashscope", "zhipu")
-    if not key or provider not in VISION_CAPABLE:
-        return None
-    return provider, key, base, model
+
+    def _resolve(provider: str, key: str, base: str, model: str):
+        provider = provider.lower().strip()
+        if not key or provider not in _VISION_CAPABLE_PROVIDERS:
+            return None
+        base = base.strip() or ASSISTANT_PROVIDER_BASE.get(provider, "")
+        return provider, key, base, model.strip()
+
+    independent = _resolve(
+        str(hub_settings.get("vision_provider") or ""),
+        str(hub_settings.get("vision_api_key") or ""),
+        str(hub_settings.get("vision_base_url") or ""),
+        str(hub_settings.get("vision_model") or ""),
+    )
+    if independent:
+        return independent
+    return _resolve(
+        str(hub_settings.get("assistant_provider") or ""),
+        str(hub_settings.get("assistant_api_key") or ""),
+        str(hub_settings.get("assistant_base_url") or ""),
+        str(hub_settings.get("assistant_vision_model")
+            or hub_settings.get("assistant_model") or ""),
+    )
 
 
 def _ivyea_agent_vision_available() -> bool:
@@ -1415,7 +1434,7 @@ async def stream_vision(prompt: str, images_b64: list[str]) -> AsyncGenerator[tu
                     gen = _stream_apimart_vision(prompt, images_b64)
                 else:
                     gen = _stream_openai_vision(prompt, images_b64, key,
-                                                base or "https://api.openai.com",
+                                                base or "https://api.openai.com/v1",
                                                 model=model or "gpt-4o")
 
             async for chunk in gen:

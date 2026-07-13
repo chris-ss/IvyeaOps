@@ -52,11 +52,11 @@ UI 里的分区：
 |---|---|---|
 | 零 Key | 什么都不填 | 各板块用内置规则兜底；Listing 套图走内置精品叙事库策划 + 人工复核，流程完整可跑 |
 | **最低配（推荐）** | 一个 [DeepSeek](https://platform.deepseek.com) key（`deepseek_api_key`，也可直接设为 IvyeaAgent 主脑） | AI 分析 / 文案 / 套图策划 / 各板块报告全部满血 |
-| 视觉增强 | 再加一个[硅基流动](https://siliconflow.cn) key：全局兜底 Provider 选「硅基流动」，视觉复核模型填 `Qwen/Qwen3-VL-30B-A3B-Instruct`（免费档即可用，无需充值） | Listing 成图质检 + 按质检意见自动重画闭环、图片视觉分析全部启用 |
+| 视觉增强 | 再加一个[硅基流动](https://siliconflow.cn) key：在独立的「**视觉复核模型**」区块选「硅基流动」，模型填 `Qwen/Qwen3-VL-30B-A3B-Instruct`（免费档即可用，无需充值） | Listing 成图质检 + 按质检意见自动重画闭环、图片视觉分析全部启用 |
 
 说明：
 - 文本任务的调用顺序是 **IvyeaAgent（主脑可配 DeepSeek）→ Hermes → DeepSeek → 全局兜底 → Codex → Claude**，配到哪层用到哪层；
-- 视觉任务顺序是 **IvyeaAgent（主脑有视觉能力时）→ OpenAI → 全局兜底的视觉复核模型**；都没配时成图质检自动降级为人工复核（勾选「已核对」即可交付），不会卡死流程；
+- 视觉任务顺序是 **IvyeaAgent（主脑有视觉能力时）→ OpenAI → 视觉复核模型（独立区块；未配置时回退全局兜底槽的视觉设置）**；都没配时成图质检自动降级为人工复核（勾选「已核对」即可交付），不会卡死流程；文本和视觉可以用不同平台，互不影响；
 - 硅基流动 / 阿里云百炼 / 智谱在 Provider 下拉里有预设，任何 OpenAI 兼容端点也可用「自定义」接入。
 
 ### IvyeaAgent 知识库
