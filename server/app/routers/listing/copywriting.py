@@ -149,16 +149,25 @@ class ProjectCopyReq(BaseModel):
 # ─── 管线 ─────────────────────────────────────────────────────────────────────
 
 async def _analyze_images_vision(image_paths: list[str], product_type: str) -> dict:
-    """统一视觉链识别产品图。Falls back gracefully."""
+    """统一视觉链识别产品图。Falls back gracefully.
+
+    image_paths 支持本地路径和 http(s) URL 混合——无上传素材时调用方会传采集图
+    URL，识别阶段不再"跳过还打绿勾"。"""
     if not image_paths:
         return {"mode": "skipped", "features": [], "reason": "No images provided"}
     if not has_vision():
         return {"mode": "skipped", "features": [], "reason": "No vision provider configured"}
 
     import base64
+    from .common import _img_datauri_from_url
     images_b64: list[str] = []
     for ip in image_paths[:6]:  # max 6 images for cost
         try:
+            if str(ip).startswith(("http://", "https://")):
+                uri = await _img_datauri_from_url(str(ip))
+                if uri:
+                    images_b64.append(uri)
+                continue
             with open(ip, "rb") as f:
                 data = base64.b64encode(f.read()).decode()
             ext = Path(ip).suffix.lower().lstrip(".")
@@ -209,6 +218,11 @@ async def _fetch_competitor_data(asins: list[str], marketplace: str) -> dict:
                 if err:
                     errors.append(err)
                 elif val:
+                    # sorftime 某些工具会返回"如何分析"的方法论指引而非数据，
+                    # 混进文案 prompt 只会稀释真实竞品信息，直接丢弃。
+                    text = str(val)
+                    if "请调用对应的工具" in text or text.strip().startswith("分析一个产品的方法"):
+                        continue
                     asin_key = name
                     if asin_key not in results:
                         results[asin_key] = []
@@ -274,7 +288,7 @@ async def run_copy_pipeline(*, marketplace: str, product_type: str, asins: list[
         if progress:
             progress(stage, message)
 
-    report(0, "正在分析产品图片…" if image_paths else "未上传图片，跳过图片识别")
+    report(0, "正在分析产品图片…" if image_paths else "无可用产品图（未上传且未采集到），跳过图片识别")
     vision_result = await _analyze_images_vision(image_paths, product_type)
 
     report(1, "正在查询竞品数据…" if asins else "未填写竞品ASIN，跳过竞品查询")
@@ -327,6 +341,9 @@ async def run_project_copy(project_id: str, body: ProjectCopyReq,
     if body.extra_notes.strip():
         notes = f"{notes}\n补充要求: {body.extra_notes.strip()}" if notes else body.extra_notes.strip()
     image_paths = [p for p in (scrape_data.get("uploaded_images") or []) if Path(str(p)).exists()]
+    if not image_paths:
+        # 没有上传素材时用采集图做视觉识别——识别阶段要么真跑、要么明说跳过
+        image_paths = [str(u) for u in (scrape_data.get("reference_images") or [])[:4]]
     asins = [a.strip().upper() for a in ([row["asin"]] + list(body.competitor_asins)) if str(a).strip()][:10]
 
     stages = ["vision", "competitor", "generate", "done"]

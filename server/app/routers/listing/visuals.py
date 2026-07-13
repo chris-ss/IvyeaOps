@@ -1674,8 +1674,12 @@ async def _render_vision_review(candidate: bytes, source: bytes | None, body: Re
         "immutable product details and are not unexpected artwork copy. If expected JSON is empty, there must be no "
         "added headline, caption, number, badge or marketing text. "
         f"Product fidelity anchors: {', '.join(body.product_fidelity_anchors[:8]) or 'silhouette, proportions, colour, material and visible details'}. "
-        "When product should appear is true, compare every visible product part against the source: silhouette, proportions, "
-        "colour blocking, material, seams, openings, controls, logo/label placement, accessories and quantity. Any redesign, "
+        + ("The source photo may be a bundle shot; loose accessory items in it (memory cards, cables, straps, manuals, "
+           "packaging) are reference noise for this shot — do NOT penalize their absence; judge only the primary product. "
+           if body.shot_type not in ("in_box", "white_main") else
+           "This shot represents the purchased set: included accessories and their quantity must match the source. ")
+        + "When product should appear is true, compare every visible primary-product part against the source: silhouette, proportions, "
+        "colour blocking, material, seams, openings, controls, logo/label placement. Any redesign, "
         "missing/extra part, changed geometry or materially wrong detail is a fatal issue. When product should appear is false, "
         "do not penalize its intentional absence and return product_fidelity 100. "
         "Return JSON only: {\"scores\":{\"product_fidelity\":0-100,\"realism\":0-100,"
