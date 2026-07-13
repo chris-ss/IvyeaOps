@@ -285,11 +285,16 @@ async def _run_skill_agent(skill_basename: str, params: dict, skill_body: str):
         yield ("error", "hermes CLI 不可用")
         return
 
-    params_section = "\n".join(f"- {k}: {v}" for k, v in params.items() if v)
+    # `task` is the universal free-form input the store shows for skills without
+    # a declared input schema — surface it as the task itself, not a mere param.
+    task = str((params or {}).get("task") or "").strip()
+    rest = {k: v for k, v in (params or {}).items() if k != "task" and v}
+    params_section = "\n".join(f"- {k}: {v}" for k, v in rest.items())
     prompt = (
         f"请执行 skill「{skill_basename}」。\n\n"
-        f"## 用户提供的参数\n{params_section or '（无额外参数）'}\n\n"
-        "按该 skill 定义的步骤执行并输出结果。"
+        + (f"## 任务要求\n{task}\n\n" if task else "")
+        + f"## 用户提供的参数\n{params_section or '（无额外参数）'}\n\n"
+        + "按该 skill 定义的步骤执行并输出结果。"
     )
 
     env = build_child_env(binary)
@@ -366,15 +371,17 @@ async def _run_llm_only(detail, params: dict):
                    if not (isinstance(v, str) and v.startswith("data:"))}
 
     filled = _fill_params(detail.content_body, text_params)
+    task = str((params or {}).get("task") or "").strip()
     params_section = "\n".join(
         f"- {k}: {'[图片已附]' if isinstance(v, str) and v.startswith('data:') else v}"
-        for k, v in (params or {}).items() if v
+        for k, v in (params or {}).items() if v and k != "task"
     )
     prompt = (
         "你是一个严格按说明书执行任务的助手。请按下面这份 Skill 说明完成任务，"
         "直接输出最终结果（Markdown），不要解释你在做什么。\n\n"
-        f"## 用户提供的参数\n{params_section or '（无额外参数）'}\n\n"
-        f"## Skill 说明\n{filled}\n"
+        + (f"## 任务要求\n{task}\n\n" if task else "")
+        + f"## 用户提供的参数\n{params_section or '（无额外参数）'}\n\n"
+        + f"## Skill 说明\n{filled}\n"
     )
 
     if images_b64:

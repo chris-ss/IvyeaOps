@@ -45,7 +45,7 @@ const MODE_KEY = "skillArchitectMode";
 // idle → working → clarify → plan → preview
 type Phase = "idle" | "working" | "clarify" | "plan" | "preview";
 
-export default function IdeaSkill() {
+export default function IdeaSkill({ embedded }: { embedded?: boolean } = {}) {
   const navigate = useNavigate();
   const [idea, setIdea] = useState("");
   const [category, setCategory] = useState("");
@@ -216,7 +216,7 @@ export default function IdeaSkill() {
 
   return (
     <div>
-      <div className="ptitle">/ 想法工坊</div>
+      {!embedded && <div className="ptitle">/ 想法工坊</div>}
       <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 16 }}>
         一句话描述你的想法，AI 深入理解需求 → 制定方案 → 复核优化 → 生成并自检 Skill
       </div>
@@ -427,7 +427,7 @@ export default function IdeaSkill() {
             </div>
           )}
           {generated.validation?.ok && generated.validation.warnings.length === 0 && (
-            <div style={{ fontSize: 10, color: "var(--green)", marginBottom: 10 }}>✓ 自检通过</div>
+            <div style={{ fontSize: 10, color: "var(--acc)", marginBottom: 10 }}>✓ 自检通过</div>
           )}
 
           {generated.frontmatter?.description_zh ? (
@@ -463,7 +463,7 @@ export default function IdeaSkill() {
           </div>
 
           {saved && (
-            <div style={{ marginTop: 10, fontSize: 11, color: "var(--green)" }}>
+            <div style={{ marginTop: 10, fontSize: 11, color: "var(--acc)" }}>
               ✓ Skill 已保存！可在「运营商店」执行，或在工具页右上角「☆ 固定到侧边栏」把它变成常驻入口。
             </div>
           )}
