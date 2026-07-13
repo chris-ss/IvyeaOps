@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
-
-function Btn({ onClick, children }: any) {
-  return <button onClick={onClick} style={{ background: "var(--bg2)", color: "var(--t)", border: "1px solid var(--b)", borderRadius: 4, padding: "5px 12px", fontSize: 11, cursor: "pointer" }}>{children}</button>;
-}
+import { Btn, LxTable, LxTableSkeleton, fmtTs, type LxCol } from "./lingxingUi";
 
 const STATUS_COLOR: Record<string, string> = {
   ok: "var(--acc)", denied: "var(--t3)", blocked: "var(--red)", error: "var(--red)",
@@ -12,12 +9,14 @@ const STATUS_COLOR: Record<string, string> = {
 export default function LingXingAudit() {
   const [rows, setRows] = useState<any[]>([]);
   const [filter, setFilter] = useState<string>("");
+  const [loaded, setLoaded] = useState(false);
   const [msg, setMsg] = useState("");
 
   useEffect(() => { void load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
   async function load() {
-    try { setRows((await api.get("/lingxing/audit?limit=300")).data.rows || []); }
+    try { setRows((await api.get("/lingxing/audit?limit=300")).data.rows || []); setMsg(""); }
     catch (e: any) { setMsg(e?.response?.data?.detail || e?.message || "加载失败"); }
+    finally { setLoaded(true); }
   }
 
   const counts = useMemo(() => {
@@ -27,10 +26,20 @@ export default function LingXingAudit() {
   }, [rows]);
   const shown = filter ? rows.filter((r) => r.status === filter) : rows;
 
+  const cols: LxCol[] = [
+    { key: "ts", label: "时间", render: (r) => fmtTs(r.ts), sortVal: (r) => r.ts },
+    { key: "caller", label: "调用方" },
+    { key: "tool", label: "工具/路由", maxWidth: 260 },
+    { key: "kind", label: "类型" },
+    { key: "status", label: "状态", render: (r) => <span style={{ color: STATUS_COLOR[r.status] || "var(--t2)", fontWeight: 600 }}>{r.status}</span> },
+    { key: "latency_ms", label: "耗时", num: true, render: (r) => (r.latency_ms ? `${r.latency_ms}ms` : "—") },
+    { key: "detail", label: "详情", maxWidth: 320, render: (r) => <span style={{ color: "var(--t3)", whiteSpace: "normal" }}>{r.detail || "—"}</span> },
+  ];
+
   return (
     <div>
       <div className="card" style={{ padding: 12, marginBottom: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 11, color: "var(--t3)" }}>全部调用审计（读/写/探针）</span>
+        <span style={{ fontSize: 11, color: "var(--t3)" }}>全部调用审计（读/写/探针）· 每 8 秒自动刷新</span>
         {["ok", "denied", "blocked", "error"].map((s) => (
           <span key={s} onClick={() => setFilter(filter === s ? "" : s)} style={{
             fontSize: 11, cursor: "pointer", padding: "2px 8px", borderRadius: 10,
@@ -44,32 +53,10 @@ export default function LingXingAudit() {
         </span>
       </div>
 
-      <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-        {shown.length === 0 ? (
-          <div style={{ padding: 30, textAlign: "center", color: "var(--t3)", fontSize: 11 }}>{msg || "暂无审计记录"}</div>
-        ) : (
-          <table className="lx-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-            <thead><tr>{["时间", "调用方", "工具/路由", "类型", "状态", "耗时", "详情"].map((h) => (
-              <th key={h} style={{ textAlign: "left", padding: "7px 10px", color: "var(--t3)", borderBottom: "1px solid var(--b)", whiteSpace: "nowrap" }}>{h}</th>))}</tr></thead>
-            <tbody>
-              {shown.map((r, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid var(--b)" }}>
-                  <td style={td}>{fmtTs(r.ts)}</td>
-                  <td style={td}>{r.caller}</td>
-                  <td style={{ ...td, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}>{r.tool}</td>
-                  <td style={td}>{r.kind}</td>
-                  <td style={{ ...td, color: STATUS_COLOR[r.status] || "var(--t2)", fontWeight: 600 }}>{r.status}</td>
-                  <td style={td}>{r.latency_ms ? `${r.latency_ms}ms` : "—"}</td>
-                  <td style={{ ...td, maxWidth: 280, whiteSpace: "normal", color: "var(--t3)" }}>{r.detail || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div className="card" style={{ padding: 0 }}>
+        {!loaded ? <LxTableSkeleton lines={8} />
+          : <LxTable rows={shown} cols={cols} empty={msg || "暂无审计记录"} initSort={{ key: "ts", dir: "desc" }} />}
       </div>
     </div>
   );
 }
-
-const td: React.CSSProperties = { padding: "6px 10px", color: "var(--t2)", whiteSpace: "nowrap", verticalAlign: "top" };
-function fmtTs(ts?: string) { if (!ts) return "—"; try { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); } catch { return ts; } }

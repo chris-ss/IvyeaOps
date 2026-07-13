@@ -53,8 +53,11 @@ export function sidCurrencyMap(sellers: any[]): Record<string, Cur> {
   return m;
 }
 
-/** Format a budget number with the store's currency symbol (no symbol if unknown). */
+/** Format a budget number with the store's currency symbol (no symbol if unknown).
+ *  Thousands-separated to match the rest of the panel's number formatting. */
 export function fmtBudget(v: any, cur?: Cur): string {
   if (v === null || v === undefined || v === "") return "—";
-  return cur ? `${cur.sym}${v}` : `${v}`;
+  const n = Number(v);
+  const s = Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : String(v);
+  return cur ? `${cur.sym}${s}` : s;
 }

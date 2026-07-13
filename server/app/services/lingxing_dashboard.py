@@ -63,6 +63,8 @@ async def dashboard(sids: Optional[List[int]] = None, days: int = 7) -> Dict[str
     store_names = await _resolve_sids(sids)
 
     totals = _bucket()
+    prev_totals = _bucket()
+    prev_seen = False
     by_store: Dict[int, Dict[str, float]] = {}
     by_campaign: Dict[str, Dict[str, Any]] = {}
     by_day: Dict[str, Dict[str, float]] = {}
@@ -75,13 +77,21 @@ async def dashboard(sids: Optional[List[int]] = None, days: int = 7) -> Dict[str
         except _gw.LingXingError:
             cname = {}
         sb = by_store.setdefault(sid, _bucket())
-        for d in range(1, days + 1):
+        # current window (1..days) + the window right before it (days+1..2*days)
+        # for period-over-period KPIs; past-day reports are cached so the extra
+        # window is cheap after the first load.
+        for d in range(1, 2 * days + 1):
             day = (datetime.now(timezone.utc) - timedelta(days=d)).strftime("%Y-%m-%d")
             try:
                 rep = await _data.fetch_dataset(
                     "sp_campaign_report", {"sid": sid, "report_date": day, "length": 300},
                     ttl=_REPORT_TTL_S)
             except _gw.LingXingError:
+                continue
+            if d > days:
+                for r in (rep.get("rows") or []):
+                    _add(prev_totals, r)
+                    prev_seen = True
                 continue
             db = by_day.setdefault(day, _bucket())
             for r in (rep.get("rows") or []):
@@ -108,6 +118,7 @@ async def dashboard(sids: Optional[List[int]] = None, days: int = 7) -> Dict[str
     return {
         "scope": {"sids": list(store_names.keys()), "days": days, "store_count": len(store_names)},
         "totals": _derive(totals),
+        "prev_totals": _derive(prev_totals) if prev_seen else None,
         "by_store": stores,
         "by_campaign": campaigns[:25],
         "trend": trend,

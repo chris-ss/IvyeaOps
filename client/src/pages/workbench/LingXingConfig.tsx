@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import SheetSelect from "../../components/SheetSelect";
+import LingXingHelp from "./LingXingHelp";
 
 const inputStyle: React.CSSProperties = {
   background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: 3,
@@ -29,6 +30,7 @@ export default function LingXingConfig() {
   const [analysisProv, setAnalysisProv] = useState("ivyea-agent");
   const [models, setModels] = useState<any[]>([]); const [cm, setCm] = useState<any>({});
   const [rules, setRules] = useState(""); const [rulesDefault, setRulesDefault] = useState("");
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => { void load(); }, []);
   async function load() {
@@ -66,9 +68,12 @@ export default function LingXingConfig() {
 
   return (
     <div>
-      <div className="card" style={{ padding: "8px 12px", marginBottom: 10, fontSize: 11, color: "var(--t3)" }}>
-        开箱即用：① 填 OpenAPI 凭证 → ② 测试连接 → ③ 打开总开关。之后即可在「大盘/数据浏览/优化引擎」浏览分析；写操作另有独立「操作开关」+ 三重复核。
+      <div className="card" style={{ padding: "8px 12px", marginBottom: 10, fontSize: 11, color: "var(--t3)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span>开箱即用：① 填 OpenAPI 凭证 → ② 测试连接 → ③ 打开总开关。之后即可在「大盘/数据浏览/优化建议」浏览分析；写操作另有独立「操作开关」+ 三重复核。</span>
+        <span style={{ marginLeft: "auto" }}><Btn onClick={() => setShowHelp((v) => !v)}>{showHelp ? "收起帮助文档" : "📖 帮助文档"}</Btn></span>
       </div>
+
+      {showHelp && <div className="wb-enter" style={{ marginBottom: 10 }}><LingXingHelp /></div>}
 
       {/* ① credentials */}
       <Card title="① 领星 OpenAPI 凭证（领星 ERP → 开放接口）">
