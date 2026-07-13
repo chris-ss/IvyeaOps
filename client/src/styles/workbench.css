@@ -2296,6 +2296,7 @@ body::after{
 .home-alert-chip.up .home-alert-dir{color:var(--amber)}
 .home-alert-chip.down .home-alert-dir{color:#60a5fa}
 .home-alert-asin{font-weight:600;color:var(--t);max-width:120px;overflow:hidden;text-overflow:ellipsis}
+.home-alert-mkt{margin-left:4px;padding:0 4px;border-radius:3px;border:1px solid var(--b2);color:var(--t3);font-size:9px;font-weight:500;vertical-align:1px}
 .home-alert-text{color:var(--t3)}
 
 /* Tabs */
@@ -2772,3 +2773,14 @@ body::after{
     font-size:12px !important;
   }
 }
+
+/* ─── 通用 toast（components/toast.tsx，右下角堆叠） ─── */
+.wb-toasts{position:fixed;right:16px;bottom:16px;z-index:10000;display:flex;flex-direction:column;gap:8px;max-width:min(420px,calc(100vw - 32px))}
+.wb-toast{display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border:1px solid var(--b);border-radius:8px;background:var(--bg1);color:var(--t2);font-size:10.5px;line-height:1.55;box-shadow:0 10px 28px rgba(0,0,0,.28);cursor:pointer;animation:wb-toast-in .18s ease-out}
+.wb-toast svg{flex-shrink:0;margin-top:1px}
+.wb-toast.leaving{opacity:0;transform:translateY(6px);transition:opacity .2s,transform .2s}
+.wb-toast-success{border-color:color-mix(in srgb,var(--acc) 40%,var(--b))}.wb-toast-success svg{color:var(--acc)}
+.wb-toast-warn{border-color:rgba(245,158,11,.4)}.wb-toast-warn svg{color:var(--amber)}
+.wb-toast-error{border-color:rgba(248,113,113,.45)}.wb-toast-error svg{color:var(--red)}
+.wb-toast-info svg{color:var(--t3)}
+@keyframes wb-toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}

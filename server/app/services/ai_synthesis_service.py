@@ -1818,6 +1818,7 @@ async def synthesize_native(
     mode: str,
     query: str,
     marketplace: str,
+    prompt_override: str | None = None,
 ) -> AsyncGenerator[tuple[str, str], None]:
     """Hermes-native path: skip sorftime pre-fetch, give hermes a tool-calling
     prompt so it fetches data via its own sorftime MCP and writes the report.
@@ -1826,8 +1827,11 @@ async def synthesize_native(
     Yields (provider, chunk) tuples; on failure yields ('error', detail).
     Caller should fall back to standard ``synthesize()`` with pre-fetched data
     if this generator yields an error.
+
+    ``prompt_override`` replaces the generic mode prompt with a task-specific
+    one (e.g. 评论聚类 / Listing 改写) while keeping the same hermes+MCP path.
     """
-    prompt = _build_hermes_native_prompt(mode, query, marketplace)
+    prompt = prompt_override or _build_hermes_native_prompt(mode, query, marketplace)
     failures: list[str] = []
     got_real_chunk = False
     async for prov, chunk in _try_cli("hermes", prompt, failures):

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { trafficDiagnosis } from "../../../api/deepAnalysis";
 import AnalysisSkeleton from "./AnalysisSkeleton";
 import SheetSelect from "../../../components/SheetSelect";
 import { marketplaceOptions } from "../../../lib/marketplaces";
+import { triggerDownload } from "../../../lib/reportFormat";
+import { TrafficResult } from "./resultViews";
 
 const MARKETPLACES = ["US", "UK", "DE", "CA", "JP", "FR", "ES", "IT", "MX", "AU"];
 
@@ -12,19 +14,23 @@ export default function TrafficDiagnosis() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<any>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const run = async () => {
     if (!asin.trim() || loading) return;
     setLoading(true);
     setError("");
     setResult(null);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      const res = await trafficDiagnosis({ asin: asin.trim(), country });
+      const res = await trafficDiagnosis({ asin: asin.trim(), country }, ctrl.signal);
       setResult(res.data);
     } catch (e: any) {
-      setError(e?.message || "请求失败");
+      if (e?.name !== "CanceledError" && e?.code !== "ERR_CANCELED") setError(e?.message || "请求失败");
     } finally {
       setLoading(false);
+      abortRef.current = null;
     }
   };
 
@@ -46,6 +52,11 @@ export default function TrafficDiagnosis() {
         <button className="market-btn market-btn-submit" onClick={run} disabled={loading || !asin.trim()}>
           {loading ? "诊断中…" : "开始诊断"}
         </button>
+        {loading && (
+          <button className="tbtn" onClick={() => abortRef.current?.abort()} style={{ fontSize: 10 }}>
+            停止
+          </button>
+        )}
       </div>
 
       {error && <div className="market-error" style={{ marginTop: 10 }}>{error}</div>}
@@ -53,78 +64,16 @@ export default function TrafficDiagnosis() {
 
       {result && (
         <div className="wb-enter" style={{ marginTop: 14 }}>
-          <div className="card" style={{ background: "var(--bg2)" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10 }}>
-              「{asin}」流量诊断报告
-            </div>
-
-            {/* Traffic Terms */}
-            {result.traffic_terms && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>流量关键词</div>
-                {typeof result.traffic_terms === "string" ? (
-                  <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>{result.traffic_terms}</div>
-                ) : Array.isArray(result.traffic_terms) ? (
-                  <div style={{ fontSize: 10 }}>
-                    {result.traffic_terms.slice(0, 15).map((t: any, i: number) => (
-                      <div key={i} style={{ padding: "3px 6px", background: "var(--bg3)", borderRadius: 4, marginBottom: 3 }}>
-                        {typeof t === "string" ? t : t.keyword || t.关键词 || JSON.stringify(t).substring(0, 50)}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <pre style={{ fontSize: 9, maxHeight: 200, overflow: "auto", padding: 8, background: "var(--bg)", borderRadius: 4 }}>
-                    {JSON.stringify(result.traffic_terms, null, 2)}
-                  </pre>
-                )}
-              </div>
-            )}
-
-            {/* Trend */}
-            {result.trend && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>销量/流量趋势</div>
-                {typeof result.trend === "string" ? (
-                  <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>{result.trend}</div>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 10 }}>
-                    {Object.entries(result.trend).map(([k, v]) => (
-                      <div key={k} style={{ padding: "4px 8px", background: "var(--bg3)", borderRadius: 4 }}>
-                        <span style={{ color: "var(--t3)" }}>{k}: </span>
-                        <span style={{ color: "var(--t)" }}>
-                          {typeof v === "object" ? JSON.stringify(v).substring(0, 60) : String(v)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Report */}
-            {result.report && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>产品报告</div>
-                <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>
-                  {typeof result.report === "string" ? result.report.substring(0, 800) : JSON.stringify(result.report).substring(0, 800)}
-                </div>
-              </div>
-            )}
-
-            {/* Errors */}
-            {result.errors?.length > 0 && (
-              <div style={{ marginBottom: 10, fontSize: 10, color: "var(--amber)" }}>
-                {result.errors.map((e: string, i: number) => <div key={i}>⚠ {e}</div>)}
-              </div>
-            )}
-
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ fontSize: 10, color: "var(--t3)", cursor: "pointer" }}>查看原始 JSON</summary>
-              <pre style={{ fontSize: 9, maxHeight: 400, overflow: "auto", padding: 8, background: "var(--bg)", borderRadius: 4, marginTop: 4 }}>
-                {JSON.stringify(result, null, 2)}
-              </pre>
-            </details>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+            <button
+              className="tbtn"
+              style={{ fontSize: 10 }}
+              onClick={() => triggerDownload(JSON.stringify(result, null, 2), `traffic-${asin.trim()}-${country}.json`, "application/json")}
+            >
+              ⬇ 下载 JSON
+            </button>
           </div>
+          <TrafficResult data={result} asin={asin} />
         </div>
       )}
     </div>

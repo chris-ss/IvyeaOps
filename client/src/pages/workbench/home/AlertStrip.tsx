@@ -29,10 +29,11 @@ function describe(a: AlertItem): { text: string; up: boolean } {
   };
 }
 
-export default function AlertStrip({ reloadKey, dataSource, onJump }: {
+export default function AlertStrip({ reloadKey, dataSource, marketplace, onJump }: {
   reloadKey: number;
   dataSource: DataSourceId;
-  onJump?: (kind: "competitor" | "own") => void;
+  marketplace: string;
+  onJump?: (kind: "competitor" | "own", marketplace: string) => void;
 }) {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -66,9 +67,12 @@ export default function AlertStrip({ reloadKey, dataSource, onJump }: {
               key={i}
               className={"home-alert-chip " + (up ? "up" : "down")}
               title={`${a.label || a.asin} · ${a.marketplace}`}
-              onClick={() => onJump?.(a.kind)}
+              onClick={() => onJump?.(a.kind, a.marketplace)}
             >
-              <span className="home-alert-asin">{a.kind === "own" ? "★" : ""}{a.label || a.asin}</span>
+              <span className="home-alert-asin">
+                {a.kind === "own" ? "★" : ""}{a.label || a.asin}
+                {a.marketplace !== marketplace && <span className="home-alert-mkt">{a.marketplace}</span>}
+              </span>
               <span className="home-alert-dir">{up ? "▲" : "▼"}</span>
               <span className="home-alert-text">{text}</span>
             </button>

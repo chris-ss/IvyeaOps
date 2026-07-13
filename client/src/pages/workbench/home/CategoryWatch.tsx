@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchCategory, fetchCategoryCached, type CategoryResult } from "../../../api/home";
+import { amazonDp } from "../../../lib/marketplaces";
 import type { DataSourceId } from "../../../lib/dataSource";
 
 const STORAGE_CAT = "ivyea-ops-home-category-q";
@@ -199,7 +200,7 @@ export default function CategoryWatch({ marketplace, dataSource }: { marketplace
                     <tr key={p.asin || p.rank}>
                       <td>{p.rank}</td>
                       <td className="cat-td-prod">
-                        <a href={`https://www.amazon.com/dp/${p.asin}`} target="_blank" rel="noreferrer" className="asin-link">{p.asin || "—"}</a>
+                        <a href={amazonDp(p.asin, marketplace)} target="_blank" rel="noreferrer" className="asin-link">{p.asin || "—"}</a>
                         {p.title && <span className="cat-td-title" title={p.title}>{p.title}</span>}
                       </td>
                       <td>{fmtPrice(p.price)}</td>

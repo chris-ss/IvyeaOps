@@ -5,6 +5,8 @@ import {
 } from "../../../api/home";
 import AsinCard, { type AsinState } from "./AsinCard";
 import type { DataSourceId } from "../../../lib/dataSource";
+import { runPool } from "../../../lib/pool";
+import { useToast } from "../../../components/toast";
 
 const ASIN_RE = /^[A-Z0-9]{10}$/;
 
@@ -31,6 +33,7 @@ export default function AsinMonitor({ kind, marketplace, dataSource, onChanged }
   const [input, setInput] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const notify = useToast();
 
   const sourceName = dataSource === "sellersprite" ? "卖家精灵" : "Sorftime";
 
@@ -72,7 +75,7 @@ export default function AsinMonitor({ kind, marketplace, dataSource, onChanged }
   const refreshAll = async () => {
     if (items.length === 0) return;
     setRefreshing(true);
-    await Promise.all(items.map(it => fetchOne(it.asin)));
+    await runPool(items, it => fetchOne(it.asin));
     setRefreshing(false);
     onChanged?.();
   };
@@ -87,11 +90,13 @@ export default function AsinMonitor({ kind, marketplace, dataSource, onChanged }
       setInput("");
       inputRef.current?.focus();
       fetchOne(asin); // one live fetch for the newly added ASIN
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      notify("error", `添加 ${asin} 失败：${e?.message || "请求失败"}`);
+    }
   };
 
   const handleRemove = async (item: WatchItem) => {
-    await deleteWatch(item.id).catch(() => {});
+    await deleteWatch(item.id).catch(() => notify("warn", `${item.asin} 服务端删除失败，刷新后可能回来`));
     setItems(p => p.filter(i => i.id !== item.id));
     setStates(p => { const n = { ...p }; delete n[item.asin]; return n; });
   };
@@ -144,6 +149,7 @@ export default function AsinMonitor({ kind, marketplace, dataSource, onChanged }
               key={it.id}
               asin={it.asin}
               label={it.label}
+              marketplace={marketplace}
               state={states[it.asin] ?? { kind: "idle" }}
               onRemove={() => handleRemove(it)}
               onRefresh={() => fetchOne(it.asin)}

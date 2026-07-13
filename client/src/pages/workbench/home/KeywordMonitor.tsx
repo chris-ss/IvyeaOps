@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { Fragment, useEffect, useRef, useState, useMemo } from "react";
 import {
   listKeywords, addKeyword as apiAddKeyword, deleteKeyword, pulseKeyword,
   fetchKeywordExtendsCached, pulseKeywordExtends, deepKeywordExtendSales,
   type KeywordItem, type KeywordData, type KeywordExtendItem,
 } from "../../../api/home";
 import type { DataSourceId } from "../../../lib/dataSource";
+import { runPool } from "../../../lib/pool";
+import { useToast } from "../../../components/toast";
 
 const STORAGE_KEY = "ivyea-ops-pulse-keywords-v1";
 
@@ -31,16 +33,28 @@ function fmtVol(v: number | null): string {
   return String(v);
 }
 
+// Same provider-neutral 0–100 pressure formula the server derives for
+// SellerSprite (sellersprite_service._competition_index): bounded share of
+// competing products vs (products + searches).
+function deriveCompetition(products: number | null, searches: number | null): number | null {
+  if (products == null || searches == null) return null;
+  return Math.max(0, Math.min(100, (100 * products) / Math.max(products + searches, 1)));
+}
+
 function parseDetail(d: Record<string, any> | null) {
   if (!d) return null;
   const root = d.data ?? d;
+  // Live Sorftime keyword_detail uses Chinese keys (月搜索量 / 推荐cpc竞价 …);
+  // English fallbacks kept for safety.
+  const searchVolume = num(root["月搜索量"] ?? root.searchVolume ?? root.search_volume ?? root.searches ?? null);
+  // SellerSprite ships a derived competitionIndex; Sorftime has no such field,
+  // but exposes 搜索结果竞品数量 — derive the same index client-side so the
+  // opportunity matrix / insight panels work on both providers.
+  const competition = num(root.competitionIndex ?? root.competition_index ?? root.competition ?? null)
+    ?? deriveCompetition(num(root["搜索结果竞品数量"] ?? root.products ?? null), searchVolume);
   return {
-    // Live Sorftime keyword_detail uses Chinese keys (月搜索量 / 推荐cpc竞价 …);
-    // English fallbacks kept for safety. Note: Sorftime's keyword API does not
-    // expose a 0–100 competition index, so 'competition' stays null (the scatter
-    // / 机会象限 / 竞争预警 features depend on it and will be empty).
-    searchVolume: num(root["月搜索量"] ?? root.searchVolume ?? root.search_volume ?? root.searches ?? null),
-    competition:  num(root.competitionIndex ?? root.competition_index ?? root.competition ?? null),
+    searchVolume,
+    competition,
     cpc:          num(root["推荐cpc竞价"] ?? root.averageCpc ?? root.average_cpc ?? root.cpc ?? null),
     purchaseRate: num(root.purchaseRate ?? root.purchase_rate ?? root.buyRate ?? null),
   };
@@ -104,16 +118,16 @@ function SummaryBar({ keywords, states }: { keywords: string[]; states: Record<s
   const loaded = keywords.filter(k => states[k]?.kind === "ok");
   const loading = keywords.filter(k => states[k]?.kind === "loading").length;
 
-  let totVol = 0, compSum = 0, cpcSum = 0, cpcN = 0, highComp = 0, opps = 0;
+  let totVol = 0, compSum = 0, compN = 0, cpcSum = 0, cpcN = 0, highComp = 0, opps = 0;
   for (const k of loaded) {
     const d = parseDetail((states[k] as any).data.detail);
     totVol  += d?.searchVolume  ?? 0;
-    compSum += d?.competition   ?? 0;
+    if (d?.competition != null) { compSum += d.competition; compN++; }
     if (d?.cpc != null) { cpcSum += d.cpc; cpcN++; }
     if ((d?.competition ?? 0) > 70) highComp++;
     if ((d?.competition ?? 101) < 40 && (d?.searchVolume ?? 0) > 2000) opps++;
   }
-  const avgComp = loaded.length ? Math.round(compSum / loaded.length) : null;
+  const avgComp = compN ? Math.round(compSum / compN) : null;
   const avgCpc  = cpcN ? (cpcSum / cpcN) : null;
 
   const items = [
@@ -128,15 +142,15 @@ function SummaryBar({ keywords, states }: { keywords: string[]; states: Record<s
   return (
     <div className="pulse-summary">
       {items.map((it, i) => (
-        <>
-          {i > 0 && <div key={`sep-${i}`} className="pulse-summary-sep" />}
-          <div key={it.label} className="pulse-summary-item">
+        <Fragment key={it.label}>
+          {i > 0 && <div className="pulse-summary-sep" />}
+          <div className="pulse-summary-item">
             <div className="pulse-summary-val" style={{ color: it.color as any }}>
               {loading > 0 && it.label === "查询中" ? <><span className="pulse-spin" style={{ fontSize: 11 }}>◌</span> {it.val}</> : it.val}
             </div>
             <div className="pulse-summary-label">{it.label}</div>
           </div>
-        </>
+        </Fragment>
       ))}
     </div>
   );
@@ -253,13 +267,13 @@ function ScatterPlot({ points }: { points: PlotPoint[] }) {
           <rect x={L}    y={midY} width={PW/2} height={PH/2} fill="rgba(96,165,250,.04)" />
           <rect x={midX} y={midY} width={PW/2} height={PH/2} fill="rgba(248,113,113,.04)" />
           {/* Dividers */}
-          <line x1={midX} y1={T}   x2={midX} y2={T+PH} stroke="rgba(255,255,255,.08)" strokeWidth="0.8" />
-          <line x1={L}    y1={midY} x2={L+PW} y2={midY} stroke="rgba(255,255,255,.08)" strokeWidth="0.8" />
+          <line x1={midX} y1={T}   x2={midX} y2={T+PH} stroke="var(--b2)" strokeWidth="0.8" />
+          <line x1={L}    y1={midY} x2={L+PW} y2={midY} stroke="var(--b2)" strokeWidth="0.8" />
           {/* Axis labels */}
-          <text x={L+3}    y={T+PH+18} fill="rgba(200,200,200,.3)" fontSize="9" fontFamily="sans-serif">低竞争</text>
-          <text x={L+PW-30} y={T+PH+18} fill="rgba(200,200,200,.3)" fontSize="9" fontFamily="sans-serif">高竞争</text>
-          <text x={L+3}    y={T+13}    fill="rgba(200,200,200,.3)" fontSize="9" fontFamily="sans-serif">↑ 高搜索量</text>
-          <text x={L+3}    y={T+PH-3}  fill="rgba(200,200,200,.3)" fontSize="9" fontFamily="sans-serif">↓ 低搜索量</text>
+          <text x={L+3}    y={T+PH+18} fill="var(--t3)" fontSize="9" fontFamily="sans-serif">低竞争</text>
+          <text x={L+PW-30} y={T+PH+18} fill="var(--t3)" fontSize="9" fontFamily="sans-serif">高竞争</text>
+          <text x={L+3}    y={T+13}    fill="var(--t3)" fontSize="9" fontFamily="sans-serif">↑ 高搜索量</text>
+          <text x={L+3}    y={T+PH-3}  fill="var(--t3)" fontSize="9" fontFamily="sans-serif">↓ 低搜索量</text>
           {/* Points */}
           {points.map(p => {
             const cx = toX(p.competition), cy = toY(p.searchVolume);
@@ -271,7 +285,7 @@ function ScatterPlot({ points }: { points: PlotPoint[] }) {
               <g key={p.keyword}>
                 <circle cx={cx} cy={cy} r={6} fill={color} fillOpacity="0.8" />
                 <circle cx={cx} cy={cy} r={9} fill={color} fillOpacity="0.15" />
-                <text x={lx} y={cy + 4} fill="rgba(220,220,220,.7)" fontSize="9" fontFamily="sans-serif" textAnchor={anchor}>{label}</text>
+                <text x={lx} y={cy + 4} fill="var(--t2)" fontSize="9" fontFamily="sans-serif" textAnchor={anchor}>{label}</text>
               </g>
             );
           })}
@@ -437,6 +451,7 @@ export default function KeywordMonitor({ marketplace, dataSource }: { marketplac
   const [input, setInput] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const notify = useToast();
   const sourceName = dataSource === "sellersprite" ? "卖家精灵" : "Sorftime";
 
   const keywords = items.filter(it => it.marketplace === marketplace).map(it => it.keyword);
@@ -484,7 +499,7 @@ export default function KeywordMonitor({ marketplace, dataSource }: { marketplac
   const refreshAll = async () => {
     if (keywords.length === 0) return;
     setRefreshing(true);
-    await Promise.all(keywords.map(kw => fetchOne(kw)));
+    await runPool(keywords, fetchOne);
     setRefreshing(false);
   };
 
@@ -495,7 +510,9 @@ export default function KeywordMonitor({ marketplace, dataSource }: { marketplac
       const created = await apiAddKeyword(kw, marketplace, dataSource);
       setItems(p => [...p, { id: created.id, keyword: kw, marketplace, data_source: dataSource, label: "", ts: Date.now(), data: null, data_ts: null }]);
       fetchOne(kw); // one live fetch for the newly added keyword
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      notify("error", `添加关键词失败：${e?.message || "请求失败"}`);
+    }
   };
 
   const addKeyword = async () => {
@@ -508,7 +525,7 @@ export default function KeywordMonitor({ marketplace, dataSource }: { marketplac
 
   const removeKeyword = async (kw: string) => {
     const id = idByKw(kw);
-    if (id) await deleteKeyword(id).catch(() => {});
+    if (id) await deleteKeyword(id).catch(() => notify("warn", `「${kw}」服务端删除失败，刷新后可能回来`));
     setItems(p => p.filter(it => !(it.keyword === kw && it.marketplace === marketplace)));
     setStates(p => { const n = { ...p }; delete n[kw]; return n; });
   };

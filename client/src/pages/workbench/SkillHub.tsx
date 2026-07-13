@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import SkillTools from "./SkillTools";
 import IdeaSkill from "./IdeaSkill";
 import SkillManage from "./skill/SkillManage";
@@ -12,10 +13,38 @@ const TABS = [
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
+const STORAGE_TAB = "ivyea-ops-skill-hub-tab";
+const isTab = (v: string | null): v is TabKey => TABS.some((t) => t.key === v);
 
 export default function SkillHub() {
-  const [tab, setTab] = useState<TabKey>("tools");
+  // Deep-linkable (?tab=create) + remembered across visits.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<TabKey>(() => {
+    const fromUrl = searchParams.get("tab");
+    if (isTab(fromUrl)) return fromUrl;
+    const stored = localStorage.getItem(STORAGE_TAB);
+    return isTab(stored) ? stored : "tools";
+  });
   const [showGithubImport, setShowGithubImport] = useState(false);
+
+  useEffect(() => { localStorage.setItem(STORAGE_TAB, tab); }, [tab]);
+
+  // Follow in-app navigations that change ?tab= while the hub stays mounted
+  // (e.g. 想法工坊 saves a skill and jumps to the tools tab to open it).
+  useEffect(() => {
+    const fromUrl = searchParams.get("tab");
+    if (isTab(fromUrl)) setTab((cur) => (cur === fromUrl ? cur : fromUrl));
+  }, [searchParams]);
+
+  const switchTab = (t: TabKey) => {
+    setTab(t);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", t);
+      next.delete("tool"); // tool deep-link belongs to the tools tab only
+      return next;
+    }, { replace: true });
+  };
 
   return (
     <div>
@@ -25,7 +54,7 @@ export default function SkillHub() {
           {TABS.map((t) => (
             <button
               key={t.key}
-              onClick={() => setTab(t.key)}
+              onClick={() => switchTab(t.key)}
               style={{
                 padding: "5px 14px",
                 fontSize: 11,
@@ -43,8 +72,8 @@ export default function SkillHub() {
         </div>
       </div>
 
-      {tab === "tools" && <div className="skill-hub-tab wb-enter"><SkillTools /></div>}
-      {tab === "create" && <div className="skill-hub-tab wb-enter"><IdeaSkill /></div>}
+      {tab === "tools" && <div className="skill-hub-tab wb-enter"><SkillTools embedded /></div>}
+      {tab === "create" && <div className="skill-hub-tab wb-enter"><IdeaSkill embedded /></div>}
       {tab === "manage" && (
         <div className="wb-enter">
           <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>

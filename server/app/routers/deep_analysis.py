@@ -169,13 +169,29 @@ _SSE_HEARTBEAT = ":hb\n\n"
 
 # ── 1. 关键词竞争分析 ────────────────────────────────────────────────────
 
+def _save_structured_history(tool: str, query: str, country: str,
+                             elapsed_s: float, data: dict) -> None:
+    """Persist a structured (JSON) tool result. provider='sorftime' + JSON
+    report is what the frontend history view keys on to re-render the
+    structured result view instead of a Markdown report."""
+    try:
+        save_history(tool=tool, title=_DEEP_TOOLS.get(tool, tool), query=query,
+                     country=country, provider="sorftime", elapsed_s=elapsed_s,
+                     report=json.dumps(data, ensure_ascii=False))
+    except Exception:
+        pass  # history is best-effort; never fail the analysis over it
+
+
 @router.post("/keyword")
 async def keyword_competition(req: KeywordReq) -> dict:
     """关键词竞争格局分析，返回 Top ASIN、集中度、可进入性评估。"""
+    start = time.time()
     try:
         data = await sif_service.keyword_competition(
             req.keyword, req.country, req.asin
         )
+        _save_structured_history("keyword", req.keyword, req.country,
+                                 round(time.time() - start, 1), data)
         return {"ok": True, "data": data}
     except Exception as exc:
         raise HTTPException(502, f"SIF MCP 调用失败: {exc}")
@@ -186,10 +202,13 @@ async def keyword_competition(req: KeywordReq) -> dict:
 @router.post("/competitor")
 async def competitor_lookup(req: CompetitorReq) -> dict:
     """竞品 ASIN 流量词反查，返回关键词信号、排名演变、健康分级。"""
+    start = time.time()
     try:
         data = await sif_service.competitor_keyword_signals(
             req.asin, req.country, req.time_type, req.time_value
         )
+        _save_structured_history("competitor", req.asin, req.country,
+                                 round(time.time() - start, 1), data)
         return {"ok": True, "data": data}
     except Exception as exc:
         raise HTTPException(502, f"SIF MCP 调用失败: {exc}")
@@ -200,8 +219,11 @@ async def competitor_lookup(req: CompetitorReq) -> dict:
 @router.post("/traffic")
 async def traffic_diagnosis(req: TrafficReq) -> dict:
     """ASIN 流量下跌根因分析，自动识别异常窗口并逐层拆因。"""
+    start = time.time()
     try:
         data = await sif_service.traffic_anomaly(req.asin, req.country)
+        _save_structured_history("traffic", req.asin, req.country,
+                                 round(time.time() - start, 1), data)
         return {"ok": True, "data": data}
     except Exception as exc:
         raise HTTPException(502, f"SIF MCP 调用失败: {exc}")
@@ -231,9 +253,11 @@ async def review_clustering(req: ReviewsReq) -> StreamingResponse:
     async def generator():
         start = time.time()
         yield _sse({"type": "phase", "phase": "collecting"})
+        collected: list[str] = []
+        provider_used = ""
         try:
             async for prov, chunk in ai_synthesis_service.synthesize_native(
-                "asin", req.asin, req.country
+                "asin", req.asin, req.country, prompt_override=prompt
             ):
                 if prov == "_attempt":
                     yield _sse({"type": "attempt", "provider": chunk})
@@ -241,9 +265,16 @@ async def review_clustering(req: ReviewsReq) -> StreamingResponse:
                     yield _sse({"type": "error", "detail": chunk})
                     return
                 else:
+                    collected.append(chunk)
+                    provider_used = prov
                     yield _sse({"type": "token", "text": chunk, "provider": prov})
             elapsed = round(time.time() - start, 1)
-            yield _sse({"type": "done", "provider": "hermes", "elapsed_s": elapsed})
+            report = "".join(collected).strip()
+            if report:
+                save_history(tool="reviews", title="评论聚类", query=req.asin,
+                             country=req.country, provider=provider_used,
+                             elapsed_s=elapsed, report=report)
+            yield _sse({"type": "done", "provider": provider_used or "hermes", "elapsed_s": elapsed})
         except Exception as exc:
             yield _sse({"type": "error", "detail": str(exc)})
 
@@ -286,9 +317,11 @@ async def listing_rewrite(req: ListingRewriteReq) -> StreamingResponse:
     async def generator():
         start = time.time()
         yield _sse({"type": "phase", "phase": "rewriting"})
+        collected: list[str] = []
+        provider_used = ""
         try:
             async for prov, chunk in ai_synthesis_service.synthesize_native(
-                "asin", asin_list, req.marketplace
+                "asin", asin_list, req.marketplace, prompt_override=prompt
             ):
                 if prov == "_attempt":
                     yield _sse({"type": "attempt", "provider": chunk})
@@ -296,9 +329,16 @@ async def listing_rewrite(req: ListingRewriteReq) -> StreamingResponse:
                     yield _sse({"type": "error", "detail": chunk})
                     return
                 else:
+                    collected.append(chunk)
+                    provider_used = prov
                     yield _sse({"type": "token", "text": chunk, "provider": prov})
             elapsed = round(time.time() - start, 1)
-            yield _sse({"type": "done", "provider": "hermes", "elapsed_s": elapsed})
+            report = "".join(collected).strip()
+            if report:
+                save_history(tool="listing_rewrite", title="Listing 批量改写", query=asin_list,
+                             country=req.marketplace, provider=provider_used,
+                             elapsed_s=elapsed, report=report)
+            yield _sse({"type": "done", "provider": provider_used or "hermes", "elapsed_s": elapsed})
         except Exception as exc:
             yield _sse({"type": "error", "detail": str(exc)})
 

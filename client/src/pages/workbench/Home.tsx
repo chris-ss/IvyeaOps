@@ -6,11 +6,11 @@ import CategoryWatch from "./home/CategoryWatch";
 import MarketTraffic from "./home/MarketTraffic";
 import { getDataSource, setDataSource, dataSourceMeta, type DataSourceId } from "../../lib/dataSource";
 import DataSourcePicker from "../../components/DataSourcePicker";
+import { FLAG_URL } from "../../lib/marketplaces";
+import { ToastProvider } from "../../components/toast";
 
 const STORAGE_MKT = "ivyea-ops-pulse-marketplace";
 const STORAGE_TAB = "ivyea-ops-home-tab";
-
-const FLAG_URL = (code: string) => `https://flagcdn.com/w20/${code === "UK" ? "gb" : code.toLowerCase()}.png`;
 const MARKETPLACES = [
   { code: "US", name: "美国" }, { code: "UK", name: "英国" },
   { code: "DE", name: "德国" }, { code: "JP", name: "日本" },
@@ -43,7 +43,7 @@ function DataSourcePlaceholder({ name }: { name: string }) {
 
 export default function Home() {
   const [marketplace, setMarketplace] = useState(() => localStorage.getItem(STORAGE_MKT) || "US");
-  const [tab, setTab] = useState<HomeTab>(() => (localStorage.getItem(STORAGE_TAB) as HomeTab) || "keyword");
+  const [tab, setTab] = useState<HomeTab>(() => (localStorage.getItem(STORAGE_TAB) as HomeTab) || "market");
   const [dataSource, setDataSourceState] = useState<DataSourceId>(getDataSource);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [alertReloadKey, setAlertReloadKey] = useState(0);
@@ -75,6 +75,7 @@ export default function Home() {
   const currentMkt = MARKETPLACES.find(m => m.code === marketplace) ?? MARKETPLACES[0];
 
   return (
+    <ToastProvider>
     <div className="home-cockpit">
       {/* ── Top bar: title + date + global marketplace ── */}
       <div className="home-topbar">
@@ -110,7 +111,14 @@ export default function Home() {
       </div>
 
       {/* ── Alert strip ── */}
-      {dsReady && <AlertStrip reloadKey={alertReloadKey} dataSource={dataSource} onJump={(kind) => setTab(kind)} />}
+      {dsReady && (
+        <AlertStrip
+          reloadKey={alertReloadKey}
+          dataSource={dataSource}
+          marketplace={marketplace}
+          onJump={(kind, mkt) => { setMarketplace(mkt); setTab(kind); }}
+        />
+      )}
 
       {/* ── Tabs ── */}
       <div className="home-tabs">
@@ -126,8 +134,10 @@ export default function Home() {
         ))}
       </div>
 
-      {/* ── Tab body (remounts on data-source change → reloads all data) ── */}
-      <div className="home-tab-body wb-enter" key={tab + ":" + dataSource}>
+      {/* ── Tab body (remounts on data-source / marketplace change → reloads
+           all data; the marketplace key also keeps in-flight fetches from the
+           previous site from bleeding into the new one) ── */}
+      <div className="home-tab-body wb-enter" key={tab + ":" + dataSource + ":" + marketplace}>
         {!dsReady ? (
           <DataSourcePlaceholder name={dataSourceMeta(dataSource, "home").name} />
         ) : (
@@ -169,5 +179,6 @@ export default function Home() {
         </div>
       )}
     </div>
+    </ToastProvider>
   );
 }

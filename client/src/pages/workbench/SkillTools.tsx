@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
-  listTools, runTool, pinTool, listRuns, getRun, deleteRun, repairTool,
+  listTools, runTool, pinTool, listRuns, getRun, deleteRun, repairTool, enrichTool,
   type SkillToolMeta, type SkillInput, type SseEvent, type SkillRunSummary, type RepairResult,
 } from "../../api/skillTools";
 import SheetSelect from "../../components/SheetSelect";
@@ -30,14 +30,21 @@ const RUNTIME_META: Record<string, { label: string; cls: string }> = {
   "llm-only":{ label: "纯AI",  cls: "tp"    },   // purple
 };
 
-function KindBadge({ kind, runtime }: { kind?: string | null; runtime?: string | null }) {
-  const km = kind ? KIND_META[kind] : null;
-  const rm = runtime ? RUNTIME_META[runtime] : null;
-  if (!km && !rm) return null;
+// 有声明式参数表单的是「参数化工具」；其余（文档型 skill）由 Agent 按文档执行。
+function isParamTool(t: SkillToolMeta): boolean {
+  return t.has_execution && (t.inputs.length > 0 || !!t.kind);
+}
+
+function KindBadge({ tool }: { tool: SkillToolMeta }) {
+  const km = tool.kind ? KIND_META[tool.kind] : null;
+  const rm = tool.runtime ? RUNTIME_META[tool.runtime] : null;
+  const agent = !km && !rm && !isParamTool(tool);
+  if (!km && !rm && !agent) return null;
   return (
     <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
       {km && <span className={`tag ${km.cls}`} style={{ fontSize: 8 }}>{km.label}</span>}
       {rm && <span className={`tag ${rm.cls}`} style={{ fontSize: 8 }}>{rm.label}</span>}
+      {agent && <span className="tag tb-tag" style={{ fontSize: 8 }}>Agent</span>}
     </span>
   );
 }
@@ -58,16 +65,24 @@ function IconBox({ children, size = 28 }: { children: React.ReactNode; size?: nu
 }
 
 // ── List page ─────────────────────────────────────────────────────────────────
-export default function SkillTools() {
+export default function SkillTools({ embedded }: { embedded?: boolean } = {}) {
   const [tools, setTools]       = useState<SkillToolMeta[]>([]);
   const [categories, setCategories] = useState<Record<string, number>>({});
   const [filterCat, setFilterCat]   = useState<string>("");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch]         = useState("");
   const [loading, setLoading]       = useState(true);
   const [activeTool, setActiveTool] = useState<SkillToolMeta | null>(null);
   const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
   const routerLoc = useLocation();
   const confirm   = useConfirm();
+
+  // Debounce search → each keystroke used to trigger a full backend rescan
+  // (list = 90 × SKILL.md read+parse per request).
+  useEffect(() => {
+    const t = window.setTimeout(() => setSearch(searchInput), 300);
+    return () => window.clearTimeout(t);
+  }, [searchInput]);
 
   const handleDelete = useCallback(async (tool: SkillToolMeta, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -114,6 +129,17 @@ export default function SkillTools() {
     });
   }, [routerLoc.search]);
 
+  // After 工具化/repair rewrites a skill, refresh the list and the open panel
+  // so the new parameter form shows up immediately.
+  const refreshActiveTool = useCallback(async () => {
+    try {
+      const res = await listTools(filterCat || undefined, search || undefined);
+      setTools(res.tools);
+      setCategories(res.categories);
+      setActiveTool((cur) => (cur ? res.tools.find((t) => t.name === cur.name) ?? cur : cur));
+    } catch { /**/ }
+  }, [filterCat, search]);
+
   // ── Active tool: panel view ──
   if (activeTool) {
     return (
@@ -132,14 +158,21 @@ export default function SkillTools() {
             删除工具
           </button>
         </div>
-        <ToolPanel tool={activeTool} />
+        <ToolPanel
+          key={activeTool.name + ":" + activeTool.inputs.length}
+          tool={activeTool}
+          onToolChanged={refreshActiveTool}
+        />
       </div>
     );
   }
 
   // ── List view ──
+  // 参数化工具（有表单，开箱即用）置顶；文档型技能按分类分组，由 Agent 执行。
+  const paramTools = tools.filter(isParamTool);
+  const agentSkills = tools.filter((t) => !isParamTool(t));
   const grouped: Record<string, SkillToolMeta[]> = {};
-  for (const t of tools) {
+  for (const t of agentSkills) {
     const cat = t.category || "(未分类)";
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(t);
@@ -147,7 +180,7 @@ export default function SkillTools() {
 
   return (
     <div>
-      <div className="ptitle">/ 运营商店</div>
+      {!embedded && <div className="ptitle">/ 运营商店</div>}
 
       {/* Search + filter bar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -155,8 +188,8 @@ export default function SkillTools() {
           <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--t3)", fontSize: 10, pointerEvents: "none" }}>◎</span>
           <input
             className="inp"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="搜索工具名称或描述…"
             style={{ paddingLeft: 26 }}
           />
@@ -194,7 +227,29 @@ export default function SkillTools() {
         </div>
       )}
 
-      {/* Tool grid grouped by category */}
+      {/* ── 参数化工具（有表单，开箱即用）── */}
+      {!loading && paramTools.length > 0 && (
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, ...S.accentBar }}>
+            <span style={{ fontSize: 9, color: "var(--t3)", letterSpacing: ".10em", textTransform: "uppercase", flex: 1 }}>
+              ⚡ 参数化工具 · 填参数即用
+            </span>
+            <span style={{ fontSize: 9, color: "var(--t3)" }}>{paramTools.length}</span>
+          </div>
+          <div className="g3">
+            {paramTools.map((t) => (
+              <ToolCard key={t.name} tool={t} onOpen={() => setActiveTool(t)} onDelete={(e) => handleDelete(t, e)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Agent 技能（文档型，描述任务交给 Agent 执行）── */}
+      {!loading && agentSkills.length > 0 && (
+        <div style={{ fontSize: 9, color: "var(--t3)", letterSpacing: ".06em", marginBottom: 10 }}>
+          🤖 AGENT 技能 · 点开描述任务，由 Agent 按技能文档执行
+        </div>
+      )}
       {!loading && Object.entries(grouped).map(([cat, items]) => {
         const collapsed = !!collapsedCats[cat];
         return (
@@ -221,46 +276,7 @@ export default function SkillTools() {
             {!collapsed && (
               <div className="g3">
                 {items.map((t) => (
-                  <div
-                    key={t.name}
-                    className="skill-card"
-                    onClick={() => setActiveTool(t)}
-                  >
-                    {/* Card header */}
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-                      <IconBox>{t.icon}</IconBox>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t)", lineHeight: 1.3, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {t.name.split("/").pop()}
-                        </div>
-                        <KindBadge kind={t.kind} runtime={t.runtime} />
-                      </div>
-                      <button
-                        title="删除工具"
-                        onClick={(e) => handleDelete(t, e)}
-                        style={{ background: "transparent", border: "none", color: "var(--t3)", cursor: "pointer", fontSize: 11, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}
-                      >✕</button>
-                    </div>
-
-                    {/* Description */}
-                    <div style={{ fontSize: 10, color: "var(--t3)", lineHeight: 1.55, marginBottom: t.inputs.length ? 8 : 0, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                      {t.description_zh || t.description || "—"}
-                    </div>
-
-                    {/* Footer row */}
-                    {(t.inputs.length > 0 || !t.has_execution) && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, borderTop: "1px solid var(--b)", paddingTop: 6 }}>
-                        {t.inputs.length > 0 && (
-                          <span style={{ fontSize: 9, color: "var(--t3)" }}>
-                            {t.inputs.length} 个参数
-                          </span>
-                        )}
-                        {!t.has_execution && (
-                          <span style={{ fontSize: 9, color: "var(--amber)" }}>⚠ 仅文档</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <ToolCard key={t.name} tool={t} onOpen={() => setActiveTool(t)} onDelete={(e) => handleDelete(t, e)} />
                 ))}
               </div>
             )}
@@ -271,13 +287,58 @@ export default function SkillTools() {
   );
 }
 
+// ── Tool card ─────────────────────────────────────────────────────────────────
+function ToolCard({ tool: t, onOpen, onDelete }: {
+  tool: SkillToolMeta;
+  onOpen: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <div className="skill-card" onClick={onOpen}>
+      {/* Card header */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+        <IconBox>{t.icon}</IconBox>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t)", lineHeight: 1.3, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {t.pinned && <span style={{ color: "var(--acc)", marginRight: 3 }} title="已固定到侧边栏">★</span>}
+            {t.name.split("/").pop()}
+          </div>
+          <KindBadge tool={t} />
+        </div>
+        <button
+          title="删除工具"
+          onClick={onDelete}
+          style={{ background: "transparent", border: "none", color: "var(--t3)", cursor: "pointer", fontSize: 11, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}
+        >✕</button>
+      </div>
+
+      {/* Description */}
+      <div style={{ fontSize: 10, color: "var(--t3)", lineHeight: 1.55, marginBottom: t.inputs.length ? 8 : 0, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+        {t.description_zh || t.description || "—"}
+      </div>
+
+      {/* Footer row */}
+      {t.inputs.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, borderTop: "1px solid var(--b)", paddingTop: 6 }}>
+          <span style={{ fontSize: 9, color: "var(--t3)" }}>
+            {t.inputs.length} 个参数
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Tool execution panel ──────────────────────────────────────────────────────
-function ToolPanel({ tool }: { tool: SkillToolMeta }) {
+function ToolPanel({ tool, onToolChanged }: { tool: SkillToolMeta; onToolChanged?: () => Promise<void> | void }) {
   const [params, setParams] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const inp of tool.inputs) init[inp.name] = inp.default || "";
     return init;
   });
+  // 文档型技能的通用任务输入（无声明式参数表单时显示）。
+  const [task, setTask] = useState("");
+  const needsTask = tool.inputs.length === 0 && !tool.has_execution;
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
   const [output, setOutput]     = useState("");
@@ -289,6 +350,9 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
   const [repair, setRepair]           = useState<RepairResult | null>(null);
   const [repairing, setRepairing]     = useState(false);
   const [applying, setApplying]       = useState(false);
+  const [enrich, setEnrich]           = useState<RepairResult | null>(null);
+  const [enriching, setEnriching]     = useState(false);
+  const [applyingEnrich, setApplyingEnrich] = useState(false);
   const [pinned, setPinned]           = useState(!!tool.pinned);
   const [pinning, setPinning]         = useState(false);
 
@@ -377,13 +441,20 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
   };
 
   const run = useCallback(async (override?: Record<string, string>) => {
-    const effective = override || params;
+    let effective = override || params;
     if (override) setParams(override);
     for (const inp of tool.inputs) {
       if (inp.required && !effective[inp.name]?.trim()) {
         setError(`请填写必填参数：${inp.label}`);
         return;
       }
+    }
+    if (!override && tool.inputs.length === 0) {
+      if (needsTask && !task.trim()) {
+        setError("请先描述你的任务，Agent 会按该技能的文档执行");
+        return;
+      }
+      if (task.trim()) effective = { ...effective, task: task.trim() };
     }
     setLoading(true); setError(""); setOutput(""); setProvider(""); setRepair(null);
     const ctrl = new AbortController();
@@ -398,7 +469,27 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
     } finally {
       setLoading(false); abortRef.current = null; loadHistory();
     }
-  }, [tool, params, loadHistory]);
+  }, [tool, params, task, needsTask, loadHistory]);
+
+  const doEnrich = useCallback(async () => {
+    setEnriching(true);
+    setError("");
+    try { setEnrich(await enrichTool(tool.name)); }
+    catch (e: any) { setError(e?.response?.data?.detail || e?.message || "AI 工具化失败"); }
+    finally { setEnriching(false); }
+  }, [tool.name]);
+
+  const applyEnrich = useCallback(async () => {
+    if (!enrich) return;
+    setApplyingEnrich(true);
+    try {
+      await updateSkill(tool.name, enrich.frontmatter, enrich.body);
+      setEnrich(null);
+      await onToolChanged?.();   // parent remounts the panel with the new form
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || "应用失败");
+    } finally { setApplyingEnrich(false); }
+  }, [enrich, tool.name, onToolChanged]);
 
   const doRepair = useCallback(async () => {
     setRepairing(true);
@@ -454,7 +545,7 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
               {tool.name.split("/").pop()}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <KindBadge kind={tool.kind} runtime={tool.runtime} />
+              <KindBadge tool={tool} />
               {tool.category && (
                 <span style={{ fontSize: 9, color: "var(--t3)" }}>{tool.category}</span>
               )}
@@ -481,11 +572,11 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
         )}
       </div>
 
-      {/* ── Not executable notice ── */}
-      {!tool.has_execution && (
-        <div style={{ fontSize: 10, color: "var(--amber)", background: "rgba(251,191,36,.07)", border: "1px solid rgba(251,191,36,.22)", borderLeft: "3px solid var(--amber)", borderRadius: "var(--r)", padding: "10px 12px", marginBottom: 14, lineHeight: 1.7 }}>
-          ⚠ 这个 Skill 没有定义可执行的步骤/参数，目前只是一份说明文档，无法在此直接运行。
-          请在「Skill 管理」中编辑，补充 <code style={{ background: "rgba(251,191,36,.12)", padding: "0 4px", borderRadius: 2, fontFamily: "inherit" }}>inputs</code> 参数和带 {"{{"} 参数 {"}}"}  的执行步骤。
+      {/* ── Agent-execution notice for doc-style skills ── */}
+      {needsTask && (
+        <div style={{ fontSize: 10, color: "var(--t2)", background: "color-mix(in srgb, var(--blue) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--blue) 22%, transparent)", borderLeft: "3px solid var(--blue)", borderRadius: "var(--r)", padding: "10px 12px", marginBottom: 14, lineHeight: 1.7 }}>
+          🤖 这是一个文档型技能，没有参数表单——在下面描述你的任务，Agent 会按该技能的文档来执行。
+          需要固定参数表单的话，可在「管理」中编辑该 Skill 补充 inputs。
         </div>
       )}
 
@@ -510,31 +601,58 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
         </div>
       )}
 
-      {tool.inputs.length === 0 && tool.has_execution && (
-        <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 14 }}>此工具无可配置参数，点击直接执行。</div>
+      {/* ── Universal task input for skills without a declared form ── */}
+      {tool.inputs.length === 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ ...S.sectionLabel, ...S.accentBar, marginBottom: 0, flex: 1 }}>
+              任务描述{needsTask ? "" : "（可选）"}
+            </div>
+            {!enrich && (
+              <button
+                className="tbtn"
+                onClick={doEnrich}
+                disabled={enriching || loading}
+                title="让 AI 分析该技能文档，生成固定参数表单（审核后应用），把它变成填参数即用的可视化工具"
+                style={{ fontSize: 9, color: "var(--acc)", borderColor: "color-mix(in srgb, var(--acc) 35%, transparent)" }}
+              >
+                {enriching ? <><span className="spin" style={{ marginRight: 4 }} />分析中…</> : "⚡ AI 工具化（生成参数表单）"}
+              </button>
+            )}
+          </div>
+          <textarea
+            className="inp"
+            rows={3}
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            placeholder={needsTask
+              ? "描述你要完成的任务，例如：帮我用这个技能处理…"
+              : "可补充具体要求；留空则按技能默认流程执行"}
+            style={{ resize: "vertical", fontFamily: "inherit", width: "100%" }}
+            disabled={loading}
+          />
+        </div>
       )}
 
       {/* ── Execute row ── */}
-      {tool.has_execution && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
-          <button
-            className="btn-acc"
-            onClick={() => run()}
-            disabled={loading}
-            style={{ fontSize: 11, padding: "6px 16px", display: "flex", alignItems: "center", gap: 6 }}
-          >
-            {loading ? <><span className="spin" />执行中…</> : "▷ 执行"}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+        <button
+          className="btn-acc"
+          onClick={() => run()}
+          disabled={loading || (needsTask && !task.trim())}
+          style={{ fontSize: 11, padding: "6px 16px", display: "flex", alignItems: "center", gap: 6 }}
+        >
+          {loading ? <><span className="spin" />执行中…</> : needsTask ? "▷ 交给 Agent 执行" : "▷ 执行"}
+        </button>
+        {hasSample && !loading && (
+          <button className="tbtn" onClick={fillSample} style={{ fontSize: 10 }}>填充示例</button>
+        )}
+        {loading && (
+          <button className="tbtn" onClick={() => abortRef.current?.abort()} style={{ fontSize: 10, color: "var(--red)", borderColor: "rgba(248,113,113,.35)" }}>
+            停止
           </button>
-          {hasSample && !loading && (
-            <button className="tbtn" onClick={fillSample} style={{ fontSize: 10 }}>填充示例</button>
-          )}
-          {loading && (
-            <button className="tbtn" onClick={() => abortRef.current?.abort()} style={{ fontSize: 10, color: "var(--red)", borderColor: "rgba(248,113,113,.35)" }}>
-              停止
-            </button>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── Error + repair ── */}
       {error && (
@@ -542,12 +660,42 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
           <div style={{ fontSize: 10, color: "var(--red)", background: "rgba(248,113,113,.07)", border: "1px solid rgba(248,113,113,.25)", borderLeft: "3px solid var(--red)", borderRadius: "var(--r)", padding: "8px 12px", lineHeight: 1.65 }}>
             {error}
           </div>
-          {tool.has_execution && !repair && (
+          {!repair && (
             <button className="tbtn" onClick={doRepair} disabled={repairing}
               style={{ fontSize: 10, marginTop: 6, color: "var(--amber)", borderColor: "rgba(251,191,36,.35)" }}>
               {repairing ? <><span className="spin" style={{ marginRight: 5 }} />AI 分析中…</> : "🛠 让 AI 修复此工具"}
             </button>
           )}
+        </div>
+      )}
+
+      {/* ── 工具化 proposal ── */}
+      {enrich && (
+        <div style={{ marginTop: 12, background: "var(--bg2)", border: "1px solid color-mix(in srgb, var(--acc) 30%, transparent)", borderLeft: "3px solid var(--acc)", borderRadius: "var(--r)", padding: "10px 12px" }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--acc)", marginBottom: 4 }}>
+            ⚡ AI 提议的参数表单（审核后应用）
+          </div>
+          <div style={{ fontSize: 9, color: "var(--t3)", marginBottom: 8 }}>
+            提炼出 {(enrich.frontmatter as any)?.inputs?.length ?? 0} 个参数
+            {(enrich.frontmatter as any)?.tool?.kind ? ` · 类型 ${(enrich.frontmatter as any).tool.kind}` : ""}
+            {(enrich.frontmatter as any)?.tool?.runtime ? ` · 运行时 ${(enrich.frontmatter as any).tool.runtime}` : ""}
+            ；应用后该技能变为填参数即用的可视化工具，原文档内容保留。
+          </div>
+          {!enrich.validation.ok && (
+            <div style={{ fontSize: 9, color: "var(--red)", marginBottom: 8 }}>
+              仍有问题：{enrich.validation.errors.join("；")}
+            </div>
+          )}
+          <pre style={{ fontSize: 10, lineHeight: 1.6, maxHeight: 260, overflow: "auto", padding: 10, background: "var(--bg1)", borderRadius: "var(--r)", whiteSpace: "pre-wrap", wordBreak: "break-word", border: "1px solid var(--b)" }}>
+            {enrich.preview}
+          </pre>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button className="btn-acc" onClick={applyEnrich} disabled={applyingEnrich || !enrich.validation.ok}
+              style={{ fontSize: 10, padding: "5px 12px" }}>
+              {applyingEnrich ? "应用中…" : "✓ 应用，变成参数化工具"}
+            </button>
+            <button className="tbtn" onClick={() => setEnrich(null)} style={{ fontSize: 10 }}>取消</button>
+          </div>
         </div>
       )}
 
@@ -585,9 +733,7 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
             {!loading && output && (
               <span style={{ display: "flex", gap: 6 }}>
                 <button className="tbtn" onClick={copyOut} style={{ fontSize: 9 }}>复制</button>
-                {tool.exportable && (
-                  <button className="tbtn" onClick={exportOut} style={{ fontSize: 9 }}>导出 .md</button>
-                )}
+                <button className="tbtn" onClick={exportOut} style={{ fontSize: 9 }}>导出 .md</button>
               </span>
             )}
           </div>

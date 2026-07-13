@@ -1,4 +1,5 @@
 import type { AsinPulse, PulseDelta } from "../../../api/home";
+import { amazonDp } from "../../../lib/marketplaces";
 
 export type AsinState =
   | { kind: "idle" }
@@ -33,9 +34,10 @@ function Delta({ v, kind }: { v?: number; kind?: "price" | "bsr" | "count" }) {
   return <span className={"asin-delta " + (up ? "up" : "down")}>{up ? "▲" : "▼"}{mag}</span>;
 }
 
-export default function AsinCard({ asin, label, state, onRemove, onRefresh }: {
+export default function AsinCard({ asin, label, marketplace, state, onRemove, onRefresh }: {
   asin: string;
   label?: string;
+  marketplace: string;
   state: AsinState;
   onRemove: () => void;
   onRefresh?: () => void;
@@ -54,7 +56,7 @@ export default function AsinCard({ asin, label, state, onRemove, onRefresh }: {
         <div className="asin-card-id">
           <span className="asin-card-title" title={title}>{title}</span>
           <span className="asin-card-sub">
-            <a href={`https://www.amazon.com/dp/${asin}`} target="_blank" rel="noreferrer" className="asin-link">{asin}</a>
+            <a href={amazonDp(asin, marketplace)} target="_blank" rel="noreferrer" className="asin-link">{asin}</a>
             {pulse?.brand && <span className="asin-brand">· {pulse.brand}</span>}
           </span>
         </div>

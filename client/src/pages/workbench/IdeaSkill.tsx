@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import {
@@ -45,7 +45,7 @@ const MODE_KEY = "skillArchitectMode";
 // idle → working → clarify → plan → preview
 type Phase = "idle" | "working" | "clarify" | "plan" | "preview";
 
-export default function IdeaSkill() {
+export default function IdeaSkill({ embedded }: { embedded?: boolean } = {}) {
   const navigate = useNavigate();
   const [idea, setIdea] = useState("");
   const [category, setCategory] = useState("");
@@ -67,6 +67,15 @@ export default function IdeaSkill() {
   const [saved, setSaved] = useState(false);
 
   const busy = phase === "working";
+
+  // Elapsed timer so the multi-stage LLM pipeline (30s–2min) doesn't feel dead.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const t0 = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
 
   const setModeAndStore = (m: Mode) => {
     setMode(m);
@@ -216,7 +225,7 @@ export default function IdeaSkill() {
 
   return (
     <div>
-      <div className="ptitle">/ 想法工坊</div>
+      {!embedded && <div className="ptitle">/ 想法工坊</div>}
       <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 16 }}>
         一句话描述你的想法，AI 深入理解需求 → 制定方案 → 复核优化 → 生成并自检 Skill
       </div>
@@ -289,6 +298,7 @@ export default function IdeaSkill() {
       {busy && (
         <div className="pulse-loading">
           <span className="pulse-spin">◌</span> {progress}
+          {elapsed > 2 && <span style={{ color: "var(--t3)", marginLeft: 8 }}>已等待 {elapsed}s</span>}
         </div>
       )}
 
@@ -427,7 +437,7 @@ export default function IdeaSkill() {
             </div>
           )}
           {generated.validation?.ok && generated.validation.warnings.length === 0 && (
-            <div style={{ fontSize: 10, color: "var(--green)", marginBottom: 10 }}>✓ 自检通过</div>
+            <div style={{ fontSize: 10, color: "var(--acc)", marginBottom: 10 }}>✓ 自检通过</div>
           )}
 
           {generated.frontmatter?.description_zh ? (
@@ -449,7 +459,7 @@ export default function IdeaSkill() {
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button
               className="market-btn market-btn-submit"
-              onClick={async () => { const ok = await save(); if (ok && savedName) navigate(`/skill-tools?tool=${encodeURIComponent(savedName)}`); }}
+              onClick={async () => { const ok = await save(); if (ok && savedName) navigate(`/skill-hub?tab=tools&tool=${encodeURIComponent(savedName)}`); }}
               disabled={saving}
             >
               {saving ? "保存中…" : "🚀 保存并打开工具"}
@@ -463,7 +473,7 @@ export default function IdeaSkill() {
           </div>
 
           {saved && (
-            <div style={{ marginTop: 10, fontSize: 11, color: "var(--green)" }}>
+            <div style={{ marginTop: 10, fontSize: 11, color: "var(--acc)" }}>
               ✓ Skill 已保存！可在「运营商店」执行，或在工具页右上角「☆ 固定到侧边栏」把它变成常驻入口。
             </div>
           )}
