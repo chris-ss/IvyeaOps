@@ -239,6 +239,13 @@ function AsinAuditPanel() {
                 }))
           }
         />
+        {(() => {
+          const r = runners.find((x) => x.name === runner);
+          if (r && r.available && r.data_source_ready === false && r.data_source_hint) {
+            return <span style={{ fontSize: 10, color: "var(--amber)", maxWidth: 260, lineHeight: 1.4 }}>⚠ {r.data_source_hint}</span>;
+          }
+          return null;
+        })()}
         <button className="tbtn" onClick={onStart} disabled={isRunning}>
           {isRunning ? (
             <><span className="spin" /> 分析中…</>

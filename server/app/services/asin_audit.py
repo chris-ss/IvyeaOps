@@ -293,7 +293,9 @@ def _resolve_audit_runner(pref: str) -> tuple[Optional[str], Optional[str], str]
         # 默认用 hermes：它是 IvyeaOps 已经配好 skill(~/.hermes/skills seed) + 数据源 MCP
         # (sorftime / sif_mcp，hermes_config_sync 写入 ~/.hermes/config.yaml) 的 runner。
         # 审计走它才能拿到 skill 的 11 板块+结尾 JSON 结构指导 + 真实数据 → 前端才能解析出
-        # 结构化报告。ivyea-agent 无 skill/数据源 → 纯推断 + 无 JSON → “未能解析结构化数据”。
+        # 结构化报告。ivyea-agent 现已内置该 skill、放开步数、plan_mode=False 放行 MCP，只要
+        # 用户在 ~/.ivyea/mcp.json 配好一个 trusted 数据源 MCP（ivyea mcp add）就同样可用；
+        # 未配数据源时 agent 会明说“未检测到数据源”而非臆造。默认仍保持 hermes（数据源现成）。
         # 可在设置 audit_default_runner 改；选定 runner 不可用时按下面顺序兜底。
         from app.core import hub_settings as _hs
         default = (str(_hs.get("audit_default_runner") or "").strip().lower()) or "hermes"
@@ -322,6 +324,23 @@ def _resolve_audit_runner(pref: str) -> tuple[Optional[str], Optional[str], str]
     return None, None, f"unknown runner: {pref}"
 
 
+def _agent_trusted_data_source() -> bool:
+    """Does the embedded IvyeaAgent have a trusted MCP data source configured?
+
+    ASIN audit via ivyea-agent needs at least one ``"trusted": true`` server in
+    ~/.ivyea/mcp.json to fetch page/review evidence unattended. Best-effort read
+    of the agent's local config (same host)."""
+    try:
+        mcp_path = Path.home() / ".ivyea" / "mcp.json"
+        if not mcp_path.is_file():
+            return False
+        data = json.loads(mcp_path.read_text(encoding="utf-8"))
+        servers = (data or {}).get("mcpServers") or {}
+        return any(isinstance(s, dict) and s.get("trusted") for s in servers.values())
+    except Exception:
+        return False
+
+
 def runner_status() -> List[Dict[str, Any]]:
     """Report availability of the embedded IvyeaAgent plus legacy CLI runners."""
     ivyea_ok, ivyea_reason = _ivyea_agent_available()
@@ -343,6 +362,11 @@ def runner_status() -> List[Dict[str, Any]]:
             "available": ivyea_ok,
             "path": ivyea_agent.base_url(),
             "reason": None if ivyea_ok else ivyea_reason,
+            # ivyea-agent 现内置审计 skill，但取真实证据需要一个 trusted 数据源 MCP。
+            "data_source_ready": _agent_trusted_data_source(),
+            "data_source_hint": None if _agent_trusted_data_source() else
+            "未检测到 trusted 数据源 MCP：审计将无法抓真实页面/评论数据（会输出推断版）。"
+            "用 `ivyea mcp add` 配一个数据源并选“信任/免审批”。",
         },
         # ivyea-agent 上面已单列（内置 HTTP），从 CLI 行里剔除，避免选择器重复。
         *[row for row in cli_rows if row.get("name") not in ("auto", IVYEA_AGENT_RUNNER)],
@@ -360,21 +384,36 @@ async def _run_ivyea_agent(job: Job, prompt: str, stdout_log: Path) -> bool:
     token = ivyea_agent._token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    from app.core import hub_settings as _hs
+    try:
+        max_steps = int(_hs.get("asin_audit_max_steps") or 80)
+    except (TypeError, ValueError):
+        max_steps = 80
     payload = {
         "message": prompt,
-        "max_steps": 24,
-        "plan_mode": True,
+        # 审计要发现 MCP 工具 + 逐项抓证据 + 写 11 板块报告，步数需要给够；
+        # 真正的兜底是 30 分钟硬超时（HARD_TIMEOUT_SEC），不是步数。
+        "max_steps": max(24, min(max_steps, 400)),
+        # plan_mode=False：放行 MCP 工具调用（计划模式会拒绝 mcp_call_tool，
+        # 导致 agent 抓不到真实数据）。写操作仍受 agent 自身审批/trusted 约束。
+        "plan_mode": False,
+        # 加载内置审计 skill（11 板块结构 + MCP 取证流程 + 结尾 JSON 契约）。
+        "skill": "amazon.asin_cosmo_rufus_audit",
         "persist": True,
         "inject_retrieval": True,
         "system": (
             "你正在作为 IvyeaOps 内置 ASIN 深度审计智能体。"
-            "严格按用户要求输出完整 Markdown 报告，并在结尾追加指定 JSON 代码块。"
-            "没有真实工具数据时必须标注推断建议，不要把猜测写成页面事实。"
+            "先用 mcp_list_tools 发现已配置的数据源工具，再用 mcp_call_tool 按 ASIN 抓真实证据；"
+            "没有真实工具数据时必须标注推断建议，不要把猜测写成页面事实，也不要去扫本地文件系统找数据。"
+            "取证与分析完成后，把【完整 11 板块 Markdown 报告 + 结尾 JSON 代码块】作为你的最终输出一次性完整呈现，"
+            "这必须是你最后一条消息的正文；不要在报告之后再追加“已交付/交付概要”之类的收尾轮次，也不要说“报告已在上方”。"
         ),
     }
     start = time.monotonic()
     got_token = False
     final_text = ""
+    final_messages: List[Dict[str, Any]] = []
+    session_id = ""
     event = "message"
     written = 0
 
@@ -398,6 +437,8 @@ async def _run_ivyea_agent(job: Job, prompt: str, stdout_log: Path) -> bool:
                         data = json.loads(line[5:].strip() or "{}")
                     except Exception:
                         continue
+                    if isinstance(data, dict) and data.get("session_id"):
+                        session_id = str(data["session_id"])
                     if event == "token":
                         text = str(data.get("text") or "")
                         if not text:
@@ -414,13 +455,74 @@ async def _run_ivyea_agent(job: Job, prompt: str, stdout_log: Path) -> bool:
                             _write_meta(job)
                     elif event == "final":
                         final_text = str(data.get("text") or "")
+                        if isinstance(data.get("messages"), list):
+                            final_messages = data["messages"]
                     elif event == "error":
                         raise RuntimeError(str(data.get("detail") or data.get("error") or data))
-    if not got_token and final_text:
-        raw = final_text.encode("utf-8")
-        stdout_log.write_bytes(raw)
+    # The agent runs a multi-step loop; the live token stream is only the LAST
+    # turn (often a short "已交付" wrap-up), while the full 11-section report +
+    # trailing JSON was produced in an EARLIER turn. Recover the real report:
+    #   1) the full persisted session (untruncated — the report may be dozens of
+    #      messages back, beyond the final event's last-30 window);
+    #   2) the final event's message list (last 30);
+    #   3) the final text / token stream (already in stdout.log).
+    report_text = ""
+    if session_id:
+        report_text = _report_from_session(session_id)
+    if not report_text:
+        report_text = _best_report_from_messages(final_messages)
+    if not report_text and final_text:
+        report_text = final_text
+    if report_text:
+        raw = report_text.encode("utf-8")
+        stdout_log.write_bytes(raw)   # overwrite the live tail with the full report
         job.stdout_bytes = len(raw)
     return True
+
+
+def _agent_sessions_dir() -> Path:
+    """Locate the embedded agent's sessions dir (best-effort). Prefers the
+    data_dir reported by the agent health, falls back to ~/.ivyea."""
+    try:
+        data_dir = (ivyea_agent.availability().get("health") or {}).get("data_dir")
+        if data_dir:
+            return Path(data_dir) / "sessions"
+    except Exception:
+        pass
+    return Path.home() / ".ivyea" / "sessions"
+
+
+def _report_from_session(session_id: str) -> str:
+    """Read the FULL persisted agent session and pick the report message.
+    chat_stream saves the session before emitting `final`, so it's on disk by the
+    time the stream ends. Untruncated, so an early report turn is still found."""
+    try:
+        sp = _agent_sessions_dir() / f"{session_id}.json"
+        if not sp.is_file():
+            return ""
+        data = json.loads(sp.read_text(encoding="utf-8", errors="replace"))
+        return _best_report_from_messages(data.get("messages") or [])
+    except Exception:
+        return ""
+
+
+def _best_report_from_messages(messages: List[Dict[str, Any]]) -> str:
+    """From an agent turn's message list, return the assistant text that is the
+    actual audit report: prefer the last one containing a ```json``` block,
+    else the longest assistant text."""
+    texts: List[str] = []
+    for m in messages or []:
+        if not isinstance(m, dict) or m.get("role") != "assistant":
+            continue
+        c = m.get("content")
+        if isinstance(c, str) and c.strip():
+            texts.append(c)
+    if not texts:
+        return ""
+    with_json = [t for t in texts if _JSON_FENCE_RE.search(t)]
+    if with_json:
+        return max(with_json, key=len)
+    return max(texts, key=len)
 
 
 async def _run_claude(job: Job) -> None:
