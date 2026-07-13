@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import {
@@ -67,6 +67,15 @@ export default function IdeaSkill({ embedded }: { embedded?: boolean } = {}) {
   const [saved, setSaved] = useState(false);
 
   const busy = phase === "working";
+
+  // Elapsed timer so the multi-stage LLM pipeline (30s–2min) doesn't feel dead.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const t0 = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
 
   const setModeAndStore = (m: Mode) => {
     setMode(m);
@@ -289,6 +298,7 @@ export default function IdeaSkill({ embedded }: { embedded?: boolean } = {}) {
       {busy && (
         <div className="pulse-loading">
           <span className="pulse-spin">◌</span> {progress}
+          {elapsed > 2 && <span style={{ color: "var(--t3)", marginLeft: 8 }}>已等待 {elapsed}s</span>}
         </div>
       )}
 
@@ -449,7 +459,7 @@ export default function IdeaSkill({ embedded }: { embedded?: boolean } = {}) {
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button
               className="market-btn market-btn-submit"
-              onClick={async () => { const ok = await save(); if (ok && savedName) navigate(`/skill-tools?tool=${encodeURIComponent(savedName)}`); }}
+              onClick={async () => { const ok = await save(); if (ok && savedName) navigate(`/skill-hub?tab=tools&tool=${encodeURIComponent(savedName)}`); }}
               disabled={saving}
             >
               {saving ? "保存中…" : "🚀 保存并打开工具"}

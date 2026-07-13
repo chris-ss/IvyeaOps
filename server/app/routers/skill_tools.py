@@ -500,6 +500,31 @@ def delete_run(run_id: str, skill_name: str) -> dict:
     return {"ok": skill_runs.delete_run(skill_name, run_id)}
 
 
+# ── One-click 工具化 (propose a Tool Spec for a doc-style skill) ─────────────
+
+class EnrichBody(BaseModel):
+    skill_name: str
+
+
+@router.post("/enrich")
+async def enrich_tool(body: EnrichBody) -> dict:
+    """Propose a Tool Spec (inputs + tool block) for a doc-style skill so it
+    becomes a parameterized visual tool. Review-first: returns a preview, the
+    frontend applies it via the skill update endpoint after user confirmation."""
+    from app.services import skill_architect
+
+    try:
+        detail = skill_repo.get_skill(body.skill_name)
+    except Exception as exc:
+        raise HTTPException(404, f"Skill not found: {exc}")
+
+    md = skill_repo._serialize_skill_md(dict(detail.frontmatter or {}), detail.content_body)
+    try:
+        return await skill_architect.enrich_and_validate(detail.name, md)
+    except Exception as exc:
+        raise HTTPException(502, f"AI 工具化失败: {exc}")
+
+
 # ── One-click AI repair (propose, review-first — does NOT auto-write) ────────
 
 class RepairBody(BaseModel):

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
-  listTools, runTool, pinTool, listRuns, getRun, deleteRun, repairTool,
+  listTools, runTool, pinTool, listRuns, getRun, deleteRun, repairTool, enrichTool,
   type SkillToolMeta, type SkillInput, type SseEvent, type SkillRunSummary, type RepairResult,
 } from "../../api/skillTools";
 import SheetSelect from "../../components/SheetSelect";
@@ -129,6 +129,17 @@ export default function SkillTools({ embedded }: { embedded?: boolean } = {}) {
     });
   }, [routerLoc.search]);
 
+  // After 工具化/repair rewrites a skill, refresh the list and the open panel
+  // so the new parameter form shows up immediately.
+  const refreshActiveTool = useCallback(async () => {
+    try {
+      const res = await listTools(filterCat || undefined, search || undefined);
+      setTools(res.tools);
+      setCategories(res.categories);
+      setActiveTool((cur) => (cur ? res.tools.find((t) => t.name === cur.name) ?? cur : cur));
+    } catch { /**/ }
+  }, [filterCat, search]);
+
   // ── Active tool: panel view ──
   if (activeTool) {
     return (
@@ -147,7 +158,11 @@ export default function SkillTools({ embedded }: { embedded?: boolean } = {}) {
             删除工具
           </button>
         </div>
-        <ToolPanel tool={activeTool} />
+        <ToolPanel
+          key={activeTool.name + ":" + activeTool.inputs.length}
+          tool={activeTool}
+          onToolChanged={refreshActiveTool}
+        />
       </div>
     );
   }
@@ -315,7 +330,7 @@ function ToolCard({ tool: t, onOpen, onDelete }: {
 }
 
 // ── Tool execution panel ──────────────────────────────────────────────────────
-function ToolPanel({ tool }: { tool: SkillToolMeta }) {
+function ToolPanel({ tool, onToolChanged }: { tool: SkillToolMeta; onToolChanged?: () => Promise<void> | void }) {
   const [params, setParams] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const inp of tool.inputs) init[inp.name] = inp.default || "";
@@ -335,6 +350,9 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
   const [repair, setRepair]           = useState<RepairResult | null>(null);
   const [repairing, setRepairing]     = useState(false);
   const [applying, setApplying]       = useState(false);
+  const [enrich, setEnrich]           = useState<RepairResult | null>(null);
+  const [enriching, setEnriching]     = useState(false);
+  const [applyingEnrich, setApplyingEnrich] = useState(false);
   const [pinned, setPinned]           = useState(!!tool.pinned);
   const [pinning, setPinning]         = useState(false);
 
@@ -453,6 +471,26 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
     }
   }, [tool, params, task, needsTask, loadHistory]);
 
+  const doEnrich = useCallback(async () => {
+    setEnriching(true);
+    setError("");
+    try { setEnrich(await enrichTool(tool.name)); }
+    catch (e: any) { setError(e?.response?.data?.detail || e?.message || "AI 工具化失败"); }
+    finally { setEnriching(false); }
+  }, [tool.name]);
+
+  const applyEnrich = useCallback(async () => {
+    if (!enrich) return;
+    setApplyingEnrich(true);
+    try {
+      await updateSkill(tool.name, enrich.frontmatter, enrich.body);
+      setEnrich(null);
+      await onToolChanged?.();   // parent remounts the panel with the new form
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || "应用失败");
+    } finally { setApplyingEnrich(false); }
+  }, [enrich, tool.name, onToolChanged]);
+
   const doRepair = useCallback(async () => {
     setRepairing(true);
     try { setRepair(await repairTool(tool.name, error)); }
@@ -566,8 +604,21 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
       {/* ── Universal task input for skills without a declared form ── */}
       {tool.inputs.length === 0 && (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ ...S.sectionLabel, ...S.accentBar, marginBottom: 10 }}>
-            任务描述{needsTask ? "" : "（可选）"}
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ ...S.sectionLabel, ...S.accentBar, marginBottom: 0, flex: 1 }}>
+              任务描述{needsTask ? "" : "（可选）"}
+            </div>
+            {!enrich && (
+              <button
+                className="tbtn"
+                onClick={doEnrich}
+                disabled={enriching || loading}
+                title="让 AI 分析该技能文档，生成固定参数表单（审核后应用），把它变成填参数即用的可视化工具"
+                style={{ fontSize: 9, color: "var(--acc)", borderColor: "color-mix(in srgb, var(--acc) 35%, transparent)" }}
+              >
+                {enriching ? <><span className="spin" style={{ marginRight: 4 }} />分析中…</> : "⚡ AI 工具化（生成参数表单）"}
+              </button>
+            )}
           </div>
           <textarea
             className="inp"
@@ -615,6 +666,36 @@ function ToolPanel({ tool }: { tool: SkillToolMeta }) {
               {repairing ? <><span className="spin" style={{ marginRight: 5 }} />AI 分析中…</> : "🛠 让 AI 修复此工具"}
             </button>
           )}
+        </div>
+      )}
+
+      {/* ── 工具化 proposal ── */}
+      {enrich && (
+        <div style={{ marginTop: 12, background: "var(--bg2)", border: "1px solid color-mix(in srgb, var(--acc) 30%, transparent)", borderLeft: "3px solid var(--acc)", borderRadius: "var(--r)", padding: "10px 12px" }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--acc)", marginBottom: 4 }}>
+            ⚡ AI 提议的参数表单（审核后应用）
+          </div>
+          <div style={{ fontSize: 9, color: "var(--t3)", marginBottom: 8 }}>
+            提炼出 {(enrich.frontmatter as any)?.inputs?.length ?? 0} 个参数
+            {(enrich.frontmatter as any)?.tool?.kind ? ` · 类型 ${(enrich.frontmatter as any).tool.kind}` : ""}
+            {(enrich.frontmatter as any)?.tool?.runtime ? ` · 运行时 ${(enrich.frontmatter as any).tool.runtime}` : ""}
+            ；应用后该技能变为填参数即用的可视化工具，原文档内容保留。
+          </div>
+          {!enrich.validation.ok && (
+            <div style={{ fontSize: 9, color: "var(--red)", marginBottom: 8 }}>
+              仍有问题：{enrich.validation.errors.join("；")}
+            </div>
+          )}
+          <pre style={{ fontSize: 10, lineHeight: 1.6, maxHeight: 260, overflow: "auto", padding: 10, background: "var(--bg1)", borderRadius: "var(--r)", whiteSpace: "pre-wrap", wordBreak: "break-word", border: "1px solid var(--b)" }}>
+            {enrich.preview}
+          </pre>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button className="btn-acc" onClick={applyEnrich} disabled={applyingEnrich || !enrich.validation.ok}
+              style={{ fontSize: 10, padding: "5px 12px" }}>
+              {applyingEnrich ? "应用中…" : "✓ 应用，变成参数化工具"}
+            </button>
+            <button className="tbtn" onClick={() => setEnrich(null)} style={{ fontSize: 10 }}>取消</button>
+          </div>
         </div>
       )}
 

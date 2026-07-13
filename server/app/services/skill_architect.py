@@ -94,7 +94,7 @@ _IDENT_RE = re.compile(r"^[a-zA-Z_]\w*$")
 # Editable prompt assets (STUDIO_ROOT/architect/*.md)
 # ---------------------------------------------------------------------------
 
-_STAGES = ("01_understand", "02_plan", "03_review", "04_optimize", "05_generate", "repair")
+_STAGES = ("01_understand", "02_plan", "03_review", "04_optimize", "05_generate", "repair", "enrich")
 
 
 _DEFAULT_PROMPTS: dict[str, str] = {
@@ -236,6 +236,39 @@ inputs 的 name 必须是合法标识符；type 取值范围：text,textarea,num
 {{SKILL_MD}}
 
 修复要点提醒：frontmatter 必须有合法 name（^[a-z][a-z0-9_-]{1,63}$）、description、tool.kind（report/transform/lookup/workflow）、以及顶层 inputs 数组（每项有合法 name）。只输出修复后的完整 SKILL.md（从 --- 开始）。""",
+    "enrich": """你是 Hermes Skill 工具化专家。下面是一份**文档型** Skill（只有说明文档，没有参数表单），
+请把它「工具化」：补全 Tool Spec，让它在网页商店里变成一个带表单、可直接执行的可视化工具。
+
+{{CAPABILITIES}}
+
+{{MCP}}
+
+待工具化的 SKILL.md：
+{{SKILL_MD}}
+
+要求——输出补全后的完整 SKILL.md（从 --- 开始，只输出 SKILL.md 内容）：
+
+1. YAML frontmatter：
+   - **保留**原有的 name、category（不得改名）；补全缺失的 description / description_zh / icon
+   - 新增顶层 inputs 数组：从文档内容里提炼用户执行该 Skill 时真正需要提供的 2-5 个参数，
+     每项 {name,label,type,required,placeholder,default,options}
+     · type 只能是：text | textarea | number | select | boolean | asin | marketplace | keyword | date | file
+     · file 类型只有 vision_llm 能力可用时才能用
+     · 参数要贴合文档实际用途——宁少勿滥，一个 textarea 型的核心输入也完全可以
+   - 新增 tool: 规格块：
+       tool:
+         kind: <report|transform|lookup|workflow，按文档用途判断>
+         runtime: <llm-only|mcp；只有文档明确需要实时市场数据且 mcp_hermes 可用才填 mcp>
+         inputs: <同上 inputs>
+         output: {format: markdown, persist: true, exportable: true}
+         sample_params: {<每个非 file 的 input 给一个示例值>}
+
+2. Markdown body：**尽量保留原文档内容**，只做两件事：
+   - 在开头补一小节「## 使用参数」，逐条说明每个 {{参数名}} 的用途
+   - 在文档的执行流程/步骤处自然引用 {{参数名}}（每个 input 至少被引用一次）；
+     若原文没有明确步骤，补一节简短的「## 执行步骤」把文档意图串成 2-4 步
+
+只输出 SKILL.md 完整内容，不要任何解释。""",
 }
 
 
@@ -416,6 +449,46 @@ async def _repair(skill_md: str, errors: list[str]) -> str:
         "SKILL_MD": skill_md,
     })
     return _extract_skill_md(await _gen(prompt))
+
+
+async def _enrich(skill_md: str) -> str:
+    prompt = _fill(_load_prompt("enrich"), {
+        "CAPABILITIES": _capabilities_block(),
+        "MCP": _MCP_TOOLS_DESC,
+        "SKILL_MD": skill_md,
+    })
+    return _extract_skill_md(await _gen(prompt))
+
+
+async def enrich_and_validate(original_name: str, skill_md: str) -> dict:
+    """工具化 a doc-style skill: derive a Tool Spec (inputs + tool block) while
+    keeping the body content. Validate (+ repair up to twice), never rename.
+    Returns the same review-first shape as the repair endpoint."""
+    basename = original_name.rsplit("/", 1)[-1]
+    md = await _enrich(skill_md)
+    fm, body = skill_repo._parse_skill_md(md)
+    fm = dict(fm or {})
+    fm["name"] = basename                        # identity is not negotiable
+    errors, warnings = validate_skill_md(fm, body)
+
+    attempts = 0
+    while errors and attempts < 2:
+        attempts += 1
+        md = await _repair(skill_repo._serialize_skill_md(fm, body), errors)
+        fm, body = skill_repo._parse_skill_md(md)
+        fm = dict(fm or {})
+        fm["name"] = basename
+        errors, warnings = validate_skill_md(fm, body)
+
+    preview = skill_repo._serialize_skill_md(fm, body)
+    return {
+        "name": original_name,
+        "frontmatter": fm,
+        "body": body,
+        "preview": preview,
+        "validation": {"ok": not errors, "attempts": attempts,
+                       "errors": errors, "warnings": warnings},
+    }
 
 
 # ---------------------------------------------------------------------------

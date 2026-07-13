@@ -29,6 +29,13 @@ export default function SkillHub() {
 
   useEffect(() => { localStorage.setItem(STORAGE_TAB, tab); }, [tab]);
 
+  // Follow in-app navigations that change ?tab= while the hub stays mounted
+  // (e.g. 想法工坊 saves a skill and jumps to the tools tab to open it).
+  useEffect(() => {
+    const fromUrl = searchParams.get("tab");
+    if (isTab(fromUrl)) setTab((cur) => (cur === fromUrl ? cur : fromUrl));
+  }, [searchParams]);
+
   const switchTab = (t: TabKey) => {
     setTab(t);
     setSearchParams((prev) => {

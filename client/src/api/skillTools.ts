@@ -105,6 +105,16 @@ export async function repairTool(skillName: string, error: string): Promise<Repa
   return data;
 }
 
+/** AI 工具化：为文档型 skill 生成 Tool Spec（参数表单），审核制预览。 */
+export async function enrichTool(skillName: string): Promise<RepairResult> {
+  const { data } = await api.post(
+    "/skill-tools/enrich",
+    { skill_name: skillName },
+    { timeout: 300000 },
+  );
+  return data;
+}
+
 export function runTool(
   skillName: string,
   params: Record<string, string>,
