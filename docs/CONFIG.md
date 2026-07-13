@@ -44,6 +44,21 @@ UI 里的分区：
 - **账号安全** —— 修改密码（把新哈希写入 hub_settings.json 的 `password_hash`，
   优先级高于 `IVYEA_OPS_PASSWORD_HASH` 环境变量）
 
+### 推荐 AI 配置阶梯（开源用户从这里开始）
+
+不需要 Claude / Codex 账号。按预算三档，全部在「系统配置 → AI 服务」里填：
+
+| 档位 | 配置 | 能力 |
+|---|---|---|
+| 零 Key | 什么都不填 | 各板块用内置规则兜底；Listing 套图走内置精品叙事库策划 + 人工复核，流程完整可跑 |
+| **最低配（推荐）** | 一个 [DeepSeek](https://platform.deepseek.com) key（`deepseek_api_key`，也可直接设为 IvyeaAgent 主脑） | AI 分析 / 文案 / 套图策划 / 各板块报告全部满血 |
+| 视觉增强 | 再加一个[硅基流动](https://siliconflow.cn) key：全局兜底 Provider 选「硅基流动」，视觉复核模型填 `Qwen/Qwen3-VL-30B-A3B-Instruct`（免费档即可用，无需充值） | Listing 成图质检 + 按质检意见自动重画闭环、图片视觉分析全部启用 |
+
+说明：
+- 文本任务的调用顺序是 **IvyeaAgent（主脑可配 DeepSeek）→ Hermes → DeepSeek → 全局兜底 → Codex → Claude**，配到哪层用到哪层；
+- 视觉任务顺序是 **IvyeaAgent（主脑有视觉能力时）→ OpenAI → 全局兜底的视觉复核模型**；都没配时成图质检自动降级为人工复核（勾选「已核对」即可交付），不会卡死流程；
+- 硅基流动 / 阿里云百炼 / 智谱在 Provider 下拉里有预设，任何 OpenAI 兼容端点也可用「自定义」接入。
+
 ### IvyeaAgent 知识库
 
 新知识库由 IvyeaAgent 管理，默认文件夹是 `~/.ivyea/knowledge`。右下角 IvyeaAgent 面板支持上传文档、预览导入草稿、确认入库、搜索知识卡和查看最近上传。安装脚本会创建目录并启动本地服务；如果服务暂时没起来，IvyeaOps 的状态检查会自动重试拉起。

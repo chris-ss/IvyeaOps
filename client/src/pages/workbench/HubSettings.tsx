@@ -224,6 +224,9 @@ const PROVIDERS: ProviderDef[] = [
   { id: "kimi",       label: "Kimi",       defaultModel: "kimi-k2.5",                          envVar: "KIMI_API_KEY",                hint: "国内可用" },
   { id: "groq",       label: "Groq",       defaultModel: "llama-3.3-70b-versatile",            envVar: "GROQ_API_KEY",                hint: "超快推理速度" },
   { id: "together",   label: "Together",   defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo", envVar: "TOGETHER_API_KEY" },
+  { id: "siliconflow", label: "硅基流动",  defaultModel: "deepseek-ai/DeepSeek-V3.2",          envVar: "SILICONFLOW_API_KEY",         hint: "国内直连，有免费档，含 Qwen-VL 视觉", examples: "deepseek-ai/DeepSeek-V3.2 / Qwen/Qwen3-VL-30B-A3B-Instruct" },
+  { id: "dashscope",  label: "阿里云百炼", defaultModel: "qwen-plus",                          envVar: "DASHSCOPE_API_KEY",           hint: "国内直连，qwen-vl 系列可做视觉" },
+  { id: "zhipu",      label: "智谱",       defaultModel: "glm-4-plus",                         envVar: "ZHIPUAI_API_KEY",             hint: "GLM-4V-Flash 视觉免费" },
   { id: "custom",     label: "自定义",     defaultModel: "",                                   envVar: "",                            hint: "OpenAI 兼容接口" },
 ];
 
@@ -787,6 +790,7 @@ const EMPTY: HubSettings = {
   hermes_fallback_provider: "", hermes_fallback_model: "",
   hermes_fallback_api_key: "", hermes_fallback_base_url: "",
   assistant_provider: "", assistant_model: "", assistant_api_key: "", assistant_base_url: "",
+  assistant_vision_model: "",
   ivyea_agent_url: "http://127.0.0.1:8765", ivyea_agent_token: "", ivyea_agent_auto_start: true,
   ivyea_agent_provider: "", ivyea_agent_model: "", ivyea_agent_api_key: "", ivyea_agent_base_url: "",
   image_model: "", image_api_key: "", image_base_url: "",
@@ -1038,7 +1042,7 @@ export default function HubSettings() {
         title="全局兜底大模型"
         dataTour="settings-fallback"
         desc={<>所有板块的统一文本出口，也是 AI 问答的默认模型。建议配置一个稳定的文本大模型；IvyeaAgent 主脑模型可在最上方单独指定。</>}
-        keys={["assistant_provider", "assistant_model", "assistant_api_key", "assistant_base_url"]}
+        keys={["assistant_provider", "assistant_model", "assistant_api_key", "assistant_base_url", "assistant_vision_model"]}
         vals={vals} onSave={save}
       >
         <LLMModelBlock
@@ -1048,6 +1052,14 @@ export default function HubSettings() {
           apiKeyKey="assistant_api_key" baseUrlKey="assistant_base_url"
           vals={vals} set={set}
         />
+        <div style={{ marginTop: 12 }}>
+          <Field label="视觉复核模型（可选）"
+            hint="Listing 成图质检、图片分析等看图任务使用；需为该 Provider 下支持图片输入的模型（如硅基流动 Qwen/Qwen3-VL-30B-A3B-Instruct）。留空则尝试用上面的文本模型看图；不配置时成图质检自动降级为人工复核。">
+            <input className="hs-input" value={vals.assistant_vision_model || ""}
+              onChange={(e) => set("assistant_vision_model", e.target.value)}
+              placeholder="Qwen/Qwen3-VL-30B-A3B-Instruct" />
+          </Field>
+        </div>
       </Section>
 
       {/* -- 核心 4: 图片生成服务 -- */}

@@ -16,6 +16,7 @@ export interface HubSettings {
   assistant_model: string;
   assistant_api_key: string;
   assistant_base_url: string;
+  assistant_vision_model: string;
   // IvyeaAgent local service
   ivyea_agent_url: string;
   ivyea_agent_token: string;

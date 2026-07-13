@@ -969,6 +969,9 @@ ASSISTANT_PROVIDER_BASE = {
     "deepseek":   "https://api.deepseek.com",
     "openai":     "https://api.openai.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
+    "siliconflow": "https://api.siliconflow.cn/v1",
+    "dashscope":  "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "zhipu":      "https://open.bigmodel.cn/api/paas/v4",
     "groq":       "https://api.groq.com/openai/v1",
     "together":   "https://api.together.xyz/v1",
     "xiaomi":     "https://token-plan-sgp.xiaomimimo.com/v1",
@@ -1182,7 +1185,8 @@ def _assistant_vision_cfg() -> tuple[str, str, str, str] | None:
     model = str(hub_settings.get("assistant_vision_model")
                 or hub_settings.get("assistant_model") or "").strip()
     VISION_CAPABLE = ("openai", "anthropic", "openrouter", "google", "together",
-                      "custom", "apimart", "deepseek")
+                      "custom", "apimart", "deepseek",
+                      "siliconflow", "dashscope", "zhipu")
     if not key or provider not in VISION_CAPABLE:
         return None
     return provider, key, base, model
