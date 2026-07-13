@@ -282,7 +282,8 @@ async def run_copy_pipeline(*, marketplace: str, product_type: str, asins: list[
         "data": {}, "errors": [], "available": False
     }
 
-    report(2, "正在生成文案（Hermes → 全局兜底 → Codex → Claude）…")
+    from .ai import text_chain_label
+    report(2, f"正在生成文案（{text_chain_label()}）…")
     prompt = _build_listing_prompt(marketplace, product_type, product_notes, vision_result, competitor_result)
     result_text = await _call_ai(prompt, web_search=False)
     if not str(result_text or "").strip():

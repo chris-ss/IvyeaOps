@@ -1,7 +1,7 @@
 """Listing 工作台的 AI 入口：统一文本降级链 + 统一视觉链。
 
-规则（整改后）：任何文本生成走 run_text_chain（Hermes → 全局兜底 → Codex →
-Claude），任何看图任务走 stream_vision 统一视觉链。Apimart 只允许出现在生图
+规则（整改后）：任何文本生成走 run_text_chain（IvyeaAgent 恒为第一位，其余按
+text_ai_providers 配置逐级降级），任何看图任务走 stream_vision 统一视觉链。Apimart 只允许出现在生图
 提交里 —— 它的 /messages 端点对文本/视觉一律 403，历史上把复核与文案兜底接到
 它上面造成了"复核永远失败"的系统性故障，禁止回退到那种写法。
 """
@@ -10,9 +10,30 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 
+_PROVIDER_LABELS = {
+    "ivyea-agent": "IvyeaAgent", "hermes": "Hermes", "deepseek": "DeepSeek",
+    "assistant": "全局兜底", "codex": "Codex", "claude": "Claude",
+}
+
+
+def text_chain_label() -> str:
+    """真实调用链的人类可读描述（如 "IvyeaAgent → DeepSeek → 全局兜底"）。
+
+    进度条/报错里的链路描述必须从这里取——曾经写死 "Hermes → 全局兜底 → Codex
+    → Claude" 与实际顺序（IvyeaAgent 恒第一）不符，误导排查。"""
+    try:
+        from app.services.ai_synthesis_service import _text_provider_chain
+        chain = _text_provider_chain()
+    except Exception:
+        chain = []
+    if not chain:
+        return "统一 AI 降级链"
+    return " → ".join(_PROVIDER_LABELS.get(p, p) for p in chain)
+
+
 async def _call_ai(prompt: str, web_search: bool = True) -> str:
-    """Generate text via the standard fallback chain:
-    Hermes → 全局兜底大模型 → Codex → Claude.
+    """Generate text via the standard fallback chain (IvyeaAgent first, then the
+    configured text_ai_providers order).
 
     Listing AI is a pure text engine (the prompt forbids tools/commands), so it
     rides the shared ``run_text_chain`` orchestrator — the exact same chain every
@@ -36,7 +57,7 @@ async def _call_ai(prompt: str, web_search: bool = True) -> str:
         _provider, text = await ai_synthesis_service.run_text_chain(task_prompt)
         return text
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"AI 调用失败（Hermes / 全局兜底 / Codex / Claude 均不可用）：{e}")
+        raise HTTPException(502, f"AI 调用失败（{text_chain_label()} 均不可用）：{e}")
 
 
 def has_vision() -> bool:

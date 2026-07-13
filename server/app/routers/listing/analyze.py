@@ -186,7 +186,8 @@ async def run_analyze(project_id: str, handle: Optional[JobHandle] = None) -> di
         structured = _fallback_analysis(row, scrape_data, {})
         content = json.dumps(structured, ensure_ascii=False)
         fallback_used = True
-        warning = f"AI 当前不可用（Hermes/全局兜底/Codex/Claude 均失败），已使用本地规则生成基础分析。原因：{str(e.detail)[:220]}"
+        from .ai import text_chain_label
+        warning = f"AI 当前不可用（{text_chain_label()} 均失败），已使用本地规则生成基础分析。原因：{str(e.detail)[:220]}"
 
     combined = {"ai_analysis": content, "imgflow": imgflow_analysis, "image_insights": image_insights}
     if fallback_used:
