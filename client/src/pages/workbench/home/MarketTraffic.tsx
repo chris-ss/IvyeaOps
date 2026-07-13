@@ -6,6 +6,7 @@ import {
 } from "../../../api/home";
 import TrendChart, { type TrendSeries } from "./TrendChart";
 import type { DataSourceId } from "../../../lib/dataSource";
+import { useToast } from "../../../components/toast";
 
 function fmtVol(v: number): string {
   if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + "M";
@@ -51,29 +52,26 @@ export default function MarketTraffic({ marketplace, dataSource }: { marketplace
   const [dailyBusy, setDailyBusy] = useState(false);
   const [dailyMsg, setDailyMsg] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const notify = useToast();
   const sourceName = dataSource === "sellersprite" ? "卖家精灵" : "Sorftime";
 
   useEffect(() => { localStorage.setItem("ivyea-ops-mkt-view", view); }, [view]);
 
   const mine = items.filter(it => it.marketplace === marketplace);
 
+  // Load the watchlist and pick a baseline for the current site, based on the
+  // freshly-fetched list (not stale state): keep the current selection when it
+  // still exists for this site, otherwise fall back to the site's first entry.
   const loadList = async (pickQuery?: string) => {
     try {
       const all = await listMarketWatch(dataSource);
       setItems(all);
       const forMkt = all.filter(it => it.marketplace === marketplace);
-      const next = pickQuery ?? (forMkt.some(it => it.query === selected) ? selected : forMkt[0]?.query ?? "");
-      setSelected(next);
+      setSelected(prev => pickQuery ?? (forMkt.some(it => it.query === prev) ? prev : forMkt[0]?.query ?? ""));
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { loadList(); /* eslint-disable-next-line */ }, [dataSource]);
-  // Marketplace changed → re-pick a baseline for that site.
-  useEffect(() => {
-    const forMkt = items.filter(it => it.marketplace === marketplace);
-    setSelected(forMkt[0]?.query ?? "");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marketplace, dataSource]);
+  useEffect(() => { loadList(); /* eslint-disable-next-line */ }, [marketplace, dataSource]);
 
   // Load series when selection changes.
   useEffect(() => {
@@ -94,12 +92,14 @@ export default function MarketTraffic({ marketplace, dataSource }: { marketplace
     try {
       await addMarketWatch({ query: q, marketplace, data_source: dataSource });
       await loadList(q);
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      notify("error", `添加基线失败：${e?.message || "请求失败"}`);
+    }
     inputRef.current?.focus();
   };
 
   const handleRemove = async (item: MarketWatchItem) => {
-    await deleteMarketWatch(item.id).catch(() => {});
+    await deleteMarketWatch(item.id).catch(() => notify("warn", `「${item.query}」服务端删除失败，刷新后可能回来`));
     await loadList();
   };
 
@@ -111,7 +111,9 @@ export default function MarketTraffic({ marketplace, dataSource }: { marketplace
         const s = await fetchMarketSeries(selected, marketplace, dataSource);
         setSeries(s);
       }
-    } catch { /* ignore */ } finally { setRecording(false); }
+    } catch (e: any) {
+      notify("error", `记录失败：${e?.message || "请求失败"}`);
+    } finally { setRecording(false); }
   };
 
   const handleBackfill = async () => {
@@ -121,7 +123,9 @@ export default function MarketTraffic({ marketplace, dataSource }: { marketplace
       await backfillMarket(selected, marketplace, dataSource);
       const s = await fetchMarketSeries(selected, marketplace, dataSource);
       setSeries(s);
-    } catch { /* ignore */ } finally { setBackfilling(false); }
+    } catch (e: any) {
+      notify("error", `导入历史失败：${e?.message || "请求失败"}`);
+    } finally { setBackfilling(false); }
   };
 
   const handleDailyBackfill = async () => {

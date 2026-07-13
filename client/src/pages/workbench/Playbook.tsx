@@ -19,6 +19,7 @@ import {
 } from "../../lib/reportFormat";
 import { getDataSource, setDataSource, dataSourceMeta, type DataSourceId } from "../../lib/dataSource";
 import DataSourcePicker from "../../components/DataSourcePicker";
+import { FLAG_URL } from "../../lib/marketplaces";
 import DeepAnalysisPanel, { type DeepAnalysisType } from "../../components/DeepAnalysisPanel";
 
 interface LocalHistoryEntry {
@@ -39,7 +40,6 @@ function toLocal(e: HistoryEntry): LocalHistoryEntry {
   return { ...e, elapsedS: e.elapsed_s };
 }
 
-const FLAG_URL = (code: string) => `https://flagcdn.com/w20/${code === "UK" ? "gb" : code.toLowerCase()}.png`;
 const MARKETPLACES: { code: string; name: string }[] = [
   { code: "US", name: "美国" },
   { code: "UK", name: "英国" },

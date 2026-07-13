@@ -158,7 +158,7 @@ export default function TrendChart({ series, height = 200 }: { series: TrendSeri
             const y = T + PH - t * PH;
             return (
               <g key={i}>
-                <line x1={L} x2={L + PW} y1={y} y2={y} stroke="rgba(255,255,255,.06)" strokeWidth="1" />
+                <line x1={L} x2={L + PW} y1={y} y2={y} stroke="var(--b)" strokeWidth="1" />
                 <text x={L - 3} y={y + 3} fill={leftColor} fillOpacity="0.7" fontSize="8.5" fontFamily="sans-serif" textAnchor="end">
                   {sn((axMax["left"] || 1) * t)}
                 </text>
@@ -188,7 +188,7 @@ export default function TrendChart({ series, height = 200 }: { series: TrendSeri
           {/* hover guide + dots */}
           {hover != null && (
             <g>
-              <line x1={hoverX} x2={hoverX} y1={T} y2={T + PH} stroke="rgba(255,255,255,.25)" strokeWidth="1" strokeDasharray="3 3" />
+              <line x1={hoverX} x2={hoverX} y1={T} y2={T + PH} stroke="var(--t3)" strokeWidth="1" strokeDasharray="3 3" />
               {rendered.map(({ s, si, pts }) => {
                 const ip = interpAt(pts, hoverX);
                 return ip ? <circle key={si} cx={hoverX} cy={ip.y} r="3.4" fill={s.color} stroke="var(--bg2)" strokeWidth="1.5" /> : null;
@@ -199,11 +199,11 @@ export default function TrendChart({ series, height = 200 }: { series: TrendSeri
           {/* x labels: date + weekday (weekend highlighted) */}
           {xLabels.map(({ i, d }) => (
             <g key={i}>
-              <text x={xAt(i)} y={height - 14} fill="rgba(200,200,200,.42)" fontSize="8.5" fontFamily="sans-serif"
+              <text x={xAt(i)} y={height - 14} fill="var(--t3)" fontSize="8.5" fontFamily="sans-serif"
                 textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}>{d.length >= 10 ? d.slice(5) : d}</text>
               {weekday(d) && (
                 <text x={xAt(i)} y={height - 3} fontSize="8" fontFamily="sans-serif"
-                  fill={isWeekend(d) ? "#f59e0b" : "rgba(200,200,200,.32)"}
+                  fill={isWeekend(d) ? "var(--amber)" : "var(--t3)"}
                   textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}>{weekday(d)}</text>
               )}
             </g>
