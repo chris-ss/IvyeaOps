@@ -85,30 +85,53 @@ async def _materialise_refs(ref_urls: list[str]) -> list[str]:
     return materialised
 
 
-def _fidelity_preamble(prompt: str, ref_count: int, reference_mode: str) -> str:
-    """Deterministic product-fidelity preamble: the per-slot prompt is LLM-written
-    and may drift, so we always prepend a hard "reproduce the real product exactly"
-    instruction whenever reference photos are attached. This is the main lever for
-    keeping the generated product consistent with the user's real product."""
+def _fidelity_preamble(prompt: str, ref_count: int, reference_mode: str,
+                       presence: str = "supporting", product_scale: float = 0.32,
+                       include_accessories: bool = False) -> str:
+    """Deterministic product-fidelity preamble, graded by product presence.
+
+    - hero/supporting：完整保真锁定，但默认只锁主产品本体——参考图常是"产品+
+      配件"的捆绑白底图，老版本连 accessories and quantity 一起锁导致 SD 卡、
+      数据线漂浮在每张图里；只有 in_box 类（include_accessories=True）才要求配件。
+    - environmental：保真 + 明确"产品在画面中很小、场景才是主角"。
+    - absent（ref_count=0）：无参考，直接返回。
+    """
     if not ref_count:
         return prompt
     if reference_mode == "template" and ref_count >= 2:
         return (
             "CRITICAL REFERENCE ROLES — DO NOT MIX THEM. REFERENCE 1 is the ONLY PRODUCT TRUTH: reproduce its "
-            "product identically, including shape, proportions, color, material, controls, ports and included parts. "
+            "product identically, including shape, proportions, color, material, controls and ports. "
             "REFERENCE 2 is ONLY A VISUAL TEMPLATE: reuse its content hierarchy, shot category, camera/view type, "
             "subject scale, negative-space map and design density, but do not copy its product identity, brand, logo, "
             "written text, person identity or exact pixels. Replace the template's product with REFERENCE 1. "
-            "Create one coherent commercial photograph with believable perspective, contact, shadow and lighting. "
-            "Render no words, letters, numbers, badges, diagrams or watermarks; typography is added later.\n\n"
+            "Create one coherent commercial image with believable perspective, contact, shadow and lighting.\n\n"
         ) + prompt
+    accessory_rule = (
+        "Include every item that belongs to the purchased set exactly as shown. "
+        if include_accessories else
+        "Reproduce ONLY the primary product unit. If the reference photo is a bundle shot, IGNORE the loose extras "
+        "(memory cards, cables, straps, manuals, packaging) — do NOT carry them into this scene. "
+    )
+    scale_rule = ""
+    if presence == "environmental":
+        scale_rule = (
+            f"In this composition the product intentionally appears SMALL — roughly {max(5, int(product_scale * 100))}% "
+            "of the frame, naturally placed in a believable real scene. The environment and the story dominate; "
+            "do not enlarge the product into a hero close-up. "
+        )
+    elif presence == "supporting":
+        scale_rule = (
+            f"The product shares the stage, occupying roughly {int(product_scale * 100)}% of the frame as one element "
+            "of a designed composition — not a full-frame hero close-up. "
+        )
     return (
         "CRITICAL — IMMUTABLE PRODUCT TRUTH: REFERENCE IMAGE 1 shows the EXACT sellable product. "
         "Reproduce it identically: same silhouette, geometry, proportions, colors, color blocking, materials, "
-        "surface finish, seams, openings, lenses, controls, ports, logos, labels, printed product markings, "
-        "accessories and quantity. Change ONLY the environment, camera, composition, lighting, supporting graphic "
-        "design and the exact artwork copy explicitly requested by the prompt. "
-        "Do NOT redesign, recolor, relabel, simplify, crop away, add or remove any product part. "
+        "surface finish, seams, openings, lenses, controls, ports, logos, labels and printed product markings. "
+        f"{accessory_rule}{scale_rule}"
+        "Change ONLY the environment, camera, composition, lighting, supporting graphic design and the exact "
+        "artwork copy explicitly requested by the prompt. Do NOT redesign, recolor, relabel or simplify the product. "
         "When the prompt bans text, that means no ADDED marketing text; existing markings on the reference product "
         "must remain unchanged. If a requested composition conflicts with product fidelity, preserve the product.\n\n"
     ) + prompt
@@ -212,14 +235,22 @@ async def _await_generation(project_id: str, task_id: str, size: str,
 
 async def generate_image_core(project_id: str, prompt: str, slot: str, size: str,
                               ref_urls: list[str], reference_mode: str = "product",
-                              on_tick=None) -> dict:
-    """一次完整生成：物化参考 → 保真前置 → 提交 → 轮询 → 规范化。"""
+                              on_tick=None, presence: str = "supporting",
+                              product_scale: float = 0.32,
+                              include_accessories: bool = False) -> dict:
+    """一次完整生成：物化参考 → 按 presence 分级保真前置 → 提交 → 轮询 → 规范化。
+
+    presence="absent" 时调用方传空 ref_urls —— 无参考纯 prompt 生成（成果样片/
+    对比/规格面板等产品缺席画面）。
+    """
     refs = await _materialise_refs(ref_urls)
     if reference_mode != "template":
         # Direct studio generation has one immutable product truth. Multiple
         # angles/competitor images encourage the model to blend identities.
         refs = refs[:1]
-    full_prompt = _fidelity_preamble(prompt, len(refs), reference_mode)
+    full_prompt = _fidelity_preamble(prompt, len(refs), reference_mode,
+                                     presence=presence, product_scale=product_scale,
+                                     include_accessories=include_accessories)
     task_id = await _submit_generation(full_prompt, size, refs, slot)
     return await _await_generation(project_id, task_id, size, on_tick=on_tick)
 
@@ -261,9 +292,20 @@ async def _render_card(project_id: str, plan: dict, index: int, deliverable: str
     if index < 0 or index >= len(images):
         raise HTTPException(400, f"分镜序号越界：{index}")
     image = images[index]
+    presence = str(image.get("product_presence")
+                   or ("absent" if image.get("show_product") is False else "supporting"))
     product_source = str(image.get("product_source_url") or plan.get("product_source_url") or "")
-    if not product_source:
+    if presence == "absent":
+        product_source = ""  # 产品缺席画面：无参考纯 prompt 生成
+    elif not product_source:
         raise HTTPException(400, f"「{image.get('role') or index + 1}」未找到产品真值素材，请先上传产品图或采集可用主图")
+    template_url = str(image.get("template_url") or "")
+    # 双参考通路：产品真值 + 竞品版式模板（逆向学习绑定时才有）
+    ref_urls = ([product_source, template_url] if product_source and template_url
+                else [product_source] if product_source else [])
+    reference_mode = "template" if (product_source and template_url) else "product"
+    product_scale = float(image.get("product_scale") or 0.32)
+    include_accessories = str(image.get("shot_type")) in ("in_box", "white_main")
     size = str(image.get("size") or ("1464x600" if deliverable == "aplus" else "1600x1600"))
     render_prompt = prompt_override.strip() or str(image.get("render_prompt") or "")
     role = str(image.get("role") or f"第 {index + 1} 张")
@@ -286,17 +328,22 @@ async def _render_card(project_id: str, plan: dict, index: int, deliverable: str
             headline=str(image.get("headline") or ""),
             callout=str(image.get("callout") or ""),
             supporting_text=str(image.get("supporting_text") or ""),
+            subline=str(image.get("subline") or ""),
+            big_number=str(image.get("big_number") or ""),
             proof=public_proof(str(image.get("proof") or "")) or "",
             source_url=product_source,
-            show_product=image.get("show_product") is not False,
+            show_product=presence != "absent",
+            product_presence=presence,
             product_fidelity_anchors=(plan.get("product_profile") or {}).get("fidelity_anchors") or [],
         ))
 
     report(f"{role}：生成中…", 0.05)
     generated = await generate_image_core(
         project_id, render_prompt, str(image.get("slot") or f"slot{index}"), size,
-        [product_source], "product",
+        ref_urls, reference_mode,
         on_tick=lambda t: report(f"{role}：生成中（约 {t * 5} 秒）…", min(0.05 + t * 0.02, 0.5)),
+        presence=presence, product_scale=product_scale,
+        include_accessories=include_accessories,
     )
     base_url = generated["url"]
     final_url = base_url
@@ -309,18 +356,25 @@ async def _render_card(project_id: str, plan: dict, index: int, deliverable: str
     if not render_qa.get("ready") and retry_guidance:
         auto_retry_count = 1
         report(f"{role}：按质检意见自动重画一次…", 0.65)
+        fidelity_note = (
+            "Reference image 1 remains the only immutable product truth. "
+            "Do not solve a fidelity issue by hiding, cropping away, redesigning or replacing the product."
+            if product_source else
+            "The physical product must stay absent from this frame."
+        )
         retry_prompt = (
             f"{render_prompt}\n\nMANDATORY QA REVISION — this is the single repair attempt. "
             "Keep the original buyer question and art direction, but correct every issue below. "
-            "Reference image 1 remains the only immutable product truth. "
-            "Do not solve a fidelity issue by hiding, cropping away, redesigning or replacing the product.\n- "
+            f"{fidelity_note}\n- "
             + "\n- ".join(retry_guidance)
         )
         try:
             retried = await generate_image_core(
                 project_id, retry_prompt, f"{image.get('slot')}_qa_retry", size,
-                [product_source], "product",
+                ref_urls, reference_mode,
                 on_tick=lambda t: report(f"{role}：重画中（约 {t * 5} 秒）…", min(0.65 + t * 0.015, 0.9)),
+                presence=presence, product_scale=product_scale,
+                include_accessories=include_accessories,
             )
             report(f"{role}：重画质检中…", 0.92)
             retry_qa = await review(retried["url"])
@@ -357,11 +411,12 @@ async def _render_card(project_id: str, plan: dict, index: int, deliverable: str
     images[index] = {
         **image,
         "asset_mode": "generate",
-        "show_product": True,
+        "show_product": presence != "absent",
+        "product_presence": presence,
         "requires_source": False,
         "source_url": "",
         "product_source_url": product_source,
-        "template_url": "",
+        "template_url": template_url,
         "layout_blueprint": "",
         "base_url": base_url,
         "final_url": final_url,

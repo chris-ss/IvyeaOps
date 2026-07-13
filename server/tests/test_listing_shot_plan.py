@@ -168,16 +168,18 @@ def test_normalize_main_first_no_text_and_clamp():
     plan = {"style": {"palette": "warm"}, "product_lock": "keep shape", "images": [
         {"slot": "x", "role": "卖点", "callout": "30 Day", "text_on_image": True, "render_prompt": "a"},
         {"callout": "Waterproof", "text_on_image": True, "render_prompt": "b"},
-        {"render_prompt": ""},  # dropped (no prompt)
+        {"render_prompt": ""},  # 无提示词：由编译器按结构字段编译，不再丢弃
     ]}
     n = L._normalize_shot_plan(plan, 0)
-    assert len(n["images"]) == 2
+    assert len(n["images"]) == 3
+    assert all("[SHOT DESIGN]" in img["render_prompt"] for img in n["images"])
     m = n["images"][0]
     assert m["slot"] == "main" and m["role"] == "主图"
     assert m["text_on_image"] is False and m["callout"] is None      # main never carries text
     assert m["asset_mode"] == "generate" and m["requires_source"] is False
     assert m["size"] == "1600x1600"
     assert n["images"][1]["callout"] == "Waterproof" and n["images"][1]["text_on_image"] is True
+    assert n["images"][1]["product_presence"] in ("hero", "supporting", "environmental", "absent")
     # explicit count clamps
     big = {"images": [{"render_prompt": str(i)} for i in range(12)]}
     assert len(L._normalize_shot_plan(big, 5)["images"]) == 5
@@ -418,10 +420,10 @@ def test_plan_image_set_structured(monkeypatch):
         assert res["plan"]["template_images"] == []
         assert "PRODUCT VISUAL IDENTITY" in captured["prompt"]
         assert "STRUCTURED LAYOUT BLUEPRINTS" not in captured["prompt"]
-        assert "fixed blueprint name" in captured["prompt"]
-        assert 'Every module uses asset_mode="generate"' in captured["prompt"]
-        assert "five concrete #RRGGBB colours" in captured["prompt"]
-        assert "Text is not added later by code" in captured["prompt"]
+        assert "RECOMMENDED NARRATIVE SKELETON" in captured["prompt"]
+        assert "product_presence" in captured["prompt"]
+        assert "do not write long render prompts" in captured["prompt"].lower()
+        assert "background #RRGGBB" in captured["prompt"]
         # persisted to shot_plan
         conn = L._db()
         row = conn.execute("SELECT shot_plan FROM listing_projects WHERE id = ?", (pid,)).fetchone()

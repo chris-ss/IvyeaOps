@@ -46,6 +46,12 @@ _DEFAULTS: Dict[str, Any] = {
     # the default deepseek→apimart chain.
     "assistant_provider": "",     # deepseek | anthropic | openai | openrouter | ...
     "assistant_model": "",
+    "assistant_vision_model": "",  # 旧字段：视觉模型曾挂在全局兜底槽下（保留兼容，新配置用 vision_*）
+    # 独立视觉复核槽：Listing 成图质检等看图任务；与全局兜底彻底解耦
+    "vision_provider": "",
+    "vision_model": "",
+    "vision_api_key": "",
+    "vision_base_url": "",
     "assistant_api_key": "",
     "assistant_base_url": "",
     # IvyeaAgent local service — primary embedded agent/runtime. New installs

@@ -22,6 +22,24 @@ const SHOT_LABELS: Record<string, string> = {
   trust: "信任收口",
   aplus_banner: "A+ 品牌首屏",
 };
+const PRESENCE_LABELS: Record<string, string> = {
+  hero: "产品主体",
+  supporting: "产品同台",
+  environmental: "场景叙事",
+  absent: "成果/信息",
+};
+const LAYOUT_LABELS: Record<string, string> = {
+  white_main: "白底主图",
+  poster_hero: "海报卖点",
+  result_showcase: "成果展示",
+  split_compare: "对比拼图",
+  spec_grid: "规格网格",
+  scenario_mosaic: "场景马赛克",
+  human_context: "真人使用",
+  in_box_flatlay: "开箱平铺",
+  detail_macro: "细节微距",
+  trust_close: "信任收口",
+};
 const ZONES: [string, string][] = [
   ["top-left", "左上"], ["top-center", "上中"], ["top-right", "右上"],
   ["center-left", "左中"], ["center-right", "右中"],
@@ -110,8 +128,8 @@ export default function VisualStep({ state }: { state: ListingState }) {
   function patchActive(patch: Partial<PlanImage>, persist = false) {
     if (!plan || !active) return;
     const invalidates = Object.keys(patch).some((key) => [
-      "eyebrow", "headline", "callout", "supporting_text", "proof", "text_on_image",
-      "text_zone", "text_pos", "layout_style", "render_prompt", "size",
+      "eyebrow", "headline", "subline", "big_number", "callout", "supporting_text", "proof", "text_on_image",
+      "text_zone", "text_pos", "layout_style", "layout", "render_prompt", "size",
     ].includes(key));
     const reviewOnly = Object.keys(patch).every((key) => key === "human_reviewed");
     const next: Plan = {
@@ -308,6 +326,12 @@ export default function VisualStep({ state }: { state: ListingState }) {
         </div>
       ) : (
         <>
+          {plan.planner === "fallback" && (
+            <div className="lst-callout warn">
+              这套方案是 <strong>AI 策划失败后的兜底模板</strong>（按内置精品叙事骨架生成，可编辑可生成）。
+              建议点「重新策划」再试一次拿到针对本品的定制方案。
+            </div>
+          )}
           <div className="vs-strategy-strip">
             <div><span>套图叙事</span><strong>{plan.story || "按购买决策顺序逐张解决疑虑"}</strong></div>
             <div><span>产品视觉身份</span><strong>{[
@@ -375,6 +399,10 @@ export default function VisualStep({ state }: { state: ListingState }) {
                       </div>
                       <div className="vs-shot-body">
                         <div className="vs-shot-title"><strong>{image.role}</strong><Pill>{SHOT_LABELS[image.shot_type] || image.shot_type}</Pill></div>
+                        <div className="vs-card-meta">
+                          {image.layout && <Pill>{LAYOUT_LABELS[image.layout] || image.layout}</Pill>}
+                          {image.product_presence && <Pill tone={image.product_presence === "hero" ? "neutral" : "success"}>{PRESENCE_LABELS[image.product_presence] || image.product_presence}</Pill>}
+                        </div>
                         <p>{image.buyer_question || image.selling_point || "待补充购买问题"}</p>
                         <div className="vs-card-meta">
                           <Pill tone={bound ? "success" : "warning"}>{bound ? "产品真值已绑定" : "缺少产品真值"}</Pill>
@@ -445,6 +473,12 @@ export default function VisualStep({ state }: { state: ListingState }) {
                     <label><span>主标题 <em>{(active.headline || "").length}/42</em></span><input value={active.headline || ""} maxLength={42}
                       onChange={(e) => patchActive({ headline: e.target.value })}
                       onBlur={(e) => patchActive({ headline: e.target.value }, true)} /></label>
+                    <label><span>副标题一行 <em>{(active.subline || "").length}/110</em></span><input value={active.subline || ""} maxLength={110}
+                      onChange={(e) => patchActive({ subline: e.target.value })}
+                      onBlur={(e) => patchActive({ subline: e.target.value }, true)} /></label>
+                    <label><span>大数字锚（如 0.1s / 36MP / IP66）</span><input value={active.big_number || ""} maxLength={16}
+                      onChange={(e) => patchActive({ big_number: e.target.value })}
+                      onBlur={(e) => patchActive({ big_number: e.target.value }, true)} /></label>
                     <label><span>短标注（可选）</span><input value={active.callout || ""} maxLength={32}
                       onChange={(e) => patchActive({ callout: e.target.value })}
                       onBlur={(e) => patchActive({ callout: e.target.value }, true)} /></label>
@@ -483,12 +517,16 @@ export default function VisualStep({ state }: { state: ListingState }) {
                   {active.final_url && (
                     <label className={`vs-review-check ${active.human_reviewed ? "checked" : ""}`}>
                       <input type="checkbox" checked={!!active.human_reviewed}
-                        disabled={!active.render_qa?.ready}
+                        disabled={!active.render_qa?.ready && !active.render_qa?.manual_visual_review_required}
                         onChange={(e) => patchActive({ human_reviewed: e.target.checked }, true)} />
                       <ShieldCheck size={17} />
                       <span><strong>我已核对产品一致性</strong><small>{active.render_qa?.ready
-                        ? "仅人工确认后，这张图才进入可交付状态"
-                        : "必须先通过成图质检，当前不可勾选"}</small></span>
+                        ? active.render_qa?.manual_visual_review_required
+                          ? "机审未运行——请务必人工核对产品外观、文字拼写后再勾选"
+                          : "仅人工确认后，这张图才进入可交付状态"
+                        : active.render_qa?.manual_visual_review_required
+                          ? "机审不可用，人工核对通过即可交付"
+                          : "必须先通过成图质检，当前不可勾选"}</small></span>
                     </label>
                   )}
                 </div>

@@ -181,7 +181,7 @@ async def run_analyze(project_id: str, handle: Optional[JobHandle] = None) -> di
     fallback_used = False
     warning = None
     try:
-        content = await _call_ai(prompt, max_tokens=3000)
+        content = await _call_ai(prompt)
     except HTTPException as e:
         structured = _fallback_analysis(row, scrape_data, {})
         content = json.dumps(structured, ensure_ascii=False)
