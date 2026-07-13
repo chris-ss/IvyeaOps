@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { MarkdownReport, relativeTime } from "../../../lib/reportFormat";
+import { MarkdownReport, relativeTime, triggerDownload } from "../../../lib/reportFormat";
+import { KeywordResult, CompetitorResult, TrafficResult } from "./resultViews";
 
 interface Entry {
   id: string;
@@ -11,6 +12,21 @@ interface Entry {
   elapsed_s: number;
   ts: number;
   report: string;
+}
+
+// 结构化条目（关键词/竞品/流量面板保存的原始 JSON 结果）→ 解析出数据；
+// 解析不出（agent 生成的 Markdown 叙述报告）返回 null 走 MarkdownReport。
+function parseStructured(e: Entry): any | null {
+  if (!["keyword", "competitor", "traffic"].includes(e.tool)) return null;
+  const text = (e.report || "").trim();
+  if (!text.startsWith("{")) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function StructuredView({ entry, data }: { entry: Entry; data: any }) {
+  if (entry.tool === "keyword") return <KeywordResult data={data} keyword={entry.query} />;
+  if (entry.tool === "competitor") return <CompetitorResult data={data} asin={entry.query} />;
+  return <TrafficResult data={data} asin={entry.query} />;
 }
 
 export default function DeepHistory() {
@@ -38,17 +54,35 @@ export default function DeepHistory() {
   };
 
   if (active) {
+    const structured = parseStructured(active);
+    const slug = `${active.tool}-${active.query}-${active.country}`.replace(/[^\w一-龥.-]+/g, "_");
     return (
       <div>
-        <button className="tbtn" style={{ marginBottom: 12, fontSize: 11 }} onClick={() => setActive(null)}>
-          ← 返回历史
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <button className="tbtn" style={{ fontSize: 11 }} onClick={() => setActive(null)}>
+            ← 返回历史
+          </button>
+          <button
+            className="tbtn"
+            style={{ fontSize: 10, marginLeft: "auto" }}
+            onClick={() =>
+              structured
+                ? triggerDownload(JSON.stringify(structured, null, 2), `${slug}.json`, "application/json")
+                : triggerDownload(active.report, `${slug}.md`, "text/markdown")}
+          >
+            ⬇ 下载 {structured ? "JSON" : "Markdown"}
+          </button>
+        </div>
         <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8 }}>
           {active.title} · {active.query} · {active.country} · {relativeTime(active.ts * 1000)}
         </div>
-        <div className="market-report-body">
-          <MarkdownReport text={active.report} />
-        </div>
+        {structured ? (
+          <StructuredView entry={active} data={structured} />
+        ) : (
+          <div className="market-report-body">
+            <MarkdownReport text={active.report} />
+          </div>
+        )}
       </div>
     );
   }
@@ -57,8 +91,8 @@ export default function DeepHistory() {
   if (rows.length === 0)
     return (
       <div style={{ color: "var(--t3)", fontSize: 11, lineHeight: 1.7 }}>
-        暂无分析历史。在右下角 IvyeaAgent 里用自然语言说，例如「做一个 B0XXXX 的流量异动诊断」，
-        生成的报告会保存到这里。
+        暂无分析历史。在本页任一分析工具跑出的结果、或右下角 IvyeaAgent
+        生成的分析报告，都会自动保存到这里。
       </div>
     );
 

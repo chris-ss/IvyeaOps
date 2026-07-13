@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { competitorLookup } from "../../../api/deepAnalysis";
 import AnalysisSkeleton from "./AnalysisSkeleton";
 import SheetSelect from "../../../components/SheetSelect";
 import { marketplaceOptions } from "../../../lib/marketplaces";
+import { triggerDownload } from "../../../lib/reportFormat";
+import { CompetitorResult } from "./resultViews";
 
 const MARKETPLACES = ["US", "UK", "DE", "CA", "JP", "FR", "ES", "IT", "MX", "AU"];
 
@@ -12,19 +14,23 @@ export default function CompetitorLookup() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<any>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const run = async () => {
     if (!asin.trim() || loading) return;
     setLoading(true);
     setError("");
     setResult(null);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      const res = await competitorLookup({ asin: asin.trim(), country });
+      const res = await competitorLookup({ asin: asin.trim(), country }, ctrl.signal);
       setResult(res.data);
     } catch (e: any) {
-      setError(e?.message || "请求失败");
+      if (e?.name !== "CanceledError" && e?.code !== "ERR_CANCELED") setError(e?.message || "请求失败");
     } finally {
       setLoading(false);
+      abortRef.current = null;
     }
   };
 
@@ -46,6 +52,11 @@ export default function CompetitorLookup() {
         <button className="market-btn market-btn-submit" onClick={run} disabled={loading || !asin.trim()}>
           {loading ? "反查中…" : "开始反查"}
         </button>
+        {loading && (
+          <button className="tbtn" onClick={() => abortRef.current?.abort()} style={{ fontSize: 10 }}>
+            停止
+          </button>
+        )}
       </div>
 
       {error && <div className="market-error" style={{ marginTop: 10 }}>{error}</div>}
@@ -53,98 +64,16 @@ export default function CompetitorLookup() {
 
       {result && (
         <div className="wb-enter" style={{ marginTop: 14 }}>
-          <div className="card" style={{ background: "var(--bg2)" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10 }}>
-              「{asin}」关键词信号分析
-            </div>
-
-            {/* Traffic Terms */}
-            {result.traffic_terms && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>流量关键词</div>
-                {typeof result.traffic_terms === "string" ? (
-                  <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>{result.traffic_terms}</div>
-                ) : Array.isArray(result.traffic_terms) ? (
-                  <div style={{ fontSize: 10 }}>
-                    {result.traffic_terms.slice(0, 20).map((t: any, i: number) => (
-                      <div key={i} style={{ padding: "3px 6px", background: "var(--bg3)", borderRadius: 4, marginBottom: 3 }}>
-                        {typeof t === "string" ? t : t.keyword || t.关键词 || JSON.stringify(t).substring(0, 50)}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <pre style={{ fontSize: 9, maxHeight: 200, overflow: "auto", padding: 8, background: "var(--bg)", borderRadius: 4 }}>
-                    {JSON.stringify(result.traffic_terms, null, 2)}
-                  </pre>
-                )}
-              </div>
-            )}
-
-            {/* Competitor Keywords */}
-            {result.competitor_keywords && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>竞品关键词</div>
-                {typeof result.competitor_keywords === "string" ? (
-                  <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>{result.competitor_keywords}</div>
-                ) : Array.isArray(result.competitor_keywords) ? (
-                  <div style={{ fontSize: 10, overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ borderBottom: "1px solid var(--b)" }}>
-                          <th style={{ textAlign: "left", padding: "4px 6px" }}>关键词</th>
-                          <th style={{ textAlign: "right", padding: "4px 6px" }}>排名</th>
-                          <th style={{ textAlign: "right", padding: "4px 6px" }}>流量占比</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.competitor_keywords.slice(0, 15).map((kw: any, i: number) => (
-                          <tr key={i} style={{ borderBottom: "1px solid var(--line)" }}>
-                            <td style={{ padding: "4px 6px", fontFamily: "monospace" }}>
-                              {typeof kw === "string" ? kw : kw.keyword || kw.关键词 || "-"}
-                            </td>
-                            <td style={{ padding: "4px 6px", textAlign: "right" }}>
-                              {typeof kw === "object" ? (kw.rank || kw.排名 || "-") : "-"}
-                            </td>
-                            <td style={{ padding: "4px 6px", textAlign: "right" }}>
-                              {typeof kw === "object" ? (kw.share || kw.流量占比 || "-") : "-"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <pre style={{ fontSize: 9, maxHeight: 200, overflow: "auto", padding: 8, background: "var(--bg)", borderRadius: 4 }}>
-                    {JSON.stringify(result.competitor_keywords, null, 2)}
-                  </pre>
-                )}
-              </div>
-            )}
-
-            {/* Product Detail */}
-            {result.product_detail && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--t2)", marginBottom: 6 }}>产品信息</div>
-                <div style={{ fontSize: 10, lineHeight: 1.6, color: "var(--t)" }}>
-                  {typeof result.product_detail === "string" ? result.product_detail.substring(0, 500) : JSON.stringify(result.product_detail).substring(0, 500)}
-                </div>
-              </div>
-            )}
-
-            {/* Errors */}
-            {result.errors?.length > 0 && (
-              <div style={{ marginBottom: 10, fontSize: 10, color: "var(--amber)" }}>
-                {result.errors.map((e: string, i: number) => <div key={i}>⚠ {e}</div>)}
-              </div>
-            )}
-
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ fontSize: 10, color: "var(--t3)", cursor: "pointer" }}>查看原始 JSON</summary>
-              <pre style={{ fontSize: 9, maxHeight: 300, overflow: "auto", padding: 8, background: "var(--bg)", borderRadius: 4, marginTop: 4 }}>
-                {JSON.stringify(result, null, 2)}
-              </pre>
-            </details>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+            <button
+              className="tbtn"
+              style={{ fontSize: 10 }}
+              onClick={() => triggerDownload(JSON.stringify(result, null, 2), `competitor-${asin.trim()}-${country}.json`, "application/json")}
+            >
+              ⬇ 下载 JSON
+            </button>
           </div>
+          <CompetitorResult data={result} asin={asin} />
         </div>
       )}
     </div>

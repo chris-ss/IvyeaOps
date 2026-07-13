@@ -4,6 +4,7 @@ import AnalysisSkeleton from "./AnalysisSkeleton";
 import SheetSelect from "../../../components/SheetSelect";
 import { marketplaceOptions } from "../../../lib/marketplaces";
 import DeepAnalysisPanel, { type DeepAnalysisType } from "../../../components/DeepAnalysisPanel";
+import { MarkdownReport, triggerDownload } from "../../../lib/reportFormat";
 
 const MARKETPLACES = ["US", "UK", "DE", "CA", "JP"];
 
@@ -93,12 +94,21 @@ export default function ReviewClustering() {
 
       {output && (
         <div className="wb-enter" style={{ marginTop: 14 }}>
-          {provider && <div style={{ fontSize: 9, color: "var(--t3)", marginBottom: 4 }}>via {provider}</div>}
-          <div
-            className="card"
-            style={{ background: "var(--bg2)", fontSize: 11, lineHeight: 1.7, whiteSpace: "pre-wrap" }}
-            dangerouslySetInnerHTML={{ __html: simpleMarkdown(output) }}
-          />
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 4 }}>
+            {provider && <span style={{ fontSize: 9, color: "var(--t3)" }}>via {provider}</span>}
+            {!loading && (
+              <button
+                className="tbtn"
+                style={{ fontSize: 10, marginLeft: "auto" }}
+                onClick={() => triggerDownload(output, `reviews-${asin.trim()}-${country}.md`, "text/markdown")}
+              >
+                ⬇ 下载 Markdown
+              </button>
+            )}
+          </div>
+          <div className="card market-report-body" style={{ background: "var(--bg2)" }}>
+            <MarkdownReport text={output} />
+          </div>
         </div>
       )}
 
@@ -107,19 +117,4 @@ export default function ReviewClustering() {
       )}
     </div>
   );
-}
-
-/** Minimal markdown → HTML for streaming display */
-function simpleMarkdown(md: string): string {
-  return md
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/^### (.+)$/gm, '<div style="font-size:13px;font-weight:700;margin:10px 0 4px">$1</div>')
-    .replace(/^## (.+)$/gm, '<div style="font-size:14px;font-weight:700;margin:12px 0 6px">$1</div>')
-    .replace(/^# (.+)$/gm, '<div style="font-size:15px;font-weight:700;margin:14px 0 8px">$1</div>')
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/`([^`]+)`/g, '<code style="background:var(--bg3);padding:1px 4px;border-radius:2px;font-size:10px">$1</code>')
-    .replace(/\n/g, "<br>");
 }

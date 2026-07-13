@@ -31,18 +31,18 @@ export interface ListingRewriteReq {
   style?: string;
 }
 
-export async function keywordCompetition(req: KeywordReq) {
-  const { data } = await api.post("/deep-analysis/keyword", req);
+export async function keywordCompetition(req: KeywordReq, signal?: AbortSignal) {
+  const { data } = await api.post("/deep-analysis/keyword", req, { signal });
   return data;
 }
 
-export async function competitorLookup(req: CompetitorReq) {
-  const { data } = await api.post("/deep-analysis/competitor", req);
+export async function competitorLookup(req: CompetitorReq, signal?: AbortSignal) {
+  const { data } = await api.post("/deep-analysis/competitor", req, { signal });
   return data;
 }
 
-export async function trafficDiagnosis(req: TrafficReq) {
-  const { data } = await api.post("/deep-analysis/traffic", req);
+export async function trafficDiagnosis(req: TrafficReq, signal?: AbortSignal) {
+  const { data } = await api.post("/deep-analysis/traffic", req, { signal });
   return data;
 }
 
