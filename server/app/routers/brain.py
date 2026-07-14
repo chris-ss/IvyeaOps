@@ -205,33 +205,22 @@ def _ia_upload_bytes(
     return _ia_upload_result(ia.knowledge_upload(payload), preview=preview)
 
 
-async def _ia_ingest_analysis(text: str) -> dict[str, Any]:
-    """Auto-analyze pasted/cleaned text into a title/tags/summary via the unified
-    text chain (IvyeaAgent → global fallback → …), with a rules-based fallback so
-    ingest never depends on the model being reachable."""
-    from app.services import ai_synthesis_service
+_ANALYSIS_FIELDS_SPEC = (
+    "- title: 中文短标题，最多 40 字\n"
+    "- directory: inbox / amazon/ads / amazon/products / amazon/messages / "
+    "amazon/suppliers / amazon/market / compliance 之一\n"
+    "- tags: 3-6 个短标签组成的数组\n"
+    "- summary: 80-160 字中文摘要\n"
+    "- content_type: note / amazon_ads / amazon_product / buyer_message / "
+    "supplier_note / market_note / compliance\n"
+    "- confidence: 0 到 1 的数字"
+)
 
-    clean = (text or "").strip()
-    prompt = (
-        "你是私有知识库的入库分类器。只返回严格 JSON，不要解释、不要用代码块。\n"
-        "分析下面的文本，生成字段：\n"
-        "- title: 中文短标题，最多 40 字\n"
-        "- directory: inbox / amazon/ads / amazon/products / amazon/messages / "
-        "amazon/suppliers / amazon/market / compliance 之一\n"
-        "- tags: 3-6 个短标签组成的数组\n"
-        "- summary: 80-160 字中文摘要\n"
-        "- content_type: note / amazon_ads / amazon_product / buyer_message / "
-        "supplier_note / market_note / compliance\n"
-        "- confidence: 0 到 1 的数字\n\n"
-        f"【待入库文本】\n{clean[:12000]}"
-    )
-    obj: dict[str, Any] = {}
-    try:
-        raw = (await ai_synthesis_service.generate_text(prompt)).strip()
-        obj = bc._extract_json_object(raw) or {}
-    except Exception:  # noqa: BLE001 — degrade to rules fallback below
-        obj = {}
-    fb = bc._fallback_ingest_analysis(clean)
+
+def _analysis_from_obj(obj: dict[str, Any], content: str) -> dict[str, Any]:
+    """Merge a (possibly empty) model-produced analysis JSON with a rules-based
+    fallback so every field is always present and sane."""
+    fb = bc._fallback_ingest_analysis((content or "").strip())
     tags = obj.get("tags")
     if not isinstance(tags, list) or not tags:
         tags = fb["tags"]
@@ -248,6 +237,28 @@ async def _ia_ingest_analysis(text: str) -> dict[str, Any]:
         "confidence": max(0.0, min(1.0, confidence)),
         "source": "ivyea-agent" if obj else "rules_fallback",
     }
+
+
+async def _ia_ingest_analysis(text: str) -> dict[str, Any]:
+    """Auto-analyze pasted/cleaned text into a title/tags/summary via the unified
+    text chain (IvyeaAgent → global fallback → …), with a rules-based fallback so
+    ingest never depends on the model being reachable."""
+    from app.services import ai_synthesis_service
+
+    clean = (text or "").strip()
+    prompt = (
+        "你是私有知识库的入库分类器。只返回严格 JSON，不要解释、不要用代码块。\n"
+        "分析下面的文本，生成字段：\n"
+        f"{_ANALYSIS_FIELDS_SPEC}\n\n"
+        f"【待入库文本】\n{clean[:8000]}"
+    )
+    obj: dict[str, Any] = {}
+    try:
+        raw = (await ai_synthesis_service.generate_text(prompt)).strip()
+        obj = bc._extract_json_object(raw) or {}
+    except Exception:  # noqa: BLE001 — degrade to rules fallback below
+        obj = {}
+    return _analysis_from_obj(obj, clean)
 
 
 async def _ia_ingest_analyzed(text: str, analysis: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -466,34 +477,46 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
     if len(text) < 30:
         raise HTTPException(400, "页面内容为空或无法解析，请换一个链接或改用「粘贴文本」。")
 
-    # Truncate for AI processing
-    raw_text = text[:12000]
+    # Truncate for AI processing (smaller window = faster single round-trip).
+    raw_text = text[:8000]
 
-    # Clean the scrape into Markdown through the unified text chain (IvyeaAgent →
-    # global fallback → DeepSeek …). This replaces the old hard-wired Codex CLI
-    # that failed with an opaque "session_id: …" error whenever that single
-    # provider was down. Cleaning asks for plain Markdown (not JSON) — reliable —
-    # and classification is a separate JSON step in _ia_ingest_analyzed.
+    # ONE round-trip through the unified text chain (IvyeaAgent → global fallback
+    # → DeepSeek …): clean the scrape into Markdown, then a ```json``` metadata
+    # block for classification. A single call keeps us well under the client
+    # timeout (two sequential model calls previously blew past 180s on real
+    # pages). Markdown stays free-text (reliable); only the small trailing block
+    # is JSON. This replaced the old hard-wired Codex CLI that failed with an
+    # opaque "session_id: …" error whenever that one provider was down.
     from app.services import ai_synthesis_service
 
-    clean_prompt = (
-        "你是内容整理专家。把下面从网页抓取的原始文本整理成一篇干净、排版良好的 Markdown 正文。\n"
-        "要求：只保留正文，去掉导航/广告/页脚/cookie 提示；用 #/##/### 分层；去重；"
-        "列表用 Markdown 列表；直接输出 Markdown，不要任何解释或前言；保持原文语言。\n\n"
+    prompt = (
+        "你是网页正文整理 + 知识库分类器。先输出整理后的干净 Markdown 正文"
+        "（只保留正文，去掉导航/广告/页脚/cookie 提示，用 #/##/### 分层，保持原文语言），"
+        "然后另起一行输出一个用 ```json 和 ``` 包裹的元数据块，字段：\n"
+        f"{_ANALYSIS_FIELDS_SPEC}\n"
+        "严格顺序：Markdown 正文在前，最后是 ```json{...}``` 元数据，不要其它解释。\n\n"
         f"来源URL: {body.url}\n\n原始文本：\n{raw_text}"
     )
-    markdown = ""
+    raw_out = ""
     try:
-        markdown = (await ai_synthesis_service.generate_text(clean_prompt)).strip()
+        raw_out = (await ai_synthesis_service.generate_text(prompt)).strip()
     except Exception:  # noqa: BLE001 — fall back to raw extracted text below
-        markdown = ""
+        raw_out = ""
 
-    # Never hard-fail once we actually have page content: if the AI cleaning step
-    # is unavailable or returned nothing, ingest the extracted text as-is.
+    # Split the cleaned Markdown from the trailing JSON metadata block.
+    markdown, obj = "", {}
+    if raw_out:
+        meta = re.search(r"```json\s*(\{.*?\})\s*```", raw_out, re.DOTALL)
+        if meta:
+            markdown = raw_out[: meta.start()].strip()
+            obj = bc._extract_json_object(meta.group(1)) or {}
+        else:
+            markdown = raw_out  # model ignored the metadata format; keep the body
+
+    # Never hard-fail once we actually have page content: if the AI step is
+    # unavailable or returned nothing, ingest the extracted text as-is.
     content = markdown or raw_text
-    # Analyze the clean content (not the "> 来源" header, which would otherwise
-    # leak into a rules-fallback title); store the header-prefixed body.
-    analysis = await _ia_ingest_analysis(content)
+    analysis = _analysis_from_obj(obj, content)
     body_text = f"> 来源：{body.url}\n\n{content}"
 
     # Ingest through the IvyeaAgent front door with auto title/tags/summary

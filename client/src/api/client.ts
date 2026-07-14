@@ -793,7 +793,7 @@ export async function brainIngestUrl(url: string, importAfterSave = true) {
   const { data } = await api.post<BrainUploadResponse>(
     "/brain/ingest/url",
     { url, import_after_save: importAfterSave },
-    { timeout: 180000 },
+    { timeout: 300000 },  // fetch + one model round-trip can run long on big pages
   );
   return data;
 }
