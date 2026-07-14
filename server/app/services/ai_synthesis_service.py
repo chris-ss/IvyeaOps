@@ -1105,7 +1105,10 @@ async def _stream_ivyea_agent(prompt: str) -> AsyncGenerator[str, None]:
         "message": prompt,
         "max_steps": 8,
         "plan_mode": True,
-        "persist": True,
+        # persist=False — this is IvyeaOps' internal text engine (report/analysis/
+        # ingest cleaning), not a user chat. Persisting would spam the shared
+        # agent session history that the dock and workbench chat now both read.
+        "persist": False,
         "inject_retrieval": True,
         "system": (
             "你正在作为 IvyeaOps 的内置文本生成引擎。"

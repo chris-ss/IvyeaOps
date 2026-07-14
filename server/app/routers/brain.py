@@ -146,7 +146,7 @@ def _strip_source_header(text: str) -> str:
     return text
 
 
-def _ia_upload_result(resp: dict[str, Any]) -> dict[str, Any]:
+def _ia_upload_result(resp: dict[str, Any], preview: str = "") -> dict[str, Any]:
     # With confirm=True the applied card lands under resp["apply"]["card"];
     # otherwise only a draft/upload record exists.
     apply = resp.get("apply") or {}
@@ -154,27 +154,128 @@ def _ia_upload_result(resp: dict[str, Any]) -> dict[str, Any]:
     up = resp.get("upload") or {}
     card_id = card.get("id") or ""
     saved = card.get("path") or card_id or up.get("extracted_path") or "已保存到 IvyeaAgent 知识库"
-    return {"saved_path": saved, "import_status": "ok", "card_id": card_id, "source": "ivyea-agent"}
+    # The applied card only carries a body_hash, not the body, so fall back to the
+    # source text the caller ingested for the preview/summary.
+    body = str(card.get("body") or preview or "")
+    # Align with BrainUploadResponse so the RESULT panel renders (the frontend
+    # reads warnings/markdown_preview/analysis unconditionally).
+    return {
+        "saved_path": saved,
+        "import_status": "ok",
+        "card_id": card_id,
+        "warnings": list(apply.get("warnings") or []),
+        "markdown_preview": body[:4000],
+        "analysis": {
+            "title": card.get("title") or "",
+            "directory": card.get("category") or "inbox",
+            "tags": card.get("tags") or [],
+            "summary": (card.get("snippet") or body[:200]),
+            "content_type": card.get("content_type") or "note",
+            "confidence": 1.0,
+            "source": "ivyea-agent",
+        },
+        "source": "ivyea-agent",
+    }
 
 
-def _ia_upload_bytes(filename: str, data: bytes, title: str | None, category: str | None) -> dict[str, Any]:
+def _ia_upload_bytes(
+    filename: str,
+    data: bytes,
+    title: str | None,
+    category: str | None = None,
+    tags: list[str] | None = None,
+    preview: str | None = None,
+) -> dict[str, Any]:
     import base64
+    tag_list = [str(t) for t in (tags or ([category] if category else [])) if str(t).strip()]
     payload = {
         "filename": filename or "upload.txt",
         "content_base64": base64.b64encode(data).decode("ascii"),
         "title": (title or "").strip(),
         "source_type": "user",
-        "tags": [category] if category else [],
+        "tags": tag_list,
         "confirm": True,   # save + apply into the governed knowledge base in one step
         "rebuild": True,
     }
-    return _ia_upload_result(ia.knowledge_upload(payload))
+    if preview is None:
+        try:
+            preview = data.decode("utf-8")  # text uploads; binary (pdf/xlsx) → no preview
+        except UnicodeDecodeError:
+            preview = ""
+    return _ia_upload_result(ia.knowledge_upload(payload), preview=preview)
 
 
-def _ia_ingest_text(text: str) -> dict[str, Any]:
-    first = next((ln.strip().lstrip("# ").strip() for ln in text.splitlines() if ln.strip()), "note")
-    stem = (first[:40] or "note")
-    return _ia_upload_bytes(f"{stem}.md", text.encode("utf-8"), title=first[:80], category="inbox")
+_ANALYSIS_FIELDS_SPEC = (
+    "- title: 中文短标题，最多 40 字\n"
+    "- directory: inbox / amazon/ads / amazon/products / amazon/messages / "
+    "amazon/suppliers / amazon/market / compliance 之一\n"
+    "- tags: 3-6 个短标签组成的数组\n"
+    "- summary: 80-160 字中文摘要\n"
+    "- content_type: note / amazon_ads / amazon_product / buyer_message / "
+    "supplier_note / market_note / compliance\n"
+    "- confidence: 0 到 1 的数字"
+)
+
+
+def _analysis_from_obj(obj: dict[str, Any], content: str) -> dict[str, Any]:
+    """Merge a (possibly empty) model-produced analysis JSON with a rules-based
+    fallback so every field is always present and sane."""
+    fb = bc._fallback_ingest_analysis((content or "").strip())
+    tags = obj.get("tags")
+    if not isinstance(tags, list) or not tags:
+        tags = fb["tags"]
+    try:
+        confidence = float(obj.get("confidence", fb["confidence"]))
+    except (TypeError, ValueError):
+        confidence = fb["confidence"]
+    return {
+        "title": (str(obj.get("title") or "").strip()[:80] or fb["title"]),
+        "directory": (str(obj.get("directory") or "").strip() or fb["directory"]),
+        "tags": [str(t).strip()[:40] for t in tags if str(t).strip()][:6],
+        "summary": (str(obj.get("summary") or "").strip()[:500] or fb["summary"]),
+        "content_type": (str(obj.get("content_type") or "").strip() or fb["content_type"]),
+        "confidence": max(0.0, min(1.0, confidence)),
+        "source": "ivyea-agent" if obj else "rules_fallback",
+    }
+
+
+async def _ia_ingest_analysis(text: str) -> dict[str, Any]:
+    """Auto-analyze pasted/cleaned text into a title/tags/summary via the unified
+    text chain (IvyeaAgent → global fallback → …), with a rules-based fallback so
+    ingest never depends on the model being reachable."""
+    from app.services import ai_synthesis_service
+
+    clean = (text or "").strip()
+    prompt = (
+        "你是私有知识库的入库分类器。只返回严格 JSON，不要解释、不要用代码块。\n"
+        "分析下面的文本，生成字段：\n"
+        f"{_ANALYSIS_FIELDS_SPEC}\n\n"
+        f"【待入库文本】\n{clean[:8000]}"
+    )
+    obj: dict[str, Any] = {}
+    try:
+        raw = (await ai_synthesis_service.generate_text(prompt)).strip()
+        obj = bc._extract_json_object(raw) or {}
+    except Exception:  # noqa: BLE001 — degrade to rules fallback below
+        obj = {}
+    return _analysis_from_obj(obj, clean)
+
+
+async def _ia_ingest_analyzed(text: str, analysis: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Analyze (unless an analysis is provided) then store the text as a governed
+    user card, returning a result the RESULT panel can render."""
+    if analysis is None:
+        analysis = await _ia_ingest_analysis(text)
+    stem = (analysis.get("title") or "note").strip()[:40] or "note"
+    result = _ia_upload_bytes(
+        f"{stem}.md", text.encode("utf-8"),
+        title=analysis.get("title"), tags=analysis.get("tags"), preview=text,
+    )
+    # The AI analysis is richer than what the applied card echoes back — surface it.
+    result["analysis"] = analysis
+    if not result.get("markdown_preview"):
+        result["markdown_preview"] = text[:4000]
+    return result
 
 
 @router.get("/overview")
@@ -334,10 +435,10 @@ def uploads(limit: int = Query(50, ge=1, le=100)) -> dict[str, Any]:
 
 
 @router.post("/ingest/text")
-def ingest_text(body: IngestTextBody) -> dict[str, Any]:
+async def ingest_text(body: IngestTextBody) -> dict[str, Any]:
     if _ivyea_front_door():
         try:
-            return _ia_ingest_text(body.text)
+            return await _ia_ingest_analyzed(body.text)
         except Exception:  # noqa: BLE001 — degrade to legacy GBrain ingest
             pass
     return _handle(bc.ingest_pasted_text, body.text, body.import_after_save)
@@ -348,15 +449,24 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
     """Fetch URL, extract content via AI into clean Markdown, then ingest."""
     import httpx
     import re
-    import subprocess
 
+    # A browser-like UA + Accept headers cut down on the 403 / anti-bot blocks
+    # a bare "IvyeaOps/1.0" agent triggers on many sites.
+    fetch_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(body.url, headers={"User-Agent": "Mozilla/5.0 (compatible; IvyeaOps/1.0)"})
+            resp = await client.get(body.url, headers=fetch_headers)
             resp.raise_for_status()
             html = resp.text
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(400, f"抓取失败：目标站点返回 {e.response.status_code}（可能有反爬限制），请换一个链接或改用「粘贴文本」。")
     except Exception as e:
-        raise HTTPException(400, f"抓取失败: {e}")
+        raise HTTPException(400, f"抓取失败：{e}")
 
     # Basic HTML to text extraction
     html = re.sub(r"<(script|style|noscript|header|footer|nav)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
@@ -365,83 +475,142 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
     text = re.sub(r"[ \t]+", " ", text).strip()
 
     if len(text) < 30:
-        raise HTTPException(400, "页面内容为空或无法解析")
+        raise HTTPException(400, "页面内容为空或无法解析，请换一个链接或改用「粘贴文本」。")
 
-    # Truncate for AI processing
-    raw_text = text[:12000]
+    # Truncate for AI processing (smaller window = faster single round-trip).
+    raw_text = text[:8000]
 
-    # Call AI to reformat into clean Markdown
-    prompt = f"""你是一个内容整理专家。请将以下从网页抓取的原始文本整理成一篇干净、排版良好的 Markdown 文章。
+    # ONE round-trip through the unified text chain (IvyeaAgent → global fallback
+    # → DeepSeek …): clean the scrape into Markdown, then a ```json``` metadata
+    # block for classification. A single call keeps us well under the client
+    # timeout (two sequential model calls previously blew past 180s on real
+    # pages). Markdown stays free-text (reliable); only the small trailing block
+    # is JSON. This replaced the old hard-wired Codex CLI that failed with an
+    # opaque "session_id: …" error whenever that one provider was down.
+    from app.services import ai_synthesis_service
 
-要求：
-1. 只保留文章正文内容，去除所有导航、广告、页脚、cookie提示等无关信息
-2. 用合适的 Markdown 标题层级（#, ##, ###）组织内容结构
-3. 保留关键信息，去除重复和冗余
-4. 如有列表内容用 Markdown 列表格式
-5. 直接输出 Markdown 内容，不要加任何解释或前言
-6. 保持原文语言（中文内容用中文，英文内容用英文）
-
-来源URL: {body.url}
-
-原始文本：
-{raw_text}"""
-
-    markdown = ""
-    errors = []
-
-    # Route through Hermes CLI so we no longer depend on the retired
-    # localhost:8000 kiro gateway.
+    prompt = (
+        "你是网页正文整理 + 知识库分类器。先输出整理后的干净 Markdown 正文"
+        "（只保留正文，去掉导航/广告/页脚/cookie 提示，用 #/##/### 分层，保持原文语言），"
+        "然后另起一行输出一个用 ```json 和 ``` 包裹的元数据块，字段：\n"
+        f"{_ANALYSIS_FIELDS_SPEC}\n"
+        "严格顺序：Markdown 正文在前，最后是 ```json{...}``` 元数据，不要其它解释。\n\n"
+        f"来源URL: {body.url}\n\n原始文本：\n{raw_text}"
+    )
+    raw_out = ""
     try:
-        cmd = [
-            bc._hermes_bin(),
-            "chat",
-            "-q",
-            prompt,
-            "-Q",
-            "--source",
-            "IvyeaOps-web-brain-url-ingest",
-            "--max-turns",
-            "1",
-            "--toolsets",
-            "",
-            "--provider",
-            "openai-codex",
-            "-m",
-            "gpt-5.4",
-        ]
-        # Run async so the URL-ingest (up to 180s) does NOT block the single-worker
-        # event loop — a sync subprocess.run here froze the whole server for the
-        # duration of one request.
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(gb.BRAIN_ROOT),
-            env=bc._hermes_env(),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **no_window_kwargs(),  # no black console flash on Windows
-        )
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=180)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            raise
-        stdout = out.decode("utf-8", "replace")
-        stderr = err.decode("utf-8", "replace")
-        if proc.returncode == 0:
-            markdown = bc._strip_hermes_output(stdout)
+        raw_out = (await ai_synthesis_service.generate_text(prompt)).strip()
+    except Exception:  # noqa: BLE001 — fall back to raw extracted text below
+        raw_out = ""
+
+    # Split the cleaned Markdown from the trailing JSON metadata block.
+    markdown, obj = "", {}
+    if raw_out:
+        meta = re.search(r"```json\s*(\{.*?\})\s*```", raw_out, re.DOTALL)
+        if meta:
+            markdown = raw_out[: meta.start()].strip()
+            obj = bc._extract_json_object(meta.group(1)) or {}
         else:
-            detail = (stderr or stdout or "").strip()[-1200:]
-            errors.append(detail or "Hermes CLI 未知错误")
-    except Exception as e:
-        errors.append(str(e))
+            markdown = raw_out  # model ignored the metadata format; keep the body
 
-    if not markdown:
-        raise HTTPException(502, f"AI整理失败: {'; '.join(errors)}")
+    # Never hard-fail once we actually have page content: if the AI step is
+    # unavailable or returned nothing, ingest the extracted text as-is.
+    content = markdown or raw_text
+    analysis = _analysis_from_obj(obj, content)
+    body_text = f"> 来源：{body.url}\n\n{content}"
 
-    return _handle(bc.ingest_pasted_text, markdown, body.import_after_save)
+    # Ingest through the IvyeaAgent front door with auto title/tags/summary
+    # (consistent with paste/file upload); fall back to legacy only when down.
+    if _ivyea_front_door():
+        try:
+            return await _ia_ingest_analyzed(body_text, analysis=analysis)
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain ingest
+            pass
+    return _handle(bc.ingest_pasted_text, body_text, body.import_after_save)
+
+
+def _migration_marker_path():
+    from app.core.config import settings as ops_settings
+    return ops_settings.data_dir / "brain_chat_migrated.json"
+
+
+def _load_migration_map() -> dict[str, str]:
+    import json as _json
+    p = _migration_marker_path()
+    try:
+        return _json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:  # noqa: BLE001 — a corrupt marker just re-migrates
+        return {}
+
+
+def _save_migration_map(mapping: dict[str, str]) -> None:
+    import json as _json
+    p = _migration_marker_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(_json.dumps(mapping, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
+
+
+@router.post("/chat/migrate-to-agent")
+def chat_migrate_to_agent() -> dict[str, Any]:
+    """One-time, idempotent migration of legacy brain_chat transcripts into the
+    agent's native session store so the dock and workbench share one history.
+    Safe to call repeatedly — already-migrated sessions are skipped via a marker."""
+    from datetime import datetime
+
+    if not _ivyea_front_door():
+        return {"ok": False, "error": "IvyeaAgent 未连接，稍后重试", "migrated": 0, "skipped": 0, "total": 0}
+
+    mapping = _load_migration_map()
+    try:
+        sessions = (bc.list_sessions(include_archived=True) or {}).get("sessions") or []
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"读取旧对话失败：{e}", "migrated": 0, "skipped": 0, "total": 0}
+
+    migrated = 0
+    skipped = 0
+    for sess in sessions:
+        sid = str(sess.get("id") or "")
+        if not sid:
+            continue
+        if sid in mapping:
+            skipped += 1
+            continue
+        try:
+            detail = bc.get_session(sid)
+        except Exception:  # noqa: BLE001 — skip unreadable session, retry next run
+            skipped += 1
+            continue
+        messages = [
+            {"role": m.get("role"), "content": m.get("content") or ""}
+            for m in (detail.get("messages") or [])
+            if m.get("role") in {"user", "assistant"} and (m.get("content") or "").strip()
+        ]
+        if not messages:
+            mapping[sid] = ""  # remember empty sessions so we don't re-scan them
+            skipped += 1
+            continue
+        created = None
+        raw_created = sess.get("created_at")
+        if isinstance(raw_created, str) and raw_created:
+            try:
+                created = datetime.fromisoformat(raw_created).timestamp()
+            except ValueError:
+                created = None
+        try:
+            resp = ia.chat_import({"messages": messages, "created": created})
+        except Exception:  # noqa: BLE001 — agent hiccup, retry next run
+            skipped += 1
+            continue
+        if resp.get("ok") and resp.get("id"):
+            mapping[sid] = str(resp["id"])
+            migrated += 1
+        else:
+            skipped += 1
+
+    _save_migration_map(mapping)
+    return {"ok": True, "migrated": migrated, "skipped": skipped, "total": len(sessions)}
 
 
 @router.get("/chat/status")

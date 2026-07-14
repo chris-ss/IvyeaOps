@@ -4,13 +4,8 @@ import BrainMarkdown from "./BrainMarkdown";
 import SheetSelect from "../../components/SheetSelect";
 import KnowledgeGovernancePanel from "./KnowledgeGovernance";
 import {
-  brainChatCreate,
-  brainChatGet,
-  brainChatSendStream,
-  brainChatDeleteMessage,
-  brainChatSessions,
   brainChatStatus,
-  brainChatUpdate,
+  brainChatMigrateToAgent,
   brainDoctor,
   brainFileRead,
   brainFileWrite,
@@ -24,8 +19,6 @@ import {
   brainSearch,
   brainUpload,
   brainUploads,
-  type BrainChatMessage,
-  type BrainChatSession,
   type BrainChatStatus,
   type BrainFileItem,
   type BrainOverview,
@@ -33,32 +26,46 @@ import {
   type BrainUploadItem,
   type BrainUploadResponse,
 } from "../../api/client";
+import {
+  ivyeaAgentChatStream,
+  ivyeaChatSession,
+  ivyeaChatSessionDelete,
+  ivyeaChatSessions,
+} from "../../api/ivyeaAgent";
+
+// Unified chat store = the agent's native session library (shared with the
+// floating dock). These lightweight shapes normalize the agent responses for
+// this page's UI.
+type ChatSession = { id: string; title: string; updated?: number };
+type ChatMsg = { id: string; role: string; content: string };
+
+const CHAT_ROLES = new Set(["user", "assistant"]);
+function sessionTitle(preview?: string): string {
+  return (preview || "").trim().replace(/\s+/g, " ").slice(0, 50) || "新对话";
+}
+function toChatMessages(sid: string, messages: { role: string; content: string }[]): ChatMsg[] {
+  return (messages || [])
+    .filter((m) => CHAT_ROLES.has(m.role) && (m.content || "").trim())
+    .map((m, i) => ({ id: `${sid}-${i}`, role: m.role, content: m.content || "" }));
+}
 
 type Tab = "governance" | "chat" | "upload" | "search" | "pages" | "templates" | "overview" | "settings";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "governance", label: "治理中心" },
+// 高频操作平铺显示；低频管理页收进「更多▾」溢出菜单
+const PRIMARY_TABS: { key: Tab; label: string }[] = [
   { key: "chat", label: "对话" },
   { key: "upload", label: "上传" },
   { key: "search", label: "搜索" },
   { key: "pages", label: "页面" },
+];
+
+const MORE_TABS: { key: Tab; label: string }[] = [
+  { key: "governance", label: "治理中心" },
   { key: "overview", label: "概览" },
   { key: "settings", label: "设置" },
 ];
 
-// 检索范围（GBrain 知识分类，对应后端 ALLOWED_CATEGORIES）
-const SCOPE_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "全部知识" },
-  { value: "amazon", label: "Amazon 运营" },
-  { value: "products", label: "产品" },
-  { value: "market", label: "市场" },
-  { value: "ads", label: "广告" },
-  { value: "compliance", label: "合规" },
-  { value: "suppliers", label: "供应商" },
-  { value: "inbox", label: "收件箱" },
-];
-
-// 空状态的 Amazon 运营快捷提问（点击直接发送，先检索知识库再让 Hermes 作答）
+// 空状态的 Amazon 运营快捷提问（点击直接发送）
 const QUICK_PROMPTS: string[] = [
   "这个产品广告应该怎么打？给出精准/词组/广泛和否词的初始结构。",
   "帮我梳理这个 Listing 的 CTR/CVR 优化点（主图、标题、五点、A+）。",
@@ -117,10 +124,12 @@ function safePathFromSlug(slug: string): string {
   return s.endsWith(".md") ? s : `${s}.md`;
 }
 
+const ALL_TABS = [...PRIMARY_TABS, ...MORE_TABS];
+
 function getInitialTab(): Tab {
   const p = new URLSearchParams(window.location.search);
   const t = p.get("tab") as Tab | null;
-  return TABS.some((x) => x.key === t) ? (t as Tab) : "governance";
+  return ALL_TABS.some((x) => x.key === t) ? (t as Tab) : "chat";
 }
 
 export default function Brain() {
@@ -141,19 +150,17 @@ export default function Brain() {
   const [flash, setFlash] = useState<string | null>(null);
 
   const [chatStatus, setChatStatus] = useState<BrainChatStatus | null>(null);
-  const [sessions, setSessions] = useState<BrainChatSession[]>([]);
-  const [activeSession, setActiveSession] = useState<BrainChatSession | null>(null);
-  const [messages, setMessages] = useState<BrainChatMessage[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [sending, setSending] = useState(false);
   const [savingKb, setSavingKb] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sessionFilter, setSessionFilter] = useState("");
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [chatScope, setChatScope] = useState("");
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 760);
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadCategory, setUploadCategory] = useState("inbox");
@@ -210,34 +217,43 @@ export default function Brain() {
     }
   }, []);
 
-  const loadSession = useCallback(async (sessionId: string) => {
-    const r = await brainChatGet(sessionId);
-    setActiveSession(r.session);
-    setMessages(r.messages);
+  const loadSession = useCallback(async (sessionId: string, title?: string) => {
+    const r = await ivyeaChatSession(sessionId);
+    const msgs = toChatMessages(sessionId, r.session?.messages || []);
+    const firstUser = msgs.find((m) => m.role === "user")?.content;
+    setActiveSession({ id: sessionId, title: title || sessionTitle(firstUser) });
+    setMessages(msgs);
     setActiveSessionUrl(sessionId);
   }, [setActiveSessionUrl]);
 
+  const refreshSessions = useCallback(async (): Promise<ChatSession[]> => {
+    const list = await ivyeaChatSessions(50);
+    const normalized = (list.sessions || []).map((s) => ({ id: s.id, title: sessionTitle(s.preview), updated: s.updated }));
+    setSessions(normalized);
+    return normalized;
+  }, []);
+
   const loadChat = useCallback(async () => {
     try {
-      const list = await brainChatSessions();
-      setSessions(list.sessions);
+      // Fold legacy workbench transcripts into the shared agent store first, so
+      // old history shows up here and in the dock. Idempotent; best-effort.
+      await brainChatMigrateToAgent().catch(() => undefined);
+      const normalized = await refreshSessions();
       const params = new URLSearchParams(window.location.search);
-      const target = params.get("session") || localStorage.getItem("brain.lastSessionId") || list.sessions[0]?.id;
-      if (target && list.sessions.some((s) => s.id === target)) {
-        await loadSession(target);
-      } else if (list.sessions[0]) {
-        await loadSession(list.sessions[0].id);
+      const target = params.get("session") || localStorage.getItem("brain.lastSessionId") || normalized[0]?.id;
+      const hit = normalized.find((s) => s.id === target) || normalized[0];
+      if (hit) {
+        await loadSession(hit.id, hit.title);
       } else {
-        const created = await brainChatCreate("新知识对话", "amazon_operator");
-        setSessions([created.session]);
-        setActiveSession(created.session);
-        setMessages(created.messages);
-        setActiveSessionUrl(created.session.id);
+        // No history yet — start on a fresh empty chat (the agent creates the
+        // session on first send, matching the dock).
+        setActiveSession(null);
+        setMessages([]);
       }
     } catch (e: any) {
       setErr(e?.response?.data?.detail ?? e.message ?? "会话加载失败");
     }
-  }, [loadSession, setActiveSessionUrl]);
+  }, [loadSession, refreshSessions]);
 
   useEffect(() => {
     loadOverview();
@@ -358,69 +374,80 @@ export default function Brain() {
     }
   };
 
-  const newChat = async () => {
-    setSending(true);
-    setErr(null);
-    try {
-      const r = await brainChatCreate("新知识对话", "amazon_operator");
-      setSessions((prev) => [r.session, ...prev]);
-      setActiveSession(r.session);
-      setMessages(r.messages);
-      setTab("chat");
-      setActiveSessionUrl(r.session.id);
-    } catch (e: any) {
-      setErr(e?.response?.data?.detail ?? e.message ?? "新建会话失败");
-    } finally {
-      setSending(false);
-    }
+  const newChat = () => {
+    // The agent mints the session id on the first send (same as the dock).
+    setActiveSession(null);
+    setMessages([]);
+    setTab("chat");
+    localStorage.removeItem("brain.lastSessionId");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("session");
+    window.history.replaceState({}, "", url.toString());
   };
 
-  const archiveChat = async (sessionId: string) => {
+  const deleteSession = async (sessionId: string) => {
+    const ok = await confirm({ title: "删除该会话", message: "删除后无法恢复，浮标里的这条历史也会一并删除。", confirmText: "删除", danger: true });
+    if (!ok) return;
     try {
-      await brainChatUpdate(sessionId, { archived: true });
-      await loadChat();
-    } catch (e: any) {
-      setErr(e?.response?.data?.detail ?? e.message ?? "归档失败");
-    }
-  };
-
-  const runStream = async (sessionId: string, body: { content?: string; regenerate?: boolean; category?: string }, tmpAsst: string, tmpUser?: string) => {
-    await brainChatSendStream(sessionId, body, (evt) => {
-      if (evt.type === "start") {
-        setMessages((prev) => prev.map((m) => {
-          if (tmpUser && m.id === tmpUser && evt.user_message) return evt.user_message;
-          if (m.id === tmpAsst) return { ...m, citations: evt.citations || [] };
-          return m;
-        }));
-      } else if (evt.type === "token") {
-        setMessages((prev) => prev.map((m) => (m.id === tmpAsst ? { ...m, content: m.content + evt.text } : m)));
-      } else if (evt.type === "done") {
-        setMessages((prev) => prev.map((m) => (m.id === tmpAsst ? { ...evt.assistant_message, _engine: evt.engine, _citCount: evt.citations_count } : m)));
-      } else if (evt.type === "error") {
-        throw new Error(evt.detail);
+      await ivyeaChatSessionDelete(sessionId);
+      if (activeSession?.id === sessionId) {
+        setActiveSession(null);
+        setMessages([]);
       }
-    });
+      await refreshSessions();
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail ?? e.message ?? "删除失败");
+    }
   };
 
   const sendChat = async (override?: string) => {
     const text = (override ?? chatInput).trim();
-    if (!text || !activeSession || sending) return;
-    const sid = activeSession.id;
+    if (!text || sending) return;
     setSending(true);
     setErr(null);
     setChatInput("");
     const tmpUser = `local-u-${Date.now()}`;
     const tmpAsst = `local-a-${Date.now()}`;
-    const now = new Date().toISOString();
     setMessages((prev) => [
       ...prev,
-      { id: tmpUser, session_id: sid, role: "user", content: text, citations: [], created_at: now },
-      { id: tmpAsst, session_id: sid, role: "assistant", content: "", citations: [], created_at: now },
+      { id: tmpUser, role: "user", content: text },
+      { id: tmpAsst, role: "assistant", content: "" },
     ]);
+    let liveSid = activeSession?.id || "";
     try {
-      await runStream(sid, { content: text, category: chatScope || undefined }, tmpAsst, tmpUser);
-      const list = await brainChatSessions();
-      setSessions(list.sessions);
+      await ivyeaAgentChatStream(
+        {
+          message: text,
+          session_id: activeSession?.id || undefined,
+          ops_context: { board: "knowledge", pathname: "/brain" },
+          max_steps: 18,
+          plan_mode: true,
+          persist: true,
+          inject_retrieval: true,
+        },
+        {
+          onStart: (data) => {
+            if (data?.session_id) {
+              liveSid = data.session_id;
+              if (!activeSession) setActiveSession({ id: data.session_id, title: sessionTitle(text) });
+              setActiveSessionUrl(data.session_id);
+            }
+          },
+          onToken: (chunk) => {
+            setMessages((prev) => prev.map((m) => (m.id === tmpAsst ? { ...m, content: m.content + chunk } : m)));
+          },
+          onFinal: (data) => {
+            if (data?.session_id) liveSid = data.session_id;
+            const full = String(data?.text || "");
+            setMessages((prev) => prev.map((m) => (m.id === tmpAsst && !m.content && full ? { ...m, content: full } : m)));
+          },
+          onError: (data) => { throw new Error(String(data?.detail || data?.error || "模型暂不可用")); },
+        },
+      );
+      // Re-sync from the shared store: canonical message ids (enables copy /
+      // save-as-knowledge) + refreshed session list shared with the dock.
+      if (liveSid) await loadSession(liveSid, activeSession?.title);
+      await refreshSessions();
     } catch (e: any) {
       setErr(e?.message ?? "发送失败");
       setMessages((prev) => prev.filter((m) => m.id !== tmpAsst && m.id !== tmpUser));
@@ -430,72 +457,19 @@ export default function Brain() {
     }
   };
 
-  const regenerate = async () => {
-    if (!activeSession || sending) return;
-    const sid = activeSession.id;
-    const lastAsst = [...messages].reverse().find((m) => m.role === "assistant" && !m.id.startsWith("local-"));
-    if (!lastAsst) return;
-    setSending(true);
-    setErr(null);
-    const tmpAsst = `local-a-${Date.now()}`;
-    setMessages((prev) => [
-      ...prev.filter((m) => m.id !== lastAsst.id),
-      { id: tmpAsst, session_id: sid, role: "assistant", content: "", citations: lastAsst.citations, created_at: new Date().toISOString() },
-    ]);
-    try {
-      await runStream(sid, { regenerate: true, category: chatScope || undefined }, tmpAsst);
-    } catch (e: any) {
-      setErr(e?.message ?? "重新生成失败");
-      try { await loadSession(sid); } catch { /* keep error */ }
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const deleteMessage = async (m: BrainChatMessage) => {
-    if (m.id.startsWith("local-")) return;
-    const ok = await confirm({ title: "删除该消息", message: "删除后无法恢复。", confirmText: "删除", danger: true });
-    if (!ok) return;
-    try {
-      await brainChatDeleteMessage(m.id);
-      setMessages((prev) => prev.filter((x) => x.id !== m.id));
-    } catch (e: any) {
-      setErr(e?.response?.data?.detail ?? e.message ?? "删除失败");
-    }
-  };
-
-  const copyMessage = (m: BrainChatMessage) => {
+  const copyMessage = (m: ChatMsg) => {
     navigator.clipboard?.writeText(m.content).then(() => {
       setCopiedId(m.id);
       setTimeout(() => setCopiedId((id) => (id === m.id ? null : id)), 1500);
     });
   };
 
-  const beginRename = (s: BrainChatSession) => {
-    setRenamingId(s.id);
-    setRenameValue(s.title || "");
-  };
-
-  const commitRename = async (sessionId: string) => {
-    const title = renameValue.trim();
-    setRenamingId(null);
-    const current = sessions.find((s) => s.id === sessionId);
-    if (!title || title === (current?.title || "")) return;
-    try {
-      await brainChatUpdate(sessionId, { title });
-      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)));
-      if (activeSession?.id === sessionId) setActiveSession((a) => (a ? { ...a, title } : a));
-    } catch (e: any) {
-      setErr(e?.response?.data?.detail ?? e.message ?? "重命名失败");
-    }
-  };
-
   const quickAsk = (text: string) => {
-    if (sending || !activeSession) return;
+    if (sending) return;
     void sendChat(text);
   };
 
-  const saveAsKnowledge = async (m: BrainChatMessage) => {
+  const saveAsKnowledge = async (m: ChatMsg) => {
     if (savingKb) return;
     setSavingKb(m.id);
     setErr(null);
@@ -595,8 +569,30 @@ export default function Brain() {
       {legacyGbrainMode && tab !== "governance" && noEmbed && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">未配置 Embedding：当前以关键词检索为主（功能正常）。如需语义检索，<a href="/hub-settings" style={{ color: "var(--acc)" }}>前往系统配置 → 智能体 → 知识库语义检索 →</a> 选择服务商（Ollama 本地免费）。</MiniAlert></div>}
       {chatStatus && !chatStatus.configured && tab === "chat" && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">对话引擎未就绪：请确认本机 IvyeaAgent 服务在运行，或在「系统配置 → 全局兜底大模型」配置一个文本模型。搜索、上传、页面仍可用。</MiniAlert></div>}
 
-      <div className="tabs" style={{ overflowX: "auto" }}>
-        {TABS.map((t) => <button key={t.key} className={"tab" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>{t.label}</button>)}
+      {/* Outer row does NOT clip overflow, so the 「更多」dropdown can escape.
+          Only the inner primary-tab strip scrolls horizontally. */}
+      <div style={{ display: "flex", alignItems: "flex-end", borderBottom: "1px solid var(--b)", marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 0, overflowX: "auto", flex: 1 }}>
+          {PRIMARY_TABS.map((t) => <button key={t.key} className={"tab" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>{t.label}</button>)}
+        </div>
+        <div style={{ position: "relative", flexShrink: 0 }}>
+          <button
+            className={"tab" + (MORE_TABS.some((t) => t.key === tab) ? " active" : "")}
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            {MORE_TABS.find((t) => t.key === tab) ? `更多 · ${MORE_TABS.find((t) => t.key === tab)!.label}` : "更多"} ▾
+          </button>
+          {moreOpen && (
+            <>
+              <div onClick={() => setMoreOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+              <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 41, minWidth: 150, padding: 4, display: "grid", gap: 2, background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: "var(--r)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(0,0,0,.28)" }}>
+                {MORE_TABS.map((t) => (
+                  <button key={t.key} className="tbtn" style={{ textAlign: "left", width: "100%", borderColor: "transparent", color: tab === t.key ? "var(--acc)" : undefined, background: tab === t.key ? "var(--bg3)" : undefined }} onClick={() => { setTab(t.key); setMoreOpen(false); }}>{t.label}</button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {tab === "governance" && <KnowledgeGovernancePanel />}
@@ -629,7 +625,7 @@ export default function Brain() {
                 {sessions.map((s) => (
                   <div
                     key={s.id}
-                    onClick={() => { loadSession(s.id); setSessionSheetOpen(false); }}
+                    onClick={() => { loadSession(s.id, s.title); setSessionSheetOpen(false); }}
                     style={{
                       padding: "12px 16px", cursor: "pointer", borderBottom: "1px solid var(--b)",
                       background: s.id === activeSession?.id ? "color-mix(in srgb, var(--acc) 10%, transparent)" : undefined,
@@ -637,7 +633,7 @@ export default function Brain() {
                     }}
                   >
                     <span style={{ flex: 1, fontSize: 13, color: s.id === activeSession?.id ? "var(--acc)" : "var(--t)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: s.id === activeSession?.id ? 600 : 400 }}>{s.title || "新对话"}</span>
-                    <button onClick={(e) => { e.stopPropagation(); archiveChat(s.id); setSessionSheetOpen(false); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--t3)", fontSize: 11, padding: "2px 6px", flexShrink: 0 }}>归档</button>
+                    <button onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--t3)", fontSize: 11, padding: "2px 6px", flexShrink: 0 }}>删除</button>
                   </div>
                 ))}
               </div>
@@ -655,25 +651,12 @@ export default function Brain() {
                 <input className="inp" value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)} placeholder="搜索会话..." style={{ marginBottom: 8, padding: "4px 8px", fontSize: 10 }} />
                 <div style={{ display: "grid", gap: 4 }}>
                   {sessions.filter((s) => !sessionFilter.trim() || (s.title || "新对话").toLowerCase().includes(sessionFilter.trim().toLowerCase())).map((s) => (
-                    renamingId === s.id ? (
-                      <input
-                        key={s.id}
-                        className="inp"
-                        autoFocus
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onBlur={() => commitRename(s.id)}
-                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitRename(s.id); } else if (e.key === "Escape") { setRenamingId(null); } }}
-                        style={{ padding: "4px 7px", fontSize: 10, borderColor: "var(--acc)" }}
-                      />
-                    ) : (
-                      <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 2, border: "1px solid " + (s.id === activeSession?.id ? "var(--acc)" : "var(--b)"), borderRadius: 5, overflow: "hidden" }}>
-                        <button className="tbtn" onClick={() => loadSession(s.id)} title={s.title || "新对话"} style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", color: s.id === activeSession?.id ? "var(--acc)" : "var(--t2)", padding: "5px 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10 }}>
-                          {s.title || "新对话"}
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); beginRename(s); }} title="重命名" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--t3)", fontSize: 11, padding: "2px 6px", flexShrink: 0 }}>✎</button>
-                      </div>
-                    )
+                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 2, border: "1px solid " + (s.id === activeSession?.id ? "var(--acc)" : "var(--b)"), borderRadius: 5, overflow: "hidden" }}>
+                      <button className="tbtn" onClick={() => loadSession(s.id, s.title)} title={s.title || "新对话"} style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", color: s.id === activeSession?.id ? "var(--acc)" : "var(--t2)", padding: "5px 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10 }}>
+                        {s.title || "新对话"}
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }} title="删除会话" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--t3)", fontSize: 11, padding: "2px 6px", flexShrink: 0 }}>✕</button>
+                    </div>
                   ))}
                   {sessions.length > 0 && sessions.filter((s) => !sessionFilter.trim() || (s.title || "新对话").toLowerCase().includes(sessionFilter.trim().toLowerCase())).length === 0 && (
                     <div style={{ color: "var(--t3)", fontSize: 10, padding: "4px 2px" }}>无匹配会话</div>
@@ -689,12 +672,12 @@ export default function Brain() {
                 {isMobile && (
                   <button className="tbtn" onClick={() => setSessionSheetOpen(true)}>≡ 会话</button>
                 )}
-                {activeSession && <button className="tbtn" onClick={() => archiveChat(activeSession.id)}>归档</button>}
+                {activeSession && <button className="tbtn" onClick={() => deleteSession(activeSession.id)}>删除</button>}
               </div>
               <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, display: "grid", gap: 10, alignContent: "start" }}>
                 {!messages.length && (
                   <div style={{ display: "grid", gap: 10 }}>
-                    <div style={{ color: "var(--t3)", fontSize: 12 }}>直接提问，系统会先检索知识库，再调用本机 Hermes 生成回答，并在消息下方显示引用来源。或从下面的常用问题开始：</div>
+                    <div style={{ color: "var(--t3)", fontSize: 12 }}>直接提问，IvyeaAgent 会结合内置知识库作答。这里和右下角浮标是同一套对话历史，可互相续聊。或从下面的常用问题开始：</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {QUICK_PROMPTS.map((p, i) => (
                         <button key={i} className="tbtn" onClick={() => quickAsk(p)} disabled={sending} style={{ textAlign: "left", padding: "6px 10px", fontSize: 11, maxWidth: 360, whiteSpace: "normal", lineHeight: 1.5 }}>
@@ -704,53 +687,25 @@ export default function Brain() {
                     </div>
                   </div>
                 )}
-                {(() => {
-                  const lastAssistantId = [...messages].reverse().find((x) => x.role === "assistant" && !x.id.startsWith("local-"))?.id;
-                  return messages.map((m) => (
+                {messages.map((m) => (
                   <div key={m.id} style={{ justifySelf: m.role === "user" ? "end" : "start", maxWidth: m.role === "user" ? "88%" : "94%" }}>
                     <div style={{ border: "1px solid var(--b)", background: m.role === "user" ? "rgba(47,129,247,.13)" : "rgba(255,255,255,.03)", color: "var(--t)", padding: "9px 11px", borderRadius: 8, fontSize: 12, lineHeight: 1.65 }}>
                       {m.role === "assistant"
                         ? (m.content ? <BrainMarkdown>{m.content}</BrainMarkdown> : <span style={{ color: "var(--t3)" }}>{sending ? "生成中…" : "（空回答）"}</span>)
                         : <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>}
                     </div>
-                    {m.role === "assistant" && m.citations?.length > 0 && (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6, alignItems: "center" }}>
-                        <span style={{ color: "var(--t3)", fontSize: 10 }}>来源</span>
-                        {m.citations.map((c, i) => (
-                          <button key={`${c.slug}-${i}`} className="tbtn" onClick={() => c.slug && openSlug(c.slug)} title={c.snippet?.slice(0, 200)} style={{ padding: "1px 7px", fontSize: 10, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {c.slug || c.snippet?.slice(0, 24) || "片段"}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {m.role === "assistant" && (m as any)._engine && (
-                      <div style={{ marginTop: 5, fontSize: 10, color: "var(--t3)", display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-                        <span style={{ border: "1px solid var(--b)", borderRadius: 4, padding: "0 5px" }}>
-                          {(m as any)._engine === "hermes" ? "Hermes 本机模型" : "兜底大模型"}
-                        </span>
-                        <span>·</span>
-                        <span>{(m as any)._citCount > 0 ? `检索命中知识 ${(m as any)._citCount} 条` : "未命中知识库（凭模型常识作答）"}</span>
-                      </div>
-                    )}
-                    {m.role === "assistant" && !m.id.startsWith("local-") && (
+                    {m.role === "assistant" && m.content && !m.id.startsWith("local-") && (
                       <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
                         <button className="tbtn" onClick={() => copyMessage(m)} style={{ padding: "1px 8px", fontSize: 10 }}>{copiedId === m.id ? "已复制" : "复制"}</button>
                         <button className="tbtn" onClick={() => saveAsKnowledge(m)} disabled={savingKb === m.id} style={{ padding: "1px 8px", fontSize: 10 }}>{savingKb === m.id ? "存入中..." : "存为知识"}</button>
-                        {m.id === lastAssistantId && <button className="tbtn" onClick={regenerate} disabled={sending} style={{ padding: "1px 8px", fontSize: 10 }}>重新生成</button>}
-                        <button className="tbtn" onClick={() => deleteMessage(m)} style={{ padding: "1px 8px", fontSize: 10, color: "var(--red)" }}>删除</button>
                       </div>
                     )}
                   </div>
-                  ));
-                })()}
+                ))}
               </div>
               <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid var(--b)", flexShrink: 0, alignItems: "stretch" }}>
                 <textarea className="inp" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendChat(); } }} placeholder="输入问题，Enter 发送（Shift+Enter 换行）" style={{ minHeight: 54, maxHeight: 140, flex: 1, resize: "vertical" }} />
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <SheetSelect className="inp" value={chatScope} onChange={setChatScope} title="限定检索范围" style={{ padding: "4px 6px", fontSize: 10 }}
-                    options={SCOPE_OPTIONS} />
-                  <button className="tbtn" onClick={() => sendChat()} disabled={sending || !chatInput.trim()} style={{ flex: 1 }}>{sending ? "发送中..." : "发送"}</button>
-                </div>
+                <button className="tbtn" onClick={() => sendChat()} disabled={sending || !chatInput.trim()} style={{ minWidth: 72 }}>{sending ? "发送中..." : "发送"}</button>
               </div>
             </div>
           </div>
@@ -807,8 +762,8 @@ export default function Brain() {
                     <div style={{ color: "var(--t2)", fontSize: 11, lineHeight: 1.7, marginTop: 8 }}>{uploadResult.analysis.summary}</div>
                   </div>
                 )}
-                {uploadResult.warnings.length > 0 && <MiniAlert kind="warn">{uploadResult.warnings.join("\n")}</MiniAlert>}
-                <pre style={{ whiteSpace: "pre-wrap", color: "var(--t2)", fontSize: 11, lineHeight: 1.7, maxHeight: 360, overflow: "auto" }}>{uploadResult.markdown_preview}</pre>
+                {(uploadResult.warnings?.length ?? 0) > 0 && <MiniAlert kind="warn">{uploadResult.warnings!.join("\n")}</MiniAlert>}
+                {uploadResult.markdown_preview && <pre style={{ whiteSpace: "pre-wrap", color: "var(--t2)", fontSize: 11, lineHeight: 1.7, maxHeight: 360, overflow: "auto" }}>{uploadResult.markdown_preview}</pre>}
               </div>
             ) : <div style={{ color: "var(--t3)", fontSize: 11 }}>入库后这里显示自动识别结果和 Markdown 预览。</div>}
             <div style={{ marginTop: 12, display: "grid", gap: 5 }}>

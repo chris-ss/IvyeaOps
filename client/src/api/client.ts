@@ -759,10 +759,12 @@ export type BrainUploadResponse = {
     source: string;
     warnings?: string[];
   };
-  markdown_preview: string;
+  markdown_preview?: string;
   import_status: string;
-  import_raw: string;
-  warnings: string[];
+  import_raw?: string;
+  warnings?: string[];
+  card_id?: string;
+  source?: string;
 };
 
 export async function brainUpload(file: File, category: string, title: string, importAfterSave = true) {
@@ -791,7 +793,7 @@ export async function brainIngestUrl(url: string, importAfterSave = true) {
   const { data } = await api.post<BrainUploadResponse>(
     "/brain/ingest/url",
     { url, import_after_save: importAfterSave },
-    { timeout: 180000 },
+    { timeout: 300000 },  // fetch + one model round-trip can run long on big pages
   );
   return data;
 }
@@ -831,6 +833,16 @@ export type BrainChatMessage = {
 
 export async function brainChatStatus() {
   const { data } = await api.get<BrainChatStatus>("/brain/chat/status");
+  return data;
+}
+
+// One-time, idempotent migration of legacy brain_chat transcripts into the
+// agent's native session store, so the dock and the workbench chat share one
+// history. Safe to call on every chat mount.
+export async function brainChatMigrateToAgent() {
+  const { data } = await api.post<{ ok: boolean; migrated: number; skipped: number; total: number }>(
+    "/brain/chat/migrate-to-agent", {}, { timeout: 120000 },
+  );
   return data;
 }
 
