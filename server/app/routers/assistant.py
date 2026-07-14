@@ -10,6 +10,7 @@ import base64
 import json
 import time
 import uuid
+from pathlib import Path
 from typing import AsyncGenerator, List
 
 import httpx
@@ -19,6 +20,7 @@ from pydantic import BaseModel
 
 from app.core import hub_settings as _hs
 from app.core.security import require_user
+from app.core.skill_paths import STUDIO_ROOT
 from app.services.ai_synthesis_service import (
     ASSISTANT_PROVIDER_BASE,
     _apimart_base,
@@ -241,12 +243,75 @@ def _image_cfg() -> dict:
 # text-to-image path already uses.
 _EDIT_JOBS: dict[str, dict] = {}
 
+# Edit jobs are also written to disk so a completed image survives a backend
+# restart (the poll can still fetch it) and an interrupted job reports a clear
+# message instead of "任务不存在". ~/.hermes/imagegen-jobs/ (respects HERMES_HOME).
+_JOBS_DIR: Path = STUDIO_ROOT.parent / "imagegen-jobs"
+
 
 def _prune_edit_jobs() -> None:
     if len(_EDIT_JOBS) <= 60:
         return
     for k in sorted(_EDIT_JOBS, key=lambda j: _EDIT_JOBS[j].get("ts", 0.0))[: len(_EDIT_JOBS) - 60]:
         _EDIT_JOBS.pop(k, None)
+
+
+def _job_file(job_id: str) -> Path:
+    # job_id is our own uuid-hex ("edit_<hex>") — no path traversal risk.
+    return _JOBS_DIR / f"{job_id}.json"
+
+
+def _persist_job(job_id: str) -> None:
+    """Write-through the in-memory job record to disk (best-effort)."""
+    j = _EDIT_JOBS.get(job_id)
+    if j is None:
+        return
+    try:
+        _JOBS_DIR.mkdir(parents=True, exist_ok=True)
+        _job_file(job_id).write_text(
+            json.dumps({**j, "id": job_id}, ensure_ascii=False), encoding="utf-8"
+        )
+        _prune_job_files()
+    except Exception:
+        pass  # disk persistence is a durability nicety, never fatal to the request
+
+
+def _load_job(job_id: str) -> dict | None:
+    try:
+        return json.loads(_job_file(job_id).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _prune_job_files() -> None:
+    try:
+        files = sorted(_JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime)
+        for p in files[:-120]:  # keep the 120 most recent on disk
+            p.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _sweep_orphaned_jobs() -> None:
+    """On startup, in-memory jobs are empty, so any persisted "running" job is
+    orphaned by a previous process (the background asyncio task cannot resume
+    across a restart). Mark those failed so their poll returns a clear message
+    instead of hanging on "running" forever."""
+    try:
+        for p in _JOBS_DIR.glob("*.json"):
+            try:
+                j = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if j.get("status") == "running":
+                j["status"] = "failed"
+                j["error"] = "服务重启导致任务中断，请重试"
+                p.write_text(json.dumps(j, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+_sweep_orphaned_jobs()
 
 
 async def _source_to_bytes(url: str) -> tuple[bytes, str]:
@@ -339,6 +404,9 @@ async def _run_edit_job(job_id: str, model: str, prompt: str, size: str, key: st
                               "error": None if images else "编辑未返回图片", "ts": ts}
     except Exception as e:  # noqa: BLE001
         _EDIT_JOBS[job_id] = {"status": "failed", "images": [], "error": f"编辑失败：{e}", "ts": ts}
+    finally:
+        # Write-through the terminal state (completed/failed) once, whichever path we took.
+        _persist_job(job_id)
 
 
 @router.post("/image")
@@ -359,6 +427,7 @@ async def image_submit(req: ImageReq, _user: str = Depends(require_user)) -> dic
         job_id = "edit_" + uuid.uuid4().hex[:16]
         _EDIT_JOBS[job_id] = {"status": "running", "images": [], "error": None, "ts": time.time()}
         _prune_edit_jobs()
+        _persist_job(job_id)  # if the backend restarts mid-edit, the startup sweep flags it
         asyncio.create_task(_run_edit_job(job_id, ic["model"], req.prompt, req.size, key, ic["base_url"], refs[0]))
         return {"task_id": job_id}
 
@@ -394,14 +463,17 @@ async def image_submit(req: ImageReq, _user: str = Depends(require_user)) -> dic
     job_id = "sync_" + uuid.uuid4().hex[:16]
     _EDIT_JOBS[job_id] = {"status": "completed", "images": images, "error": None, "ts": time.time()}
     _prune_edit_jobs()
+    _persist_job(job_id)
     return {"task_id": job_id}
 
 
 @router.get("/image/status")
 async def image_status(task_id: str, _user: str = Depends(require_user)) -> dict:
-    # Local image-edit jobs (image-to-image) are tracked in-process.
-    if task_id.startswith("edit_") or task_id in _EDIT_JOBS:
-        j = _EDIT_JOBS.get(task_id)
+    # Local image jobs (image-to-image edit + synchronous text-to-image) are
+    # tracked in-process, with a disk fallback so a completed result survives a
+    # backend restart and an interrupted job reports a clear message.
+    if task_id.startswith(("edit_", "sync_")) or task_id in _EDIT_JOBS:
+        j = _EDIT_JOBS.get(task_id) or _load_job(task_id)
         if not j:
             return {"status": "failed", "progress": 0, "images": [], "error": "任务不存在或已过期，请重试"}
         running = j["status"] == "running"
