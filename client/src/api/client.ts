@@ -216,6 +216,8 @@ export type RunnerStatus = {
   path?: string | null;
   reason?: string | null;
   auto_resolved_to?: string | null;
+  data_source_ready?: boolean;
+  data_source_hint?: string | null;
 };
 
 export async function auditRunners() {
