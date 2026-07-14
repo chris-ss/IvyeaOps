@@ -415,10 +415,12 @@ approve=是否批准；risk_score=重大风险概率(越高越危险)；理由�
 
 async def review_intent(intent: Dict[str, Any]) -> Dict[str, Any]:
     provs = str(_hs.get("lingxing_review_providers") or "ivyea-agent,deepseek,assistant").replace("，", ",").split(",")
-    reviews = []
+    # the three personas are independent by design — run them concurrently
+    tasks = []
     for i, (persona, framing) in enumerate(_REVIEWERS):
         prov = (provs[i].strip() if i < len(provs) and provs[i].strip() else "deepseek")
-        reviews.append(await _one_review(persona, framing, intent, prov))
+        tasks.append(_one_review(persona, framing, intent, prov))
+    reviews = list(await asyncio.gather(*tasks))
     approved = all(r["approve"] for r in reviews) and max(r["risk_score"] for r in reviews) <= _RISK_THRESHOLD
     return {"approved": approved, "reviews": reviews,
             "max_risk": max(r["risk_score"] for r in reviews)}
@@ -433,21 +435,75 @@ def _verdict_status(reviewed_ok: bool, guard_ok: bool) -> str:
     return "awaiting_human"
 
 
+async def _refresh_live_before(intent: Dict[str, Any]) -> None:
+    """For modify-type ops, replace the recorded ``before`` with the LIVE value
+    read from LingXing (don't trust hand-typed/stale numbers for the magnitude
+    guardrail), and recompute change_pct. Best-effort: master off / not found
+    keeps the recorded value."""
+    op = OP_TYPES.get(intent.get("op_type") or "")
+    if not op or op["category"] == "add":
+        return
+    nf = op["num_field"]
+    try:
+        live = await _current_value(intent)
+    except Exception:  # noqa: BLE001
+        return
+    before = dict(intent.get("before") or {})
+    if live.get(nf) is not None:
+        before[nf] = live[nf]
+    if live.get("state"):
+        before.setdefault("state", live["state"])
+    intent["before"] = before
+    change = intent.get("change") or {}
+    if change.get(nf) is not None and before.get(nf):
+        try:
+            intent["change_pct"] = round(
+                (float(change[nf]) - float(before[nf])) / float(before[nf]) * 100, 1)
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
+
+async def _process_ticket(tid: str) -> None:
+    """Background pipeline for a fresh ticket: live-before refresh → guardrails
+    → triple review → verdict. Runs after create_ticket() has already returned,
+    so the HTTP caller never blocks on LLM latency."""
+    t = get_ticket(tid)
+    if not t or t.get("status") != "reviewing":
+        return
+    intent = t["intent"] or {}
+    try:
+        await _refresh_live_before(intent)
+        t["intent"] = intent
+        guard = check_guardrails(intent)
+        t["guardrail"] = guard
+        if not guard["ok"]:
+            # hard-blocked by code — no point spending LLM reviews
+            t["status"] = "guardrail_blocked"
+            _save(t)
+            return
+        _save(t)
+        rev = await review_intent(intent)
+        t["reviews"] = rev
+        t["status"] = _verdict_status(rev["approved"], guard["ok"])
+        _save(t)
+    except Exception as e:  # noqa: BLE001 — never leave a ticket stuck in reviewing
+        t["status"] = "failed"
+        t["error"] = f"复核流程异常：{e}"
+        _save(t)
+
+
 async def create_ticket(intent: Dict[str, Any], source: str = "manual") -> Dict[str, Any]:
-    """Create + auto-process a ticket: triple review + guardrails → awaiting_human
-    (or blocked/rejected). Nothing executes here."""
+    """Create a ticket and kick its review pipeline in the background.
+    Returns immediately with status ``reviewing``; guardrails + triple review
+    update it to awaiting_human / guardrail_blocked / review_rejected. Nothing
+    executes here."""
     t: Dict[str, Any] = {
         "id": uuid.uuid4().hex[:12], "created_at": _now(), "source": source,
         "status": "reviewing", "intent": intent, "reviews": None, "guardrail": None,
         "snapshot": None, "result": None, "decided_by": "", "error": "",
     }
     _save(t)
-    guard = check_guardrails(intent)
-    rev = await review_intent(intent)
-    t["guardrail"] = guard
-    t["reviews"] = rev
-    t["status"] = _verdict_status(rev["approved"], guard["ok"])
-    _save(t)
+    asyncio.create_task(_process_ticket(t["id"]), name=f"lingxing-ticket-{t['id']}")
     return t
 
 
@@ -594,16 +650,9 @@ async def create_manual_ticket(payload: Dict[str, Any]) -> Dict[str, Any]:
         before["state"] = payload["cur_state"]
     if not change:
         raise _gw.LingXingError("未指定任何改动（数值或状态）")
-    # prefer the LIVE current value (read from LingXing) for the magnitude
-    # guardrail + display — don't trust a hand-typed number.
-    try:
-        live = await _current_value({"op_type": op_type, "sid": payload["sid"], "target_id": str(payload["target_id"])})
-        if live.get(nf) is not None:
-            before[nf] = live[nf]
-        if live.get("state"):
-            before.setdefault("state", live["state"])
-    except Exception:  # noqa: BLE001
-        pass  # master may be off / not found → fall back to entered value
+    # NOTE: the LIVE current value is fetched in the background pipeline
+    # (_refresh_live_before) so ticket creation stays instant; the hand-typed
+    # value below is only the provisional display until then.
     change_pct = None
     if change.get(nf) is not None and before.get(nf):
         try:
@@ -619,6 +668,47 @@ async def create_manual_ticket(payload: Dict[str, Any]) -> Dict[str, Any]:
     if payload.get("opt"):
         intent["opt"] = payload["opt"]
     return await create_ticket(intent, source="manual")
+
+
+async def create_tickets_batch(payloads: List[Dict[str, Any]],
+                               source: str = "manual") -> Dict[str, Any]:
+    """Create many tickets at once (e.g. selected optimizer candidates). Each
+    ticket's review pipeline runs in the background; invalid payloads are
+    collected instead of failing the whole batch."""
+    created: List[str] = []
+    errors: List[Dict[str, Any]] = []
+    for i, p in enumerate((payloads or [])[:50]):
+        try:
+            t = await create_manual_ticket(dict(p))
+            created.append(t["id"])
+        except _gw.LingXingError as e:
+            errors.append({"index": i, "error": str(e),
+                           "target": p.get("target_name") or p.get("keyword_text") or p.get("target_id")})
+    return {"created": len(created), "tickets": created, "errors": errors}
+
+
+async def batch_tickets_action(action: str, ids: List[str], *,
+                               dry_run: bool = False) -> Dict[str, Any]:
+    """Confirm/reject a human-selected set of tickets. Confirms run strictly one
+    by one through the normal gate (every gate re-checked per ticket); a real
+    write failure stops the rest — the circuit breaker has already disabled the
+    operate switch at that point."""
+    if action not in ("confirm", "reject"):
+        raise _gw.LingXingError(f"未知批量动作: {action}")
+    results: List[Dict[str, Any]] = []
+    for tid in (ids or [])[:50]:
+        try:
+            if action == "confirm":
+                t = await confirm_ticket(tid, decided_by="human-batch", dry_run=dry_run)
+            else:
+                t = await reject_ticket(tid, decided_by="human-batch")
+            results.append({"id": tid, "ok": True, "status": t["status"]})
+        except _gw.LingXingError as e:
+            results.append({"id": tid, "ok": False, "error": str(e)})
+            if action == "confirm" and not dry_run:
+                break
+    return {"results": results,
+            "done": sum(1 for r in results if r["ok"]), "total": len(ids or [])}
 
 
 async def confirm_ticket(tid: str, decided_by: str = "human", dry_run: bool = False) -> Dict[str, Any]:

@@ -1,37 +1,39 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../../api/client";
 import SheetSelect from "../../components/SheetSelect";
-import LingXingAutomation from "./LingXingAutomation";
+import { ToastProvider, useToast } from "../../components/toast";
+import { Btn, Chip, LxTable, LxTableSkeleton, fmtTs, humanErr, inputStyle } from "./lingxingUi";
+import LingXingSuggest from "./LingXingSuggest";
 import LingXingOperate from "./LingXingOperate";
 import LingXingAudit from "./LingXingAudit";
 import LingXingDashboard from "./LingXingDashboard";
-import LingXingOptimizer from "./LingXingOptimizer";
 import LingXingConfig from "./LingXingConfig";
-import LingXingHelp from "./LingXingHelp";
-
-/* ── shared mini-styles (match workbench look) ─────────────────────────── */
-const inputStyle: React.CSSProperties = {
-  background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: 3,
-  padding: "5px 7px", fontSize: 11, color: "var(--t)", outline: "none",
-  fontFamily: "inherit", boxSizing: "border-box",
-};
-function Btn({ onClick, children, primary, disabled }: any) {
-  return (
-    <button onClick={onClick} disabled={disabled} style={{
-      background: primary ? "var(--acc)" : "var(--bg2)", color: primary ? "#000" : "var(--t)",
-      border: primary ? "none" : "1px solid var(--b)", borderRadius: 4, padding: "5px 12px",
-      fontSize: 11, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1,
-    }}>{children}</button>
-  );
-}
 
 type Col = { key: string; label: string };
 type Param = { name: string; type?: string; required?: boolean; default?: any; label?: string };
 type Dataset = { key: string; label: string; group: string; params: Param[]; columns: Col[]; hint?: string };
-type Status = { master_enabled: boolean; operate_active: boolean; openapi_configured: boolean };
+type Status = {
+  master_enabled: boolean; operate_active: boolean; openapi_configured: boolean;
+  ticket_counts?: { awaiting_human?: number; reviewing?: number; executing?: number };
+};
+
+type View = "dashboard" | "browse" | "suggest" | "tickets" | "audit" | "config";
+const VIEWS: [View, string][] = [
+  ["dashboard", "大盘"], ["browse", "数据浏览"], ["suggest", "优化建议"],
+  ["tickets", "工单"], ["audit", "审计"], ["config", "配置"],
+];
+const VALID_VIEWS = new Set(VIEWS.map(([v]) => v));
+// 旧 8-tab 布局的 localStorage 值迁移到新 6-tab
+const VIEW_MIGRATE: Record<string, View> = { optimizer: "suggest", auto: "suggest", operate: "tickets", help: "config" };
 
 const LS_KEY = "lingxing.ui.v1";
 function readLS(): any { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; } }
+function normalizeView(v: any): View | null {
+  if (VALID_VIEWS.has(v)) return v as View;
+  if (v && VIEW_MIGRATE[v]) return VIEW_MIGRATE[v];
+  return null;
+}
 // relative date token like "-7d" / "-1d" → real YYYY-MM-DD (for display + date inputs)
 function resolveDate(token: any): string {
   if (typeof token !== "string") return token ?? "";
@@ -42,43 +44,62 @@ function resolveDate(token: any): string {
 }
 
 export default function LingXing() {
+  return (
+    <ToastProvider>
+      <LingXingInner />
+    </ToastProvider>
+  );
+}
+
+function LingXingInner() {
+  const [params, setParams] = useSearchParams();
   const [status, setStatus] = useState<Status | null>(null);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [view, setView] = useState<"dashboard" | "browse" | "optimizer" | "auto" | "operate" | "audit" | "config" | "help">(() => readLS().view || "dashboard");
-  const [active, setActive] = useState<string>(() => readLS().active || "sellers");
+  const [view, setViewRaw] = useState<View>(() =>
+    normalizeView(params.get("tab")) || normalizeView(readLS().view) || "dashboard");
   const [sellers, setSellers] = useState<any[]>([]);
   const [storeSid, setStoreSid] = useState<string>(() => readLS().storeSid || "");
-  const [form, setForm] = useState<Record<string, any>>({});
-  const [rows, setRows] = useState<any[]>([]);
-  const [meta, setMeta] = useState<{ count?: number; synced_at?: string; cached?: boolean } | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [active, setActive] = useState<string>(() => readLS().active || "sellers");
+  const [focusTicket, setFocusTicket] = useState<string>("");
   const [err, setErr] = useState<string>("");
+  const toast = useToast();
 
-  const ds = useMemo(() => datasets.find((d) => d.key === active), [datasets, active]);
+  const setView = (v: View) => { setViewRaw(v); };
 
-  /* remember last view / dataset / store across visits */
+  /* remember view / dataset / store; mirror the tab into the URL for deep links */
   useEffect(() => {
     try { localStorage.setItem(LS_KEY, JSON.stringify({ view, active, storeSid })); } catch { /* */ }
+    if (params.get("tab") !== view) {
+      const next = new URLSearchParams(params);
+      next.set("tab", view);
+      setParams(next, { replace: true });
+    }
   }, [view, active, storeSid]);
 
-  /* initial load */
-  useEffect(() => { void boot(); }, []);
+  /* initial load + status polling (badge / switch states stay fresh) */
+  useEffect(() => {
+    void boot();
+    const t = setInterval(() => { void refreshStatus(); }, 10000);
+    return () => clearInterval(t);
+  }, []);
   async function boot() {
     try {
       const [st, dl] = await Promise.all([
         api.get("/lingxing/status"), api.get("/lingxing/datasets"),
       ]);
       setStatus(st.data); setDatasets(dl.data.datasets || []);
-      if (!st.data.openapi_configured) setView("config");  // onboarding: land on 配置
+      if (!st.data.openapi_configured) setViewRaw("config");  // onboarding: land on 配置
       if (st.data.master_enabled) void loadSellers();
     } catch (e: any) { setErr(humanErr(e)); }
+  }
+  async function refreshStatus() {
+    try { setStatus((await api.get("/lingxing/status")).data); } catch { /* transient */ }
   }
   async function loadSellers() {
     try {
       const r = await api.post("/lingxing/read/sellers", { params: {} });
       const list = r.data.rows || [];
       setSellers(list);
-      // keep the remembered store if it still exists, else fall back to first
       if (list.length && (!storeSid || !list.some((s: any) => String(s.sid) === storeSid))) {
         setStoreSid(String(list[0].sid));
       }
@@ -88,48 +109,19 @@ export default function LingXing() {
   async function enableMaster() {
     try {
       await api.patch("/settings", { settings: { lingxing_enabled: true } });
+      toast("success", "领星数据已启用（只读）");
       await boot();
-    } catch (e: any) { setErr(humanErr(e)); }
+    } catch (e: any) { toast("error", humanErr(e)); }
   }
 
-  /* when dataset changes, seed the form from its param defaults + current store */
-  useEffect(() => {
-    if (!ds) return;
-    const f: Record<string, any> = {};
-    for (const p of ds.params) {
-      if (p.name === "sid") f[p.name] = storeSid;
-      else if (p.name === "sids") f[p.name] = storeSid;
-      else if (p.type === "date") f[p.name] = resolveDate(p.default);
-      else f[p.name] = p.default ?? "";
-    }
-    setForm(f); setRows([]); setMeta(null); setErr("");
-    // auto-load last selection so the user doesn't have to re-query each visit
-    if (view === "browse") {
-      const ready = ds.params.filter((p) => p.required).every((p) => f[p.name] !== "" && f[p.name] != null);
-      if (ready) void run(false, f);
-    }
-  }, [active, ds, storeSid]);
-
-  async function run(force = false, override?: Record<string, any>) {
-    if (!ds) return;
-    setLoading(true); setErr("");
-    try {
-      const r = await api.post(`/lingxing/read/${ds.key}`, { params: override || form, force });
-      const data = r.data;
-      setRows(Array.isArray(data.rows) ? data.rows : []);
-      setMeta({ count: data.count, synced_at: data.synced_at, cached: data.cached });
-    } catch (e: any) { setErr(humanErr(e)); setRows([]); setMeta(null); }
-    finally { setLoading(false); }
+  /* suggest → tickets 一键衔接：批量生成后带着新工单跳到工单 tab */
+  function goTickets(firstId?: string) {
+    if (firstId) setFocusTicket(firstId);
+    setViewRaw("tickets");
   }
 
-  const groups = useMemo(() => {
-    const m: Record<string, Dataset[]> = {};
-    for (const d of datasets) (m[d.group || "其它"] ||= []).push(d);
-    return m;
-  }, [datasets]);
-
-  const cols = ds?.columns?.length ? ds.columns
-    : (rows[0] ? Object.keys(rows[0]).slice(0, 8).map((k) => ({ key: k, label: k })) : []);
+  const pending = status?.ticket_counts?.awaiting_human || 0;
+  const reviewing = status?.ticket_counts?.reviewing || 0;
 
   return (
     <div>
@@ -161,119 +153,182 @@ export default function LingXing() {
         )}
       </div>
 
-      <>
-        <div className="lx-tabs">
-          {([["dashboard", "大盘"], ["browse", "数据浏览"], ["optimizer", "优化引擎"], ["auto", "自动化建议"], ["operate", "操作执行"], ["audit", "审计"], ["config", "配置"], ["help", "帮助"]] as const).map(([v, l]) => (
-            <button key={v} onClick={() => setView(v)} style={{
-              padding: "6px 14px", fontSize: 11, border: "none", borderRadius: 4, cursor: "pointer",
-              background: view === v ? "var(--acc)" : "var(--bg2)", color: view === v ? "#000" : "var(--t2)",
-              fontWeight: view === v ? 600 : 400,
-            }}>{l}</button>
-          ))}
-        </div>
-        {view === "help" ? <LingXingHelp />
-          : view === "config" ? <LingXingConfig />
-          : !status?.master_enabled ? (
-            <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--t3)", fontSize: 12 }}>
-              领星数据未启用。请到「配置」tab 填好 OpenAPI 凭证、测试连接后启用。<br />
-              <span style={{ fontSize: 11 }}>（写操作另有独立「操作开关」+ 三重复核，默认关闭）</span>
-            </div>
-          )
-          : view === "dashboard" ? <LingXingDashboard storeSid={storeSid} /> : view === "optimizer" ? <LingXingOptimizer storeSid={storeSid} /> : view === "auto" ? <LingXingAutomation /> : view === "operate" ? <LingXingOperate /> : view === "audit" ? <LingXingAudit /> : (
-        <div className="lx-split">
-          {/* dataset list */}
-          <div style={{ width: 180 }} className="lx-side">
-            {Object.entries(groups).map(([g, items]) => (
-              <div key={g} className="card" style={{ padding: 8, marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 4 }}>{g}</div>
-                {items.map((d) => (
-                  <div key={d.key} onClick={() => setActive(d.key)} style={{
-                    padding: "6px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, marginBottom: 2,
-                    background: active === d.key ? "var(--acc)" : "transparent",
-                    color: active === d.key ? "#000" : "var(--t2)", fontWeight: active === d.key ? 600 : 400,
-                  }}>{d.label}</div>
-                ))}
-              </div>
-            ))}
-          </div>
+      <div className="lx-tabs">
+        {VIEWS.map(([v, l]) => (
+          <button key={v} onClick={() => setView(v)} style={{
+            padding: "6px 14px", fontSize: 11, border: "none", borderRadius: 4, cursor: "pointer",
+            background: view === v ? "var(--acc)" : "var(--bg2)", color: view === v ? "#000" : "var(--t2)",
+            fontWeight: view === v ? 600 : 400, position: "relative",
+          }}>
+            {l}
+            {v === "tickets" && pending > 0 && (
+              <span className="lx-badge" title={`${pending} 张工单待确认`}>{pending}</span>
+            )}
+            {v === "tickets" && pending === 0 && reviewing > 0 && (
+              <span className="lx-badge lx-badge-soft" title={`${reviewing} 张工单复核中`}>{reviewing}</span>
+            )}
+          </button>
+        ))}
+      </div>
 
-          {/* main */}
-          <div className="lx-main">
-            <div className="card" style={{ padding: 12, marginBottom: 10 }}>
-              {ds?.hint && <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8 }}>{ds.hint}</div>}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                {ds?.params.map((p) => (
-                  <label key={p.name} style={{ display: "grid", gap: 3, fontSize: 10, color: "var(--t3)" }}>
-                    <span>{p.label || p.name}{p.required ? " *" : ""}</span>
-                    <input type={p.type === "date" ? "date" : "text"} value={form[p.name] ?? ""}
-                      placeholder={p.type === "date" ? "" : p.type}
-                      onChange={(e) => setForm((f) => ({ ...f, [p.name]: e.target.value }))}
-                      style={{ ...inputStyle, width: p.type === "int" ? 90 : p.type === "date" ? 140 : 150 }} />
-                  </label>
-                ))}
-                <Btn primary onClick={() => run(false)} disabled={loading}>{loading ? "查询中…" : "查询"}</Btn>
-                <Btn onClick={() => run(true)} disabled={loading}>强制刷新</Btn>
-              </div>
-              {err && <div style={{ marginTop: 8, fontSize: 11, color: "var(--red)" }}>{err}</div>}
-              {meta && (
-                <div style={{ marginTop: 8, fontSize: 10, color: "var(--t3)" }}>
-                  {meta.count ?? 0} 条 · {meta.cached ? "缓存" : "实时"} · 数据时间 {fmtTs(meta.synced_at)}
-                </div>
-              )}
-            </div>
-
-            {/* table */}
-            <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-              {rows.length === 0 ? (
-                <div style={{ padding: 30, textAlign: "center", color: "var(--t3)", fontSize: 11 }}>
-                  {loading ? "加载中…" : "暂无数据，点「查询」"}
-                </div>
-              ) : (
-                <table className="lx-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                  <thead>
-                    <tr>{cols.map((c) => (
-                      <th key={c.key} style={{ textAlign: "left", padding: "7px 10px", color: "var(--t3)", borderBottom: "1px solid var(--b)", whiteSpace: "nowrap" }}>{c.label}</th>
-                    ))}</tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r, i) => (
-                      <tr key={i} style={{ borderBottom: "1px solid var(--b)" }}>
-                        {cols.map((c) => (
-                          <td key={c.key} style={{ padding: "6px 10px", color: "var(--t2)", whiteSpace: "nowrap", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {fmtCell(r[c.key])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+      {view === "config" ? <LingXingConfig />
+        : !status?.master_enabled ? (
+          <div className="card wb-enter" style={{ padding: 40, textAlign: "center", color: "var(--t3)", fontSize: 12 }}>
+            领星数据未启用。请到「配置」tab 填好 OpenAPI 凭证、测试连接后启用。<br />
+            <span style={{ fontSize: 11 }}>（写操作另有独立「操作开关」+ 三重复核，默认关闭）</span>
           </div>
-        </div>
-        )}
-        </>
+        )
+        : view === "dashboard" ? <LingXingDashboard storeSid={storeSid} />
+        : view === "suggest" ? <LingXingSuggest storeSid={storeSid} onGoTickets={goTickets} />
+        : view === "tickets" ? <LingXingOperate focusTicket={focusTicket} onFocusConsumed={() => setFocusTicket("")} />
+        : view === "audit" ? <LingXingAudit />
+        : <Browse datasets={datasets} active={active} setActive={setActive} storeSid={storeSid} />}
     </div>
   );
 }
 
-function Chip({ on, label, warn }: { on: boolean; label: string; warn?: boolean }) {
-  const color = warn ? "var(--amber)" : on ? "var(--acc)" : "var(--t3)";
+/* ── 数据浏览（左侧数据集 + 参数 + 表格；服务端翻页 + 全列切换） ─────────── */
+function Browse({ datasets, active, setActive, storeSid }: {
+  datasets: Dataset[]; active: string; setActive: (k: string) => void; storeSid: string;
+}) {
+  const [form, setForm] = useState<Record<string, any>>({});
+  const [rows, setRows] = useState<any[]>([]);
+  const [meta, setMeta] = useState<{ count?: number; synced_at?: string; cached?: boolean } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [allCols, setAllCols] = useState(false);
+  const [err, setErr] = useState("");
+  const toast = useToast();
+  const ds = useMemo(() => datasets.find((d) => d.key === active), [datasets, active]);
+  const reqSeq = useRef(0);
+
+  /* when dataset changes, seed the form from its param defaults + current store */
+  useEffect(() => {
+    if (!ds) return;
+    const f: Record<string, any> = {};
+    for (const p of ds.params) {
+      if (p.name === "sid" || p.name === "sids") f[p.name] = storeSid;
+      else if (p.type === "date") f[p.name] = resolveDate(p.default);
+      else f[p.name] = p.default ?? "";
+    }
+    setForm(f); setRows([]); setMeta(null); setErr("");
+    const ready = ds.params.filter((p) => p.required).every((p) => f[p.name] !== "" && f[p.name] != null);
+    if (ready) void run(false, f);
+  }, [active, ds, storeSid]);
+
+  async function run(force = false, override?: Record<string, any>) {
+    if (!ds) return;
+    const seq = ++reqSeq.current;
+    setLoading(true); setErr("");
+    try {
+      const r = await api.post(`/lingxing/read/${ds.key}`, { params: override || form, force });
+      if (seq !== reqSeq.current) return;  // 过期响应（已切数据集/翻页）丢弃
+      const data = r.data;
+      setRows(Array.isArray(data.rows) ? data.rows : []);
+      setMeta({ count: data.count, synced_at: data.synced_at, cached: data.cached });
+    } catch (e: any) {
+      if (seq !== reqSeq.current) return;
+      setErr(humanErr(e)); setRows([]); setMeta(null);
+    } finally { if (seq === reqSeq.current) setLoading(false); }
+  }
+
+  /* 服务端翻页：有 offset/length 参数的数据集给上一页/下一页 */
+  const pageLen = Number(form.length) || 0;
+  const pageOff = Number(form.offset) || 0;
+  const canPage = !!ds?.params.some((p) => p.name === "offset") && pageLen > 0;
+  function turnPage(dir: 1 | -1) {
+    const next = { ...form, offset: Math.max(0, pageOff + dir * pageLen) };
+    setForm(next); void run(false, next);
+  }
+
+  async function exportCsv() {
+    if (!rows.length) return;
+    const cs = cols.map((c) => c.key);
+    const esc = (v: any) => { const s = v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const csv = [cols.map((c) => esc(c.label)).join(","), ...rows.map((r) => cs.map((k) => esc(r[k])).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a"); a.href = url; a.download = `lingxing-${ds?.key || "data"}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    toast("success", `已导出 ${rows.length} 条`);
+  }
+
+  const groups = useMemo(() => {
+    const m: Record<string, Dataset[]> = {};
+    for (const d of datasets) (m[d.group || "其它"] ||= []).push(d);
+    return m;
+  }, [datasets]);
+
+  const cols = useMemo(() => {
+    if (allCols && rows.length) {
+      const keys = new Set<string>();
+      for (const r of rows.slice(0, 50)) for (const k of Object.keys(r || {})) keys.add(k);
+      return Array.from(keys).map((k) => ({ key: k, label: k }));
+    }
+    if (ds?.columns?.length) return ds.columns;
+    return rows[0] ? Object.keys(rows[0]).map((k) => ({ key: k, label: k })) : [];
+  }, [ds, rows, allCols]);
+
   return (
-    <span style={{ fontSize: 11, color, display: "inline-flex", alignItems: "center", gap: 5 }}>
-      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, display: "inline-block" }} />{label}
-    </span>
+    <div className="lx-split">
+      {/* dataset list */}
+      <div style={{ width: 180 }} className="lx-side">
+        {Object.entries(groups).map(([g, items]) => (
+          <div key={g} className="card" style={{ padding: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 4 }}>{g}</div>
+            {items.map((d) => (
+              <div key={d.key} onClick={() => setActive(d.key)} style={{
+                padding: "6px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, marginBottom: 2,
+                background: active === d.key ? "var(--acc)" : "transparent",
+                color: active === d.key ? "#000" : "var(--t2)", fontWeight: active === d.key ? 600 : 400,
+              }}>{d.label}</div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* main */}
+      <div className="lx-main">
+        <div className="card" style={{ padding: 12, marginBottom: 10 }}>
+          {ds?.hint && <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8 }}>{ds.hint}</div>}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {ds?.params.map((p) => (
+              <label key={p.name} style={{ display: "grid", gap: 3, fontSize: 10, color: "var(--t3)" }}>
+                <span>{p.label || p.name}{p.required ? " *" : ""}</span>
+                <input type={p.type === "date" ? "date" : "text"} value={form[p.name] ?? ""}
+                  placeholder={p.type === "date" ? "" : p.type}
+                  onChange={(e) => setForm((f) => ({ ...f, [p.name]: e.target.value }))}
+                  style={{ ...inputStyle, width: p.type === "int" ? 90 : p.type === "date" ? 140 : 150 }} />
+              </label>
+            ))}
+            <Btn primary onClick={() => run(false)} disabled={loading}>{loading ? "查询中…" : "查询"}</Btn>
+            <Btn onClick={() => run(true)} disabled={loading} title="跳过本地缓存，直连领星拉最新">强制刷新</Btn>
+            {canPage && (
+              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                <Btn onClick={() => turnPage(-1)} disabled={loading || pageOff <= 0}>‹ 上一页</Btn>
+                <Btn onClick={() => turnPage(1)} disabled={loading || rows.length < pageLen}>下一页 ›</Btn>
+              </span>
+            )}
+          </div>
+          {err && <div style={{ marginTop: 8, fontSize: 11, color: "var(--red)" }}>{err}</div>}
+          {meta && (
+            <div style={{ marginTop: 8, fontSize: 10, color: "var(--t3)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span>{meta.count ?? 0} 条 · {meta.cached ? "缓存" : "实时"} · 数据时间 {fmtTs(meta.synced_at)}{canPage && pageLen > 0 ? ` · 第 ${Math.floor(pageOff / pageLen) + 1} 页` : ""}</span>
+              <label style={{ display: "inline-flex", gap: 4, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={allCols} onChange={(e) => setAllCols(e.target.checked)} />全部列
+              </label>
+              <span style={{ cursor: "pointer", color: "var(--t3)", textDecoration: "underline" }} onClick={exportCsv}>导出 CSV</span>
+            </div>
+          )}
+        </div>
+
+        {/* table */}
+        <div className="card" style={{ padding: 0 }}>
+          {loading && rows.length === 0 ? <LxTableSkeleton lines={8} /> : (
+            <div className="wb-enter" key={`${active}:${pageOff}:${allCols ? 1 : 0}`}>
+              <LxTable rows={rows} cols={cols as any} empty="暂无数据，点「查询」" />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
-}
-function fmtCell(v: any) {
-  if (v === null || v === undefined || v === "") return "—";
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
-}
-function fmtTs(ts?: string) {
-  if (!ts) return "—";
-  try { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); } catch { return ts; }
-}
-function humanErr(e: any): string {
-  return e?.response?.data?.detail || e?.message || "请求失败";
 }

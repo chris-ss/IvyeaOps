@@ -17,6 +17,9 @@ is deterministic and auditable — the LLM only reviews, it doesn't invent chang
 """
 from __future__ import annotations
 
+import asyncio
+import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -65,10 +68,13 @@ def _metrics(b: Dict[str, float]) -> Dict[str, Any]:
 
 
 async def _agg(sid: int, dataset: str, key_fn: Callable[[Dict[str, Any]], Any],
-               capture: Tuple[str, ...]) -> Dict[Any, Dict[str, Any]]:
+               capture: Tuple[str, ...],
+               on_day: Optional[Callable[[], None]] = None) -> Dict[Any, Dict[str, Any]]:
     """Sum a per-day report over the window, bucketed by key_fn; capture static fields."""
     out: Dict[Any, Dict[str, Any]] = {}
     for day in _window_dates():
+        if on_day:
+            on_day()
         try:
             rep = await _data.fetch_dataset(dataset, {"sid": sid, "report_date": day, "length": 300}, ttl=_REPORT_TTL_S)
         except _gw.LingXingError:
@@ -208,7 +214,8 @@ async def _recent_touched(sid: int) -> set:
     return touched
 
 
-async def run_store(sid: int) -> Dict[str, Any]:
+async def run_store(sid: int,
+                    progress: Optional[Callable[[str, int, int], None]] = None) -> Dict[str, Any]:
     c = _cfg()
     factor = _f(c.get("lingxing_target_acos_factor")) or 0.7
     neg_clicks = int(c.get("lingxing_neg_min_clicks") or 15)
@@ -219,8 +226,22 @@ async def run_store(sid: int) -> Dict[str, Any]:
     floor = _f(c.get("lingxing_bid_floor")) or 0.02
     win = int(c.get("lingxing_opt_window_days") or 30)
 
+    # progress: 3 report datasets × win days + 4 fixed lookups
+    total_steps = 3 * win + 4
+    state = {"done": 0}
+
+    def tick(phase: str) -> None:
+        state["done"] += 1
+        if progress:
+            try:
+                progress(phase, min(state["done"], total_steps), total_steps)
+            except Exception:  # noqa: BLE001 — progress must never break the run
+                pass
+
     margin = await _store_margin(sid)
+    tick("读取店铺毛利")
     cmargins = await _campaign_margins(sid)
+    tick("读取活动毛利")
     t_over, m_over = _f(c.get("lingxing_target_acos_override")), _f(c.get("lingxing_margin_override"))
 
     def margin_of(cid: Any) -> Optional[float]:
@@ -259,7 +280,8 @@ async def run_store(sid: int) -> Dict[str, Any]:
     # ---- 否词 + 收割：search term report ----
     st = await _agg(sid, "sp_search_term_report",
                     lambda r: (str(r.get("campaign_id")), str(r.get("query") or "")) if r.get("query") else None,
-                    capture=("query", "campaign_id", "ad_group_id", "match_type"))
+                    capture=("query", "campaign_id", "ad_group_id", "match_type"),
+                    on_day=lambda: tick("聚合搜索词报表"))
     for (cid, q), b in st.items():
         m = _metrics(b["_b"])
         if m["clicks"] >= neg_clicks and m["orders"] == 0 and sig_ok(q):
@@ -286,8 +308,10 @@ async def run_store(sid: int) -> Dict[str, Any]:
 
     # ---- 降bid / 加bid：keyword report + live bids ----
     kr = await _agg(sid, "sp_keyword_report", lambda r: str(r.get("keyword_id")) if r.get("keyword_id") else None,
-                    capture=("keyword_id", "keyword_text", "match_type", "campaign_id"))
+                    capture=("keyword_id", "keyword_text", "match_type", "campaign_id"),
+                    on_day=lambda: tick("聚合关键词报表"))
     bids = await _bid_map(sid) if kr else {}
+    tick("读取当前竞价")
     for kid, b in kr.items():
         m = _metrics(b["_b"])
         cur = bids.get(kid, {}).get("bid")
@@ -320,8 +344,10 @@ async def run_store(sid: int) -> Dict[str, Any]:
 
     # ---- 加预算：campaign report + budgets ----
     cr = await _agg(sid, "sp_campaign_report", lambda r: str(r.get("campaign_id")) if r.get("campaign_id") else None,
-                    capture=("campaign_id",))
+                    capture=("campaign_id",),
+                    on_day=lambda: tick("聚合活动报表"))
     budgets = await _campaign_budgets(sid) if cr else {}
+    tick("读取活动预算")
     for cid, b in cr.items():
         m = _metrics(b["_b"])
         info = budgets.get(cid) or {}
@@ -360,6 +386,90 @@ async def run_store(sid: int) -> Dict[str, Any]:
         "breakeven_acos": breakeven, "per_campaign": bool(cmargins), "note": note,
         "count": len(cands), "candidates": cands,
     }
+
+
+# --- background runs (persisted, with progress) ------------------------------
+def _save_opt_run(run: Dict[str, Any]) -> None:
+    conn = _gw.connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO lingxing_optimizer_runs "
+            "(id,sid,started_at,finished_at,status,phase,done,total,summary,result_json,error) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (run["id"], run.get("sid"), run.get("started_at"), run.get("finished_at"),
+             run.get("status"), run.get("phase", ""), int(run.get("done") or 0),
+             int(run.get("total") or 0), run.get("summary", ""),
+             json.dumps(run.get("result"), ensure_ascii=False, default=str) if run.get("result") is not None else "",
+             run.get("error", "")))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_opt_runs(sid: Optional[int] = None, limit: int = 20) -> List[Dict[str, Any]]:
+    conn = _gw.connect()
+    try:
+        q = ("SELECT id,sid,started_at,finished_at,status,phase,done,total,summary,error "
+             "FROM lingxing_optimizer_runs ")
+        args: List[Any] = []
+        if sid is not None:
+            q += "WHERE sid=? "
+            args.append(int(sid))
+        q += "ORDER BY started_at DESC LIMIT ?"
+        args.append(int(limit))
+        cur = conn.execute(q, args)
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_opt_run(run_id: str) -> Optional[Dict[str, Any]]:
+    conn = _gw.connect()
+    try:
+        cur = conn.execute("SELECT * FROM lingxing_optimizer_runs WHERE id=?", (run_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [c[0] for c in cur.description]
+        d = dict(zip(cols, row))
+    finally:
+        conn.close()
+    try:
+        d["result"] = json.loads(d.pop("result_json") or "null")
+    except Exception:
+        d["result"] = None
+    return d
+
+
+def start_background_run(sid: int) -> Dict[str, Any]:
+    """Kick one rule-engine run in the background; returns the run row
+    immediately so the UI can poll ``get_opt_run`` for progress + result."""
+    run: Dict[str, Any] = {
+        "id": uuid.uuid4().hex[:12], "sid": int(sid),
+        "started_at": datetime.now(timezone.utc).isoformat(), "finished_at": None,
+        "status": "running", "phase": "启动中", "done": 0, "total": 0,
+        "summary": "", "result": None, "error": "",
+    }
+    _save_opt_run(run)
+
+    def _progress(phase: str, done: int, total: int) -> None:
+        run.update(phase=phase, done=done, total=total)
+        _save_opt_run(run)
+
+    async def _go() -> None:
+        try:
+            res = await run_store(int(sid), progress=_progress)
+            run.update(status="done", phase="完成", result=res,
+                       summary=f"候选 {res.get('count', 0)} 条 · {res.get('note', '')}"[:200],
+                       finished_at=datetime.now(timezone.utc).isoformat())
+        except Exception as e:  # noqa: BLE001
+            run.update(status="failed", error=str(e)[:500], phase="失败",
+                       finished_at=datetime.now(timezone.utc).isoformat())
+        _save_opt_run(run)
+
+    asyncio.create_task(_go(), name=f"lingxing-opt-{run['id']}")
+    return run
 
 
 def _bid_cand(lever, sid, kid, name, cur, new_bid, m, target, breakeven, rule, rationale):

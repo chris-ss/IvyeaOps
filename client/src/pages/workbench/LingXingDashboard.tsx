@@ -3,24 +3,17 @@ import { api } from "../../api/client";
 import TrendChart, { type TrendSeries } from "./home/TrendChart";
 import SheetSelect from "../../components/SheetSelect";
 import { sidCurrencyMap, fmtBudget, type Cur } from "./lingxingCurrency";
+import { Btn, LxKpiSkeleton, humanErr, inputStyle, num, pct } from "./lingxingUi";
 
-const inputStyle: React.CSSProperties = {
-  background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: 3,
-  padding: "5px 7px", fontSize: 11, color: "var(--t)", outline: "none", fontFamily: "inherit", boxSizing: "border-box",
-};
-function Btn({ onClick, children, disabled }: any) {
-  return <button onClick={onClick} disabled={disabled} style={{ background: "var(--bg2)", color: "var(--t)", border: "1px solid var(--b)", borderRadius: 4, padding: "5px 12px", fontSize: 11, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}>{children}</button>;
-}
-
-const pct = (v: any) => (v == null ? "—" : (v * 100).toFixed(1) + "%");
-const num = (v: any) => (v == null ? "—" : Number(v).toLocaleString("en-US"));
+const CMP_LS = "lingxing.dash.cmp";
 
 export default function LingXingDashboard({ storeSid }: { storeSid?: string }) {
   const [sellers, setSellers] = useState<any[]>([]);
   const sid = storeSid || "";   // store is driven by the page-level selector
   const [days, setDays] = useState<number>(7);
   const [data, setData] = useState<any>(null);
-  const [cmp, setCmp] = useState<any>(null);       // all-store comparison (opt-in)
+  const [cmp, setCmp] = useState<any>(null);       // all-store comparison (opt-in, remembered)
+  const [cmpOn, setCmpOn] = useState<boolean>(() => localStorage.getItem(CMP_LS) === "1");
   const [loading, setLoading] = useState(false);
   const [cmpLoading, setCmpLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -47,8 +40,16 @@ export default function LingXingDashboard({ storeSid }: { storeSid?: string }) {
     try { setCmp((await api.get(`/lingxing/dashboard?sids=&days=${days}`)).data); }
     catch (e: any) { setErr(humanErr(e)); } finally { setCmpLoading(false); }
   }
+  function toggleCmp() {
+    const next = !cmpOn;
+    setCmpOn(next); localStorage.setItem(CMP_LS, next ? "1" : "0");
+    if (next && !cmp) void loadCmp();
+  }
+  /* remembered preference: auto-load the all-store comparison on entry */
+  useEffect(() => { if (cmpOn && !cmp && sellers.length) void loadCmp(); /* eslint-disable-next-line */ }, [sellers, days]);
 
   const t = data?.totals;
+  const prev = data?.prev_totals;
   const trendSeries: TrendSeries[] = useMemo(() => {
     const tr = data?.trend || [];
     return [
@@ -65,22 +66,24 @@ export default function LingXingDashboard({ storeSid }: { storeSid?: string }) {
         <span style={{ fontSize: 11, color: "var(--t3)" }}>店铺：{sellers.find((s) => String(s.sid) === sid)?.name || sid || "（上方选择）"}</span>
         <span style={{ fontSize: 11, color: "var(--t3)" }}>窗口</span>
         <SheetSelect value={String(days)} onChange={(v) => setDays(Number(v))} title="时间窗口" style={{ ...inputStyle, width: 100 }}
-          options={[7, 14, 30].map((d) => ({ value: String(d), label: `近 ${d} 天` }))} />
+          options={[7, 14, 30, 60].map((d) => ({ value: String(d), label: `近 ${d} 天` }))} />
         <Btn onClick={load} disabled={loading}>{loading ? "聚合中…" : "刷新"}</Btn>
         {err && <span style={{ fontSize: 11, color: "var(--red)" }}>{err}</span>}
-        <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--t3)" }}>币种随店铺（{cur?.code || "—"}）</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--t3)" }}>环比 = 上一个 {days} 天 · 币种随店铺（{cur?.code || "—"}）</span>
       </div>
 
-      {/* KPI cards (single store, native currency) */}
+      {/* KPI cards (single store, native currency, period-over-period) */}
+      {loading && !t ? <LxKpiSkeleton n={7} /> : (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 10 }}>
-        <Kpi label="花费" value={t ? fmtBudget(t.spend, cur) : "—"} />
-        <Kpi label="销售额" value={t ? fmtBudget(t.sales, cur) : "—"} />
-        <Kpi label="ACOS" value={pct(t?.acos)} hint={t?.acos != null && t.acos > 0.35 ? "偏高" : ""} />
-        <Kpi label="ROAS" value={t?.roas ?? "—"} />
-        <Kpi label="订单" value={num(t?.orders)} />
+        <Kpi label="花费" value={t ? fmtBudget(t.spend, cur) : "—"} delta={delta(t?.spend, prev?.spend)} invert />
+        <Kpi label="销售额" value={t ? fmtBudget(t.sales, cur) : "—"} delta={delta(t?.sales, prev?.sales)} />
+        <Kpi label="ACOS" value={pct(t?.acos)} hint={t?.acos != null && t.acos > 0.35 ? "偏高" : ""} delta={delta(t?.acos, prev?.acos)} invert />
+        <Kpi label="ROAS" value={t?.roas ?? "—"} delta={delta(t?.roas, prev?.roas)} />
+        <Kpi label="订单" value={num(t?.orders)} delta={delta(t?.orders, prev?.orders)} />
         <Kpi label="点击 / 曝光" value={t ? `${num(t.clicks)} / ${num(t.impressions)}` : "—"} />
         <Kpi label="CTR / CVR" value={t ? `${pct(t.ctr)} / ${pct(t.cvr)}` : "—"} />
       </div>
+      )}
 
       {/* trend */}
       <div className="card" style={{ padding: 12, marginBottom: 10 }}>
@@ -93,13 +96,16 @@ export default function LingXingDashboard({ storeSid }: { storeSid?: string }) {
         <CampTable rows={data?.by_campaign || []} cur={cur} loading={loading} />
       </Card>
 
-      {/* all-store comparison (opt-in; each native currency, no cross-currency total) */}
+      {/* all-store comparison (opt-in but remembered; each native currency) */}
       <div className="card" style={{ padding: 0, marginTop: 10 }}>
         <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--b)", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 11, color: "var(--t3)" }}>全部店铺对比（各店本币，不跨币种汇总）</span>
+          <label style={{ display: "inline-flex", gap: 4, alignItems: "center", cursor: "pointer", fontSize: 10, color: "var(--t3)" }}>
+            <input type="checkbox" checked={cmpOn} onChange={toggleCmp} />进入时自动加载
+          </label>
           <Btn onClick={loadCmp} disabled={cmpLoading}>{cmpLoading ? "加载中…(首次较慢)" : cmp ? "刷新对比" : "加载全部店铺对比"}</Btn>
         </div>
-        {cmp && (
+        {cmpOn && cmp && (
           <div style={{ overflowX: "auto" }}>
             <table className="lx-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead><tr>{["店铺", "花费", "销售额", "ACOS", "ROAS", "订单"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
@@ -123,11 +129,21 @@ export default function LingXingDashboard({ storeSid }: { storeSid?: string }) {
   );
 }
 
-function Kpi({ label, value, hint }: { label: string; value: any; hint?: string }) {
+/** percentage change of `cur` vs `prev`; null when not computable */
+function delta(cur: any, prev: any): number | null {
+  const c = Number(cur), p = Number(prev);
+  if (!Number.isFinite(c) || !Number.isFinite(p) || p === 0) return null;
+  return (c - p) / Math.abs(p) * 100;
+}
+function Kpi({ label, value, hint, delta: d, invert }: { label: string; value: any; hint?: string; delta?: number | null; invert?: boolean }) {
+  // invert=true → 上升是坏事（花费/ACOS），用红/绿相反着色
+  const good = d == null ? false : invert ? d < 0 : d > 0;
+  const color = d == null || Math.abs(d) < 0.05 ? "var(--t3)" : good ? "var(--acc)" : "var(--amber)";
   return (
     <div className="card" style={{ padding: "10px 12px" }}>
       <div style={{ fontSize: 10, color: "var(--t3)" }}>{label}</div>
       <div style={{ fontSize: 17, fontWeight: 600, marginTop: 2 }}>{value}{hint && <span style={{ fontSize: 10, color: "var(--amber)", marginLeft: 4 }}>{hint}</span>}</div>
+      {d != null && <div style={{ fontSize: 10, color, marginTop: 1 }}>{d > 0 ? "▲" : d < 0 ? "▼" : "＝"} {Math.abs(d).toFixed(1)}% 环比</div>}
     </div>
   );
 }
@@ -161,4 +177,3 @@ function CampTable({ rows, cur, loading }: { rows: any[]; cur?: Cur; loading: bo
 }
 const th: React.CSSProperties = { textAlign: "left", padding: "6px 10px", color: "var(--t3)", borderBottom: "1px solid var(--b)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "6px 10px", color: "var(--t2)", whiteSpace: "nowrap" };
-function humanErr(e: any): string { return e?.response?.data?.detail || e?.message || "请求失败"; }

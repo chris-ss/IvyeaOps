@@ -175,6 +175,24 @@ def init_db() -> None:
             )
             """
         )
+        # Rule-engine optimizer runs (background jobs with progress + result).
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lingxing_optimizer_runs (
+                id          TEXT PRIMARY KEY,
+                sid         INTEGER,
+                started_at  TEXT,
+                finished_at TEXT,
+                status      TEXT,            -- running|done|failed
+                phase       TEXT,            -- human-readable current step
+                done        INTEGER,         -- progress numerator
+                total       INTEGER,         -- progress denominator
+                summary     TEXT,
+                result_json TEXT,
+                error       TEXT
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -273,6 +291,24 @@ def is_operate_active() -> bool:
     return True
 
 
+def _ticket_counts() -> Dict[str, int]:
+    """Ticket status counts for the UI badge (awaiting_human / reviewing)."""
+    out = {"awaiting_human": 0, "reviewing": 0, "executing": 0}
+    try:
+        conn = _connect()
+        try:
+            cur = conn.execute(
+                "SELECT status, COUNT(*) FROM lingxing_op_ticket "
+                "WHERE status IN ('awaiting_human','reviewing','executing') GROUP BY status")
+            for status_, n in cur.fetchall():
+                out[str(status_)] = int(n)
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return out
+
+
 def status() -> Dict[str, Any]:
     """Config/health snapshot for the UI (no secrets)."""
     cfg = _cfg()
@@ -300,6 +336,7 @@ def status() -> Dict[str, Any]:
         "scope_asins": cfg.get("lingxing_scope_asins") or "",
         "max_ops_per_run": cfg.get("lingxing_max_ops_per_run"),
         "max_change_pct": cfg.get("lingxing_max_change_pct"),
+        "ticket_counts": _ticket_counts(),
     }
 
 

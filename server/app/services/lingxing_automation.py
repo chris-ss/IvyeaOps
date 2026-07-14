@@ -241,6 +241,7 @@ async def run_once(trigger: str = "manual") -> Dict[str, Any]:
                 run.update(status="done", summary="窗口内无广告数据，无建议。",
                            proposals=[], finished_at=datetime.now(timezone.utc).isoformat())
                 _save_run(run)
+                await _notify_run(run)
                 return run
 
             from app.services import lingxing_operate as _op
@@ -255,12 +256,30 @@ async def run_once(trigger: str = "manual") -> Dict[str, Any]:
             run.update(status="done", summary=parsed.get("summary", ""),
                        proposals=proposals, finished_at=datetime.now(timezone.utc).isoformat())
             _save_run(run)
+            await _notify_run(run)
             return run
         except Exception as e:  # noqa: BLE001
             run.update(status="failed", error=str(e)[:500],
                        finished_at=datetime.now(timezone.utc).isoformat())
             _save_run(run)
+            await _notify_run(run)
             return run
+
+
+async def _notify_run(run: Dict[str, Any]) -> None:
+    """Best-effort webhook summary when an advisory run finishes (esp. the
+    scheduled weekly run, which no one is watching)."""
+    try:
+        from app.services import lingxing_operate as _op
+        if run.get("status") == "failed":
+            await _op.send_alert(f"自动化建议运行失败：{run.get('error', '')[:200]}")
+        else:
+            n = len(run.get("proposals") or [])
+            await _op.send_alert(
+                f"自动化建议完成（{'定时' if run.get('trigger') == 'scheduled' else '手动'}）："
+                f"{n} 条建议。{(run.get('summary') or '')[:150]}")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def start_background_run(trigger: str = "manual") -> str:

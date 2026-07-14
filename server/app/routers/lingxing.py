@@ -74,18 +74,38 @@ async def audit(limit: int = 100) -> Dict[str, Any]:
 
 
 @router.get("/optimizer/run")
-async def optimizer_run(sid: int, days: int = 0) -> Dict[str, Any]:
-    """Deterministic rule-engine candidates for one store (advisory).
-    Honors the configured target-ACOS-from-margin + conservative thresholds."""
+async def optimizer_run_legacy() -> Dict[str, Any]:
+    """Legacy synchronous entry — replaced by the background-job flow."""
+    raise HTTPException(status_code=410,
+                        detail="该接口已改为后台任务：POST /optimizer/run 启动，GET /optimizer/runs/{id} 轮询进度")
+
+
+@router.post("/optimizer/run")
+async def optimizer_run_start(sid: int, days: int = 0) -> Dict[str, Any]:
+    """Start one deterministic rule-engine run in the background (advisory).
+    Returns the run row immediately; poll ``/optimizer/runs/{id}`` for
+    progress + result. Honors target-ACOS-from-margin + conservative thresholds."""
     from app.services import lingxing_optimizer as lxopt
     if not lx.is_master_enabled():
         raise HTTPException(status_code=400, detail="领星集成未启用（总开关关闭）")
     if days:
         _hs.save({"lingxing_opt_window_days": max(7, min(days, 60))})
-    try:
-        return await lxopt.run_store(int(sid))
-    except lx.LingXingError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return lxopt.start_background_run(int(sid))
+
+
+@router.get("/optimizer/runs")
+async def optimizer_runs(sid: Optional[int] = None, limit: int = 20) -> Dict[str, Any]:
+    from app.services import lingxing_optimizer as lxopt
+    return {"runs": lxopt.list_opt_runs(sid=sid, limit=max(1, min(limit, 50)))}
+
+
+@router.get("/optimizer/runs/{run_id}")
+async def optimizer_run_detail(run_id: str) -> Dict[str, Any]:
+    from app.services import lingxing_optimizer as lxopt
+    run = lxopt.get_opt_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="未找到该优化运行")
+    return run
 
 
 @router.get("/dashboard")
@@ -157,6 +177,16 @@ class ConfirmRequest(BaseModel):
     dry_run: bool = False
 
 
+class BatchTickets(BaseModel):
+    payloads: list[Dict[str, Any]] = []
+
+
+class BatchAction(BaseModel):
+    action: str  # confirm | reject
+    ids: list[str] = []
+    dry_run: bool = False
+
+
 class ManualTicket(BaseModel):
     op_type: str
     sid: int
@@ -208,6 +238,26 @@ async def operate_op_types() -> Dict[str, Any]:
 async def operate_manual(body: ManualTicket) -> Dict[str, Any]:
     try:
         return await lxo.create_manual_ticket(body.model_dump())
+    except lx.LingXingError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/operate/batch-tickets")
+async def operate_batch_tickets(body: BatchTickets) -> Dict[str, Any]:
+    """Create tickets for a selected set of optimizer/advisory payloads.
+    Returns immediately; each ticket's review pipeline runs in the background."""
+    try:
+        return await lxo.create_tickets_batch(body.payloads)
+    except lx.LingXingError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/operate/tickets/batch")
+async def operate_tickets_batch(body: BatchAction) -> Dict[str, Any]:
+    """Confirm/reject a human-selected set of tickets (each still passes every
+    per-ticket gate; a real write failure stops the rest + trips the breaker)."""
+    try:
+        return await lxo.batch_tickets_action(body.action, body.ids, dry_run=body.dry_run)
     except lx.LingXingError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
