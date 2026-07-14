@@ -58,8 +58,12 @@
 
 .ivyea-agent-panel {
   position: fixed;
-  left: 50%;
-  top: 50%;
+  /* Center via inset+margin (not translate(-50%,-50%)): a transform-centered box
+     of odd pixel width lands on a half-pixel and, with will-change promoting it to
+     its own composited layer, rasterizes text off the pixel grid → blurry. margin
+     auto centering snaps to integer layout pixels and keeps text crisp. */
+  inset: 0;
+  margin: auto;
   z-index: 2399;
   width: min(680px, calc(100vw - 48px));
   height: min(720px, calc(100vh - 80px));
@@ -72,10 +76,7 @@
   background: var(--ivyea-agent-surface);
   color: var(--t);
   box-shadow: 0 26px 80px rgba(0, 0, 0, .44);
-  transform: translate(-50%, -50%);
-  transform-origin: center;
   animation: ivyeaAgentPanelIn .18s cubic-bezier(.2, .8, .2, 1);
-  will-change: transform, opacity;
 }
 
 .ivyea-agent-head {
@@ -196,23 +197,13 @@
   flex-direction: column;
 }
 
-.ivyea-agent-chatbar {
-  display: flex;
+/* Inline "处理中" spinner shown inside the pending assistant bubble before the
+   first streamed token (replaces the old separate second bubble). */
+.ivyea-agent-typing {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--b);
-  flex-shrink: 0;
-}
-
-.ivyea-agent-session-id {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-left: auto;
+  gap: 7px;
   color: var(--t3);
-  font-size: 10px;
 }
 
 .ivyea-agent-history-view {
@@ -717,11 +708,11 @@ a.ivyea-agent-mini-btn {
 @keyframes ivyeaAgentPanelIn {
   from {
     opacity: 0;
-    transform: translate(-50%, -47%) scale(.94);
+    transform: scale(.96);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: scale(1);
   }
 }
 
@@ -739,15 +730,13 @@ a.ivyea-agent-mini-btn {
   }
 
   .ivyea-agent-panel {
-    left: 50%;
-    top: 50%;
+    inset: 0;
+    margin: auto;
     width: calc(100vw - 20px);
     height: min(78vh, calc(100vh - 92px));
     min-height: 0;
     border-radius: 8px;
     border: 1px solid var(--ivyea-agent-border);
-    transform: translate(-50%, -50%);
-    transform-origin: center;
   }
 
   .ivyea-agent-sub {

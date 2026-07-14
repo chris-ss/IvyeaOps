@@ -698,6 +698,16 @@ export default function IvyeaAgentDock() {
               </div>
             </div>
             <div className="ivyea-agent-head-actions">
+              {tab === "chat" && (
+                <>
+                  <button className="ivyea-agent-icon-btn" onClick={newSession} title="新会话">
+                    <Plus size={16} />
+                  </button>
+                  <button className="ivyea-agent-icon-btn" onClick={loadSessions} disabled={loadingHistory} title="历史会话">
+                    {loadingHistory ? <Loader2 size={15} className="spin" /> : <History size={15} />}
+                  </button>
+                </>
+              )}
               <button className="ivyea-agent-icon-btn" onClick={loadStatus} disabled={loadingStatus} title="刷新">
                 <RefreshCw size={15} className={loadingStatus ? "spin" : ""} />
               </button>
@@ -717,15 +727,6 @@ export default function IvyeaAgentDock() {
 
           {tab === "chat" && (
             <div className="ivyea-agent-chat">
-              <div className="ivyea-agent-chatbar">
-                <button className="ivyea-agent-mini-btn" onClick={loadSessions} disabled={loadingHistory}>
-                  {loadingHistory ? <Loader2 size={13} className="spin" /> : <History size={13} />}历史
-                </button>
-                <button className="ivyea-agent-mini-btn" onClick={newSession}>
-                  <Plus size={13} />新会话
-                </button>
-                {sessionId && <span className="ivyea-agent-session-id">{activeSessionName}</span>}
-              </div>
               {historyView !== "chat" ? (
                 <div className="ivyea-agent-history-view">
                   <div className="ivyea-agent-history-head">
@@ -789,12 +790,21 @@ export default function IvyeaAgentDock() {
                         <span>亚马逊运营、Listing、广告、知识库和代码任务都可以问。</span>
                       </div>
                     )}
-                    {messages.map((m, idx) => (
-                      <div key={idx} className={`ivyea-agent-msg ${m.role}`}>
-                        <div>{m.text}</div>
-                      </div>
-                    ))}
-                    {sending && <div className="ivyea-agent-msg assistant"><Loader2 size={14} className="spin" /> 处理中...</div>}
+                    {messages.map((m, idx) => {
+                      // The assistant bubble is pushed empty at send time and filled by
+                      // streaming tokens. Before the first token it shows an inline
+                      // "处理中" spinner (one box, not two); a stray empty bubble left
+                      // after sending finishes is hidden.
+                      const pendingAssistant = m.role === "assistant" && !m.text;
+                      if (pendingAssistant && !sending) return null;
+                      return (
+                        <div key={idx} className={`ivyea-agent-msg ${m.role}`}>
+                          {pendingAssistant
+                            ? <span className="ivyea-agent-typing"><Loader2 size={14} className="spin" /> 处理中...</span>
+                            : <div>{m.text}</div>}
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="ivyea-agent-composer">
                     <input ref={composerFileRef} type="file" style={{ display: "none" }} onChange={attachFileToChat} />
