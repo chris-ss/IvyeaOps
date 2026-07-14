@@ -412,13 +412,15 @@ def _set_colour_prompt(style: dict, shot_type: str) -> str:
 def _presence_clause(presence: str, product_scale: float) -> str:
     if presence == "hero":
         return (
-            "; the exact reference product is the dominant subject, "
-            f"filling roughly {int(product_scale * 100)}% of the frame"
+            "; the exact reference product is the dominant subject, shown complete and "
+            "entirely within the frame — the whole product is visible and never cropped by "
+            f"the canvas edges — filling roughly {int(product_scale * 100)}% of the frame"
         )
     if presence == "supporting":
         return (
-            "; the exact reference product appears clearly but shares the stage, "
-            f"occupying roughly {int(product_scale * 100)}% of the frame"
+            "; the exact reference product appears clearly but shares the stage, shown "
+            "complete and entirely within the frame — the whole product is visible and never "
+            f"cropped by the canvas edges — occupying roughly {int(product_scale * 100)}% of the frame"
         )
     if presence == "environmental":
         return (

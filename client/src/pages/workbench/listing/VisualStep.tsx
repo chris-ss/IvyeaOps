@@ -359,14 +359,20 @@ export default function VisualStep({ state }: { state: ListingState }) {
             </details>
           )}
 
-          {(plan.set_qa?.issues?.length ?? 0) > 0 && (
-            <details className="vs-issues" open>
-              <summary><AlertTriangle size={14} /> 整套质检未通过 <ChevronDown size={14} /></summary>
-              <div>{plan.set_qa!.issues!.map((issue, index) => (
-                <p key={`${issue.code}-${index}`} className="error">阻塞 · {issue.message}</p>
-              ))}</div>
-            </details>
-          )}
+          {(plan.set_qa?.issues?.length ?? 0) > 0 && (() => {
+            const setIssues = plan.set_qa!.issues!;
+            const hasError = setIssues.some((issue) => issue.severity === "error");
+            return (
+              <details className="vs-issues" open={hasError}>
+                <summary><AlertTriangle size={14} /> {hasError ? "整套质检未通过" : "整套复核提示"} <ChevronDown size={14} /></summary>
+                <div>{setIssues.map((issue, index) => (
+                  <p key={`${issue.code}-${index}`} className={issue.severity === "error" ? "error" : "warning"}>
+                    {issue.severity === "error" ? "阻塞" : "建议"} · {issue.message}
+                  </p>
+                ))}</div>
+              </details>
+            );
+          })()}
 
           <div className="vs-workspace">
             <div className="vs-board">
