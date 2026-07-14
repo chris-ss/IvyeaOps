@@ -19,6 +19,44 @@ function fileToDataUrl(file: Blob): Promise<string> {
   });
 }
 
+// Downscale a base64 data-URL image before it travels to the server: shrinks the
+// upload body (fewer弱网 resets) and keeps localStorage session records small.
+// http(s) URLs pass through untouched — the backend fetches those itself.
+function downscaleDataUrl(dataUrl: string, maxEdge = 1536, quality = 0.85): Promise<string> {
+  if (!dataUrl.startsWith("data:image/")) return Promise.resolve(dataUrl);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const { width, height } = img;
+        const scale = Math.min(1, maxEdge / Math.max(width, height));
+        if (scale >= 1) { resolve(dataUrl); return; } // already small enough — keep original
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { resolve(dataUrl); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const out = canvas.toDataURL("image/jpeg", quality);
+        // Guard against pathological cases where re-encoding grew the payload.
+        resolve(out && out.length < dataUrl.length ? out : dataUrl);
+      } catch { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+// Map raw fetch failures (browser TypeError "Failed to fetch" and friends) to a
+// readable Chinese message; keep meaningful backend messages as-is.
+function friendlyNetError(e: any): string {
+  const msg = String(e?.message || e || "");
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(msg)) {
+    return "网络不稳定，任务可能已在后台完成，请稍后在「历史」查看或重试";
+  }
+  return msg || "请求失败";
+}
+
 interface ImageTurn {
   id: string;
   prompt: string;
@@ -63,19 +101,19 @@ export default function ImageGen() {
   const [loading, setLoading] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sourceImage, setSourceImage] = useState<string | null>(null);
-  const timerRef = useRef<number | null>(null);
+  const timerRef = useRef<number | null>(null); // recursive-poll setTimeout id
   const bodyRef = useRef<HTMLDivElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
   // Pick up a source image handed off from the Listing board ("进一步优化").
   useEffect(() => {
     try {
       const seed = sessionStorage.getItem(SEED_KEY);
       if (seed) {
-        setSourceImage(seed);
         sessionStorage.removeItem(SEED_KEY);
+        downscaleDataUrl(seed).then(setSourceImage).catch(() => setSourceImage(seed));
       }
     } catch { /* ignore */ }
   }, []);
@@ -86,7 +124,7 @@ export default function ImageGen() {
     if (!file) return;
     if (!file.type.startsWith("image/")) return;
     try {
-      setSourceImage(await fileToDataUrl(file));
+      setSourceImage(await downscaleDataUrl(await fileToDataUrl(file)));
     } catch { /* ignore */ }
   }
 
@@ -122,65 +160,59 @@ export default function ImageGen() {
       const sz = size.trim() || "1024x1024";
       const taskId = await submitImage(text, sz, n, src ? [src] : undefined);
       const started = Date.now();
-      timerRef.current = window.setInterval(async () => {
+
+      // Patch just this turn by id; ignore if the user already removed it.
+      const patchTurn = (patch: Partial<ImageTurn>) => setTurns(prev => {
+        const idx = prev.findIndex(t => t.id === turnId);
+        if (idx < 0) return prev;
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...patch };
+        return next;
+      });
+      const stop = (patch: Partial<ImageTurn>) => {
+        if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+        patchTurn({ loading: false, ...patch });
+        setLoading(false);
+      };
+
+      const PING_MS = 4000;
+      const MAX_NET_FAILS = 4;  // tolerate ~15s of transient network errors before giving up
+      let netFails = 0;
+      // Recursive setTimeout (not setInterval): the next poll is only scheduled
+      // after the current one settles, so slow responses can never stack up.
+      const poll = async () => {
         try {
           const s = await imageStatus(taskId);
-          setTurns(prev => {
-            const next = [...prev];
-            const idx = next.findIndex(t => t.id === turnId);
-            if (idx < 0) return prev;
-            next[idx] = { ...next[idx], progress: s.progress || 0 };
-            return next;
-          });
+          netFails = 0;
           if (s.status === "completed") {
-            clearInterval(timerRef.current!); timerRef.current = null;
-            setTurns(prev => {
-              const next = [...prev];
-              const idx = next.findIndex(t => t.id === turnId);
-              if (idx < 0) return prev;
-              next[idx] = { ...next[idx], images: s.images, loading: false, progress: undefined };
-              return next;
-            });
-            setLoading(false);
+            stop({ images: s.images, progress: undefined });
           } else if (s.status === "failed" || s.error) {
-            clearInterval(timerRef.current!); timerRef.current = null;
-            setTurns(prev => {
-              const next = [...prev];
-              const idx = next.findIndex(t => t.id === turnId);
-              if (idx < 0) return prev;
-              next[idx] = { ...next[idx], error: s.error || "生图失败", loading: false };
-              return next;
-            });
-            setLoading(false);
+            stop({ error: s.error || "生图失败" });
           } else if (Date.now() - started > 180000) {
-            clearInterval(timerRef.current!); timerRef.current = null;
-            setTurns(prev => {
-              const next = [...prev];
-              const idx = next.findIndex(t => t.id === turnId);
-              if (idx < 0) return prev;
-              next[idx] = { ...next[idx], error: "生图超时（>3分钟）", loading: false };
-              return next;
-            });
-            setLoading(false);
+            stop({ error: "生图超时（>3分钟）" });
+          } else {
+            patchTurn({ progress: s.progress || 0 });
+            timerRef.current = window.setTimeout(poll, PING_MS);
           }
         } catch (e: any) {
-          clearInterval(timerRef.current!); timerRef.current = null;
-          setTurns(prev => {
-            const next = [...prev];
-            const idx = next.findIndex(t => t.id === turnId);
-            if (idx < 0) return prev;
-            next[idx] = { ...next[idx], error: e?.message || "查询失败", loading: false };
-            return next;
-          });
-          setLoading(false);
+          // A single dropped poll must not kill the job — the result is often
+          // already being produced server-side. Only give up after several
+          // consecutive failures.
+          netFails += 1;
+          if (netFails >= MAX_NET_FAILS) {
+            stop({ error: friendlyNetError(e) });
+          } else {
+            timerRef.current = window.setTimeout(poll, PING_MS);
+          }
         }
-      }, 4000);
+      };
+      timerRef.current = window.setTimeout(poll, PING_MS);
     } catch (e: any) {
       setTurns(prev => {
-        const next = [...prev];
-        const idx = next.findIndex(t => t.id === turnId);
+        const idx = prev.findIndex(t => t.id === turnId);
         if (idx < 0) return prev;
-        next[idx] = { ...next[idx], error: e?.message || "提交失败", loading: false };
+        const next = [...prev];
+        next[idx] = { ...next[idx], error: friendlyNetError(e), loading: false };
         return next;
       });
       setLoading(false);
@@ -363,7 +395,7 @@ export default function ImageGen() {
                     <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                       <a className="tbtn" href={u} target="_blank" rel="noreferrer">下载 / 查看</a>
                       <button className="tbtn" disabled={loading}
-                        onClick={() => { setSourceImage(u); bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }); }}
+                        onClick={() => { downscaleDataUrl(u).then(setSourceImage).catch(() => setSourceImage(u)); bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }); }}
                         title="把这张作为原图，继续用文字描述修改">以这张继续改</button>
                     </div>
                   </div>
