@@ -836,6 +836,16 @@ export async function brainChatStatus() {
   return data;
 }
 
+// One-time, idempotent migration of legacy brain_chat transcripts into the
+// agent's native session store, so the dock and the workbench chat share one
+// history. Safe to call on every chat mount.
+export async function brainChatMigrateToAgent() {
+  const { data } = await api.post<{ ok: boolean; migrated: number; skipped: number; total: number }>(
+    "/brain/chat/migrate-to-agent", {}, { timeout: 120000 },
+  );
+  return data;
+}
+
 export async function brainChatSessions() {
   const { data } = await api.get<{ sessions: BrainChatSession[] }>("/brain/chat/sessions");
   return data;

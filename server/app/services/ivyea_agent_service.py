@@ -588,6 +588,11 @@ def chat_create(payload: dict[str, Any]) -> dict[str, Any]:
     return request_json("POST", "/v1/chat/sessions", payload)
 
 
+def chat_import(payload: dict[str, Any]) -> dict[str, Any]:
+    """Seed an agent session with pre-existing messages (migration, no LLM turn)."""
+    return request_json("POST", "/v1/chat/sessions/import", payload)
+
+
 def model_providers() -> dict[str, Any]:
     return request_json("GET", "/v1/model/providers")
 

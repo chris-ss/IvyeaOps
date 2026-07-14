@@ -529,6 +529,90 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
     return _handle(bc.ingest_pasted_text, body_text, body.import_after_save)
 
 
+def _migration_marker_path():
+    from app.core.config import settings as ops_settings
+    return ops_settings.data_dir / "brain_chat_migrated.json"
+
+
+def _load_migration_map() -> dict[str, str]:
+    import json as _json
+    p = _migration_marker_path()
+    try:
+        return _json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:  # noqa: BLE001 — a corrupt marker just re-migrates
+        return {}
+
+
+def _save_migration_map(mapping: dict[str, str]) -> None:
+    import json as _json
+    p = _migration_marker_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(_json.dumps(mapping, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
+
+
+@router.post("/chat/migrate-to-agent")
+def chat_migrate_to_agent() -> dict[str, Any]:
+    """One-time, idempotent migration of legacy brain_chat transcripts into the
+    agent's native session store so the dock and workbench share one history.
+    Safe to call repeatedly — already-migrated sessions are skipped via a marker."""
+    from datetime import datetime
+
+    if not _ivyea_front_door():
+        return {"ok": False, "error": "IvyeaAgent 未连接，稍后重试", "migrated": 0, "skipped": 0, "total": 0}
+
+    mapping = _load_migration_map()
+    try:
+        sessions = (bc.list_sessions(include_archived=True) or {}).get("sessions") or []
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"读取旧对话失败：{e}", "migrated": 0, "skipped": 0, "total": 0}
+
+    migrated = 0
+    skipped = 0
+    for sess in sessions:
+        sid = str(sess.get("id") or "")
+        if not sid:
+            continue
+        if sid in mapping:
+            skipped += 1
+            continue
+        try:
+            detail = bc.get_session(sid)
+        except Exception:  # noqa: BLE001 — skip unreadable session, retry next run
+            skipped += 1
+            continue
+        messages = [
+            {"role": m.get("role"), "content": m.get("content") or ""}
+            for m in (detail.get("messages") or [])
+            if m.get("role") in {"user", "assistant"} and (m.get("content") or "").strip()
+        ]
+        if not messages:
+            mapping[sid] = ""  # remember empty sessions so we don't re-scan them
+            skipped += 1
+            continue
+        created = None
+        raw_created = sess.get("created_at")
+        if isinstance(raw_created, str) and raw_created:
+            try:
+                created = datetime.fromisoformat(raw_created).timestamp()
+            except ValueError:
+                created = None
+        try:
+            resp = ia.chat_import({"messages": messages, "created": created})
+        except Exception:  # noqa: BLE001 — agent hiccup, retry next run
+            skipped += 1
+            continue
+        if resp.get("ok") and resp.get("id"):
+            mapping[sid] = str(resp["id"])
+            migrated += 1
+        else:
+            skipped += 1
+
+    _save_migration_map(mapping)
+    return {"ok": True, "migrated": migrated, "skipped": skipped, "total": len(sessions)}
+
+
 @router.get("/chat/status")
 def chat_status() -> dict[str, Any]:
     return _handle(bc.chat_model_status)
