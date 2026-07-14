@@ -178,28 +178,93 @@ def _ia_upload_result(resp: dict[str, Any], preview: str = "") -> dict[str, Any]
     }
 
 
-def _ia_upload_bytes(filename: str, data: bytes, title: str | None, category: str | None) -> dict[str, Any]:
+def _ia_upload_bytes(
+    filename: str,
+    data: bytes,
+    title: str | None,
+    category: str | None = None,
+    tags: list[str] | None = None,
+    preview: str | None = None,
+) -> dict[str, Any]:
     import base64
+    tag_list = [str(t) for t in (tags or ([category] if category else [])) if str(t).strip()]
     payload = {
         "filename": filename or "upload.txt",
         "content_base64": base64.b64encode(data).decode("ascii"),
         "title": (title or "").strip(),
         "source_type": "user",
-        "tags": [category] if category else [],
+        "tags": tag_list,
         "confirm": True,   # save + apply into the governed knowledge base in one step
         "rebuild": True,
     }
-    try:
-        preview = data.decode("utf-8")  # text uploads; binary (pdf/xlsx) → no preview
-    except UnicodeDecodeError:
-        preview = ""
+    if preview is None:
+        try:
+            preview = data.decode("utf-8")  # text uploads; binary (pdf/xlsx) → no preview
+        except UnicodeDecodeError:
+            preview = ""
     return _ia_upload_result(ia.knowledge_upload(payload), preview=preview)
 
 
-def _ia_ingest_text(text: str) -> dict[str, Any]:
-    first = next((ln.strip().lstrip("# ").strip() for ln in text.splitlines() if ln.strip()), "note")
-    stem = (first[:40] or "note")
-    return _ia_upload_bytes(f"{stem}.md", text.encode("utf-8"), title=first[:80], category="inbox")
+async def _ia_ingest_analysis(text: str) -> dict[str, Any]:
+    """Auto-analyze pasted/cleaned text into a title/tags/summary via the unified
+    text chain (IvyeaAgent → global fallback → …), with a rules-based fallback so
+    ingest never depends on the model being reachable."""
+    from app.services import ai_synthesis_service
+
+    clean = (text or "").strip()
+    prompt = (
+        "你是私有知识库的入库分类器。只返回严格 JSON，不要解释、不要用代码块。\n"
+        "分析下面的文本，生成字段：\n"
+        "- title: 中文短标题，最多 40 字\n"
+        "- directory: inbox / amazon/ads / amazon/products / amazon/messages / "
+        "amazon/suppliers / amazon/market / compliance 之一\n"
+        "- tags: 3-6 个短标签组成的数组\n"
+        "- summary: 80-160 字中文摘要\n"
+        "- content_type: note / amazon_ads / amazon_product / buyer_message / "
+        "supplier_note / market_note / compliance\n"
+        "- confidence: 0 到 1 的数字\n\n"
+        f"【待入库文本】\n{clean[:12000]}"
+    )
+    obj: dict[str, Any] = {}
+    try:
+        raw = (await ai_synthesis_service.generate_text(prompt)).strip()
+        obj = bc._extract_json_object(raw) or {}
+    except Exception:  # noqa: BLE001 — degrade to rules fallback below
+        obj = {}
+    fb = bc._fallback_ingest_analysis(clean)
+    tags = obj.get("tags")
+    if not isinstance(tags, list) or not tags:
+        tags = fb["tags"]
+    try:
+        confidence = float(obj.get("confidence", fb["confidence"]))
+    except (TypeError, ValueError):
+        confidence = fb["confidence"]
+    return {
+        "title": (str(obj.get("title") or "").strip()[:80] or fb["title"]),
+        "directory": (str(obj.get("directory") or "").strip() or fb["directory"]),
+        "tags": [str(t).strip()[:40] for t in tags if str(t).strip()][:6],
+        "summary": (str(obj.get("summary") or "").strip()[:500] or fb["summary"]),
+        "content_type": (str(obj.get("content_type") or "").strip() or fb["content_type"]),
+        "confidence": max(0.0, min(1.0, confidence)),
+        "source": "ivyea-agent" if obj else "rules_fallback",
+    }
+
+
+async def _ia_ingest_analyzed(text: str, analysis: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Analyze (unless an analysis is provided) then store the text as a governed
+    user card, returning a result the RESULT panel can render."""
+    if analysis is None:
+        analysis = await _ia_ingest_analysis(text)
+    stem = (analysis.get("title") or "note").strip()[:40] or "note"
+    result = _ia_upload_bytes(
+        f"{stem}.md", text.encode("utf-8"),
+        title=analysis.get("title"), tags=analysis.get("tags"), preview=text,
+    )
+    # The AI analysis is richer than what the applied card echoes back — surface it.
+    result["analysis"] = analysis
+    if not result.get("markdown_preview"):
+        result["markdown_preview"] = text[:4000]
+    return result
 
 
 @router.get("/overview")
@@ -359,10 +424,10 @@ def uploads(limit: int = Query(50, ge=1, le=100)) -> dict[str, Any]:
 
 
 @router.post("/ingest/text")
-def ingest_text(body: IngestTextBody) -> dict[str, Any]:
+async def ingest_text(body: IngestTextBody) -> dict[str, Any]:
     if _ivyea_front_door():
         try:
-            return _ia_ingest_text(body.text)
+            return await _ia_ingest_analyzed(body.text)
         except Exception:  # noqa: BLE001 — degrade to legacy GBrain ingest
             pass
     return _handle(bc.ingest_pasted_text, body.text, body.import_after_save)
@@ -374,13 +439,23 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
     import httpx
     import re
 
+    # A browser-like UA + Accept headers cut down on the 403 / anti-bot blocks
+    # a bare "IvyeaOps/1.0" agent triggers on many sites.
+    fetch_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(body.url, headers={"User-Agent": "Mozilla/5.0 (compatible; IvyeaOps/1.0)"})
+            resp = await client.get(body.url, headers=fetch_headers)
             resp.raise_for_status()
             html = resp.text
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(400, f"抓取失败：目标站点返回 {e.response.status_code}（可能有反爬限制），请换一个链接或改用「粘贴文本」。")
     except Exception as e:
-        raise HTTPException(400, f"抓取失败: {e}")
+        raise HTTPException(400, f"抓取失败：{e}")
 
     # Basic HTML to text extraction
     html = re.sub(r"<(script|style|noscript|header|footer|nav)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
@@ -389,53 +464,46 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
     text = re.sub(r"[ \t]+", " ", text).strip()
 
     if len(text) < 30:
-        raise HTTPException(400, "页面内容为空或无法解析")
+        raise HTTPException(400, "页面内容为空或无法解析，请换一个链接或改用「粘贴文本」。")
 
     # Truncate for AI processing
     raw_text = text[:12000]
 
-    # Call AI to reformat into clean Markdown
-    prompt = f"""你是一个内容整理专家。请将以下从网页抓取的原始文本整理成一篇干净、排版良好的 Markdown 文章。
-
-要求：
-1. 只保留文章正文内容，去除所有导航、广告、页脚、cookie提示等无关信息
-2. 用合适的 Markdown 标题层级（#, ##, ###）组织内容结构
-3. 保留关键信息，去除重复和冗余
-4. 如有列表内容用 Markdown 列表格式
-5. 直接输出 Markdown 内容，不要加任何解释或前言
-6. 保持原文语言（中文内容用中文，英文内容用英文）
-
-来源URL: {body.url}
-
-原始文本：
-{raw_text}"""
-
-    # Route the AI cleaning step through the unified text fallback chain
-    # (IvyeaAgent → global fallback model → DeepSeek …) instead of the old
-    # hard-wired Codex CLI, which is fragile and failed with an opaque
-    # "session_id: …" error whenever that one provider was unavailable.
+    # Clean the scrape into Markdown through the unified text chain (IvyeaAgent →
+    # global fallback → DeepSeek …). This replaces the old hard-wired Codex CLI
+    # that failed with an opaque "session_id: …" error whenever that single
+    # provider was down. Cleaning asks for plain Markdown (not JSON) — reliable —
+    # and classification is a separate JSON step in _ia_ingest_analyzed.
     from app.services import ai_synthesis_service
 
+    clean_prompt = (
+        "你是内容整理专家。把下面从网页抓取的原始文本整理成一篇干净、排版良好的 Markdown 正文。\n"
+        "要求：只保留正文，去掉导航/广告/页脚/cookie 提示；用 #/##/### 分层；去重；"
+        "列表用 Markdown 列表；直接输出 Markdown，不要任何解释或前言；保持原文语言。\n\n"
+        f"来源URL: {body.url}\n\n原始文本：\n{raw_text}"
+    )
     markdown = ""
     try:
-        markdown = (await ai_synthesis_service.generate_text(prompt)).strip()
-    except Exception:  # noqa: BLE001 — surface a friendly message below
+        markdown = (await ai_synthesis_service.generate_text(clean_prompt)).strip()
+    except Exception:  # noqa: BLE001 — fall back to raw extracted text below
         markdown = ""
 
-    if not markdown:
-        raise HTTPException(
-            502,
-            "AI 整理失败：本地未配置可用文本模型，请在系统配置 → 全局兜底大模型设置后重试。",
-        )
+    # Never hard-fail once we actually have page content: if the AI cleaning step
+    # is unavailable or returned nothing, ingest the extracted text as-is.
+    content = markdown or raw_text
+    # Analyze the clean content (not the "> 来源" header, which would otherwise
+    # leak into a rules-fallback title); store the header-prefixed body.
+    analysis = await _ia_ingest_analysis(content)
+    body_text = f"> 来源：{body.url}\n\n{content}"
 
-    # Ingest through the IvyeaAgent front door (consistent with paste/file
-    # upload); fall back to the legacy GBrain store only when it is down.
+    # Ingest through the IvyeaAgent front door with auto title/tags/summary
+    # (consistent with paste/file upload); fall back to legacy only when down.
     if _ivyea_front_door():
         try:
-            return _ia_ingest_text(markdown)
+            return await _ia_ingest_analyzed(body_text, analysis=analysis)
         except Exception:  # noqa: BLE001 — degrade to legacy GBrain ingest
             pass
-    return _handle(bc.ingest_pasted_text, markdown, body.import_after_save)
+    return _handle(bc.ingest_pasted_text, body_text, body.import_after_save)
 
 
 @router.get("/chat/status")

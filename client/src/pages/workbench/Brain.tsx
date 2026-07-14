@@ -602,19 +602,23 @@ export default function Brain() {
       {legacyGbrainMode && tab !== "governance" && noEmbed && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">未配置 Embedding：当前以关键词检索为主（功能正常）。如需语义检索，<a href="/hub-settings" style={{ color: "var(--acc)" }}>前往系统配置 → 智能体 → 知识库语义检索 →</a> 选择服务商（Ollama 本地免费）。</MiniAlert></div>}
       {chatStatus && !chatStatus.configured && tab === "chat" && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">对话引擎未就绪：请确认本机 IvyeaAgent 服务在运行，或在「系统配置 → 全局兜底大模型」配置一个文本模型。搜索、上传、页面仍可用。</MiniAlert></div>}
 
-      <div className="tabs" style={{ overflowX: "auto" }}>
-        {PRIMARY_TABS.map((t) => <button key={t.key} className={"tab" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>{t.label}</button>)}
-        <div style={{ position: "relative", marginLeft: "auto" }}>
+      {/* Outer row does NOT clip overflow, so the 「更多」dropdown can escape.
+          Only the inner primary-tab strip scrolls horizontally. */}
+      <div style={{ display: "flex", alignItems: "flex-end", borderBottom: "1px solid var(--b)", marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 0, overflowX: "auto", flex: 1 }}>
+          {PRIMARY_TABS.map((t) => <button key={t.key} className={"tab" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>{t.label}</button>)}
+        </div>
+        <div style={{ position: "relative", flexShrink: 0 }}>
           <button
             className={"tab" + (MORE_TABS.some((t) => t.key === tab) ? " active" : "")}
             onClick={() => setMoreOpen((v) => !v)}
           >
-            {MORE_TABS.find((t) => t.key === tab)?.label ? `更多 · ${MORE_TABS.find((t) => t.key === tab)!.label}` : "更多"} ▾
+            {MORE_TABS.find((t) => t.key === tab) ? `更多 · ${MORE_TABS.find((t) => t.key === tab)!.label}` : "更多"} ▾
           </button>
           {moreOpen && (
             <>
               <div onClick={() => setMoreOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-              <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 41, minWidth: 140, padding: 4, display: "grid", gap: 2, background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: "var(--r)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(0,0,0,.28)" }}>
+              <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 41, minWidth: 150, padding: 4, display: "grid", gap: 2, background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: "var(--r)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(0,0,0,.28)" }}>
                 {MORE_TABS.map((t) => (
                   <button key={t.key} className="tbtn" style={{ textAlign: "left", width: "100%", borderColor: "transparent", color: tab === t.key ? "var(--acc)" : undefined, background: tab === t.key ? "var(--bg3)" : undefined }} onClick={() => { setTab(t.key); setMoreOpen(false); }}>{t.label}</button>
                 ))}
