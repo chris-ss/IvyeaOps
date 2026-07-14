@@ -137,6 +137,54 @@ def _fidelity_preamble(prompt: str, ref_count: int, reference_mode: str,
     ) + prompt
 
 
+def _crop_safe_zone_note(target_size: str, provider_size: str) -> str:
+    """告知模型成图会被中心裁剪，让它把关键内容放进会保留的安全区。
+
+    供应商 gpt-image-2 只支持 1024×1024 / 1536×1024 / 1024×1536 三种画布，比例与目标
+    不符时 `_await_generation` 用 `normalise_canvas(mode="cover")`（即 ImageOps.fit 中心
+    裁剪）把成图裁成目标尺寸。高级 A+ 1464×600（2.44:1）在 1536×1024 上生成后会被上下各
+    裁掉约 19%——模型放在顶部的主标题正好被切掉，只剩中间像"贴上去"的字幕条。这里按 cover
+    数学算出会裁掉哪个方向、各裁多少，提示模型只在中心带内构图。
+
+    仅在明显裁剪（>10%）时返回指令；方形主图/画廊图（1:1→1024²，同比例几乎不裁）恒返回
+    空串，对其零影响。"""
+    from app.services.listing_image_compositor import parse_size
+    tw, th = parse_size(target_size)
+    pw, ph = parse_size(provider_size)
+    if not (tw and th and pw and ph):
+        return ""
+    scale = max(tw / pw, th / ph)          # cover：缩放到刚好盖住目标
+    disp_w, disp_h = pw * scale, ph * scale
+    crop_v = (disp_h - th) / disp_h if disp_h else 0.0   # 上下各裁比例之和
+    crop_h = (disp_w - tw) / disp_w if disp_w else 0.0   # 左右各裁比例之和
+    if max(crop_v, crop_h) <= 0.10:
+        return ""
+    if crop_v >= crop_h:
+        each = round(crop_v * 100 / 2)
+        keep = 100 - each * 2
+        edge = "top and bottom"
+        band = "central horizontal band"
+        override = ("Any other instruction to place a title band, headline or text across the TOP is OVERRIDDEN "
+                    "by this notice — the top strip is cropped away, so the headline must live inside the central "
+                    "band, not at the top edge")
+    else:
+        each = round(crop_h * 100 / 2)
+        keep = 100 - each * 2
+        edge = "left and right"
+        band = "central vertical band"
+        override = ("Any other instruction to push the headline or key elements to a side edge is OVERRIDDEN by "
+                    "this notice — those side strips are cropped away")
+    return (
+        f"CANVAS CROP NOTICE (read first, highest priority): you are painting on a {pw}×{ph} canvas, but the "
+        f"delivered Amazon module is a {tw}×{th} banner produced by CENTER-CROPPING this canvas. The {edge} "
+        f"~{each}% of whatever you generate WILL BE CUT OFF and never seen. Compose the ENTIRE finished banner — "
+        f"headline, subline, big number, product and every essential element — inside the {band} (the surviving "
+        f"middle ~{keep}% of the image), laid out as one complete, edge-to-edge wide hero banner with clear "
+        f"typographic hierarchy and the headline large and dominant. Leave only plain background extension in the "
+        f"{edge} ~{each}% margins; put nothing important there. Do NOT build a tall vertical poster. {override}."
+    )
+
+
 async def _submit_generation(prompt: str, size: str, ref_urls: list[str],
                              slot: str) -> str:
     """提交生图任务，返回 task_id。"""
@@ -153,6 +201,9 @@ async def _submit_generation(prompt: str, size: str, ref_urls: list[str],
         provider_size = "1536x1024"
     else:
         provider_size = "1024x1536"
+    crop_note = _crop_safe_zone_note(size, provider_size)
+    if crop_note:
+        prompt = f"{crop_note}\n\n{prompt}"
     base_body = {"model": "gpt-image-2", "prompt": prompt, "n": 1, "size": provider_size}
     if ref_urls:
         base_body["image_urls"] = ref_urls[:2]
