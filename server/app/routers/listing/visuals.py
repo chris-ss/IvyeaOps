@@ -482,9 +482,11 @@ def _compile_presence_section(image: dict, product_profile: dict, product_lock: 
     return (
         f"REFERENCE IMAGE 1 is the only immutable product truth. {lock}"
         f"Preserve exactly: {anchors}. Physical behaviour: {behaviour}. {treatment_rule}{accessory_rule} "
-        "Change only the environment, camera, composition, lighting and supporting design. Do not redesign, "
-        "recolour, relabel, simplify or add parts. Existing logos, labels and printed markings on the product "
-        "must remain unchanged."
+        "The complete product must sit fully inside the frame with comfortable margin on every side — show the "
+        "whole product, never crop, cut off or let any part of it bleed past the canvas edges, even on wide or "
+        "short banner canvases. Change only the environment, camera, composition, lighting and supporting design. "
+        "Do not redesign, recolour, relabel, simplify or add parts. Existing logos, labels and printed markings on "
+        "the product must remain unchanged."
     )
 
 

@@ -223,6 +223,11 @@ def technical_quality(raw: bytes, expected_size: str) -> dict:
             "code": "wrong_dimensions", "severity": "error",
             "message": f"画布为 {image.width}×{image.height}，要求 {expected[0]}×{expected[1]}",
         })
-    if min(image.size) < 1000:
-        issues.append({"code": "low_resolution", "severity": "error", "message": "图片短边不足 1000px"})
+    # 1000px 短边是亚马逊主图/画廊图的门槛；A+ 模块（如高级 A+ 1464×600）短边本就
+    # 只有 600px，是合法规格。wrong_dimensions 已强制精确匹配 expected，所以这里的分辨率
+    # 下限应随 expected 收敛，不能用固定 1000 误杀合法的 A+ 画布。
+    min_short_side = min(1000, min(expected))
+    if min(image.size) < min_short_side:
+        issues.append({"code": "low_resolution", "severity": "error",
+                       "message": f"图片短边不足 {min_short_side}px"})
     return {"ready": not issues, "score": 100 if not issues else 0, "issues": issues, "mode": "technical"}

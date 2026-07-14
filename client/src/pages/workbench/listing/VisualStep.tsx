@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, Check, ChevronDown, Download, Image as ImageIcon,
-  Layers3, Loader2, RefreshCw, ShieldCheck, Sparkles, WandSparkles,
+  Layers3, Loader2, Maximize2, RefreshCw, ShieldCheck, Sparkles, WandSparkles,
 } from "lucide-react";
 import JobProgress from "./JobProgress";
 import { useToast } from "./toast";
@@ -390,6 +390,12 @@ export default function VisualStep({ state }: { state: ListingState }) {
                     <article key={image.slot} className={`vs-shot-card ${selected === index ? "selected" : ""}`}
                       onClick={() => setSelected(index)}>
                       <div className="vs-shot-preview" onDoubleClick={() => image.final_url && setPreview(image.final_url)}>
+                        {image.final_url && (
+                          <button type="button" className="vs-shot-zoom" title="预览大图"
+                            onClick={(e) => { e.stopPropagation(); setPreview(image.final_url!); }}>
+                            <Maximize2 size={15} />
+                          </button>
+                        )}
                         {image.final_url ? <img src={image.final_url} alt={image.role} /> : (
                           <div className="vs-shot-placeholder">
                             {running ? <Loader2 className="spin" size={20} /> : bound ? <ImageIcon size={20} /> : <AlertTriangle size={20} />}
