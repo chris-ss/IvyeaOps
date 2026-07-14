@@ -759,10 +759,12 @@ export type BrainUploadResponse = {
     source: string;
     warnings?: string[];
   };
-  markdown_preview: string;
+  markdown_preview?: string;
   import_status: string;
-  import_raw: string;
-  warnings: string[];
+  import_raw?: string;
+  warnings?: string[];
+  card_id?: string;
+  source?: string;
 };
 
 export async function brainUpload(file: File, category: string, title: string, importAfterSave = true) {

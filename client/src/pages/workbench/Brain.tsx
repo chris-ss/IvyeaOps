@@ -36,12 +36,16 @@ import {
 
 type Tab = "governance" | "chat" | "upload" | "search" | "pages" | "templates" | "overview" | "settings";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "governance", label: "治理中心" },
+// 高频操作平铺显示；低频管理页收进「更多▾」溢出菜单
+const PRIMARY_TABS: { key: Tab; label: string }[] = [
   { key: "chat", label: "对话" },
   { key: "upload", label: "上传" },
   { key: "search", label: "搜索" },
   { key: "pages", label: "页面" },
+];
+
+const MORE_TABS: { key: Tab; label: string }[] = [
+  { key: "governance", label: "治理中心" },
   { key: "overview", label: "概览" },
   { key: "settings", label: "设置" },
 ];
@@ -117,10 +121,12 @@ function safePathFromSlug(slug: string): string {
   return s.endsWith(".md") ? s : `${s}.md`;
 }
 
+const ALL_TABS = [...PRIMARY_TABS, ...MORE_TABS];
+
 function getInitialTab(): Tab {
   const p = new URLSearchParams(window.location.search);
   const t = p.get("tab") as Tab | null;
-  return TABS.some((x) => x.key === t) ? (t as Tab) : "governance";
+  return ALL_TABS.some((x) => x.key === t) ? (t as Tab) : "chat";
 }
 
 export default function Brain() {
@@ -154,6 +160,7 @@ export default function Brain() {
   const [chatScope, setChatScope] = useState("");
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 760);
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadCategory, setUploadCategory] = useState("inbox");
@@ -596,7 +603,25 @@ export default function Brain() {
       {chatStatus && !chatStatus.configured && tab === "chat" && <div style={{ marginBottom: 10 }}><MiniAlert kind="warn">对话引擎未就绪：请确认本机 IvyeaAgent 服务在运行，或在「系统配置 → 全局兜底大模型」配置一个文本模型。搜索、上传、页面仍可用。</MiniAlert></div>}
 
       <div className="tabs" style={{ overflowX: "auto" }}>
-        {TABS.map((t) => <button key={t.key} className={"tab" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>{t.label}</button>)}
+        {PRIMARY_TABS.map((t) => <button key={t.key} className={"tab" + (tab === t.key ? " active" : "")} onClick={() => setTab(t.key)}>{t.label}</button>)}
+        <div style={{ position: "relative", marginLeft: "auto" }}>
+          <button
+            className={"tab" + (MORE_TABS.some((t) => t.key === tab) ? " active" : "")}
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            {MORE_TABS.find((t) => t.key === tab)?.label ? `更多 · ${MORE_TABS.find((t) => t.key === tab)!.label}` : "更多"} ▾
+          </button>
+          {moreOpen && (
+            <>
+              <div onClick={() => setMoreOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+              <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 41, minWidth: 140, padding: 4, display: "grid", gap: 2, background: "var(--bg1)", border: "1px solid var(--b)", borderRadius: "var(--r)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(0,0,0,.28)" }}>
+                {MORE_TABS.map((t) => (
+                  <button key={t.key} className="tbtn" style={{ textAlign: "left", width: "100%", borderColor: "transparent", color: tab === t.key ? "var(--acc)" : undefined, background: tab === t.key ? "var(--bg3)" : undefined }} onClick={() => { setTab(t.key); setMoreOpen(false); }}>{t.label}</button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {tab === "governance" && <KnowledgeGovernancePanel />}
@@ -807,8 +832,8 @@ export default function Brain() {
                     <div style={{ color: "var(--t2)", fontSize: 11, lineHeight: 1.7, marginTop: 8 }}>{uploadResult.analysis.summary}</div>
                   </div>
                 )}
-                {uploadResult.warnings.length > 0 && <MiniAlert kind="warn">{uploadResult.warnings.join("\n")}</MiniAlert>}
-                <pre style={{ whiteSpace: "pre-wrap", color: "var(--t2)", fontSize: 11, lineHeight: 1.7, maxHeight: 360, overflow: "auto" }}>{uploadResult.markdown_preview}</pre>
+                {(uploadResult.warnings?.length ?? 0) > 0 && <MiniAlert kind="warn">{uploadResult.warnings!.join("\n")}</MiniAlert>}
+                {uploadResult.markdown_preview && <pre style={{ whiteSpace: "pre-wrap", color: "var(--t2)", fontSize: 11, lineHeight: 1.7, maxHeight: 360, overflow: "auto" }}>{uploadResult.markdown_preview}</pre>}
               </div>
             ) : <div style={{ color: "var(--t3)", fontSize: 11 }}>入库后这里显示自动识别结果和 Markdown 预览。</div>}
             <div style={{ marginTop: 12, display: "grid", gap: 5 }}>

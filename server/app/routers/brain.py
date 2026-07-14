@@ -146,7 +146,7 @@ def _strip_source_header(text: str) -> str:
     return text
 
 
-def _ia_upload_result(resp: dict[str, Any]) -> dict[str, Any]:
+def _ia_upload_result(resp: dict[str, Any], preview: str = "") -> dict[str, Any]:
     # With confirm=True the applied card lands under resp["apply"]["card"];
     # otherwise only a draft/upload record exists.
     apply = resp.get("apply") or {}
@@ -154,7 +154,28 @@ def _ia_upload_result(resp: dict[str, Any]) -> dict[str, Any]:
     up = resp.get("upload") or {}
     card_id = card.get("id") or ""
     saved = card.get("path") or card_id or up.get("extracted_path") or "已保存到 IvyeaAgent 知识库"
-    return {"saved_path": saved, "import_status": "ok", "card_id": card_id, "source": "ivyea-agent"}
+    # The applied card only carries a body_hash, not the body, so fall back to the
+    # source text the caller ingested for the preview/summary.
+    body = str(card.get("body") or preview or "")
+    # Align with BrainUploadResponse so the RESULT panel renders (the frontend
+    # reads warnings/markdown_preview/analysis unconditionally).
+    return {
+        "saved_path": saved,
+        "import_status": "ok",
+        "card_id": card_id,
+        "warnings": list(apply.get("warnings") or []),
+        "markdown_preview": body[:4000],
+        "analysis": {
+            "title": card.get("title") or "",
+            "directory": card.get("category") or "inbox",
+            "tags": card.get("tags") or [],
+            "summary": (card.get("snippet") or body[:200]),
+            "content_type": card.get("content_type") or "note",
+            "confidence": 1.0,
+            "source": "ivyea-agent",
+        },
+        "source": "ivyea-agent",
+    }
 
 
 def _ia_upload_bytes(filename: str, data: bytes, title: str | None, category: str | None) -> dict[str, Any]:
@@ -168,7 +189,11 @@ def _ia_upload_bytes(filename: str, data: bytes, title: str | None, category: st
         "confirm": True,   # save + apply into the governed knowledge base in one step
         "rebuild": True,
     }
-    return _ia_upload_result(ia.knowledge_upload(payload))
+    try:
+        preview = data.decode("utf-8")  # text uploads; binary (pdf/xlsx) → no preview
+    except UnicodeDecodeError:
+        preview = ""
+    return _ia_upload_result(ia.knowledge_upload(payload), preview=preview)
 
 
 def _ia_ingest_text(text: str) -> dict[str, Any]:
@@ -348,7 +373,6 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
     """Fetch URL, extract content via AI into clean Markdown, then ingest."""
     import httpx
     import re
-    import subprocess
 
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
@@ -386,61 +410,31 @@ async def ingest_url(body: IngestUrlBody) -> dict[str, Any]:
 原始文本：
 {raw_text}"""
 
-    markdown = ""
-    errors = []
+    # Route the AI cleaning step through the unified text fallback chain
+    # (IvyeaAgent → global fallback model → DeepSeek …) instead of the old
+    # hard-wired Codex CLI, which is fragile and failed with an opaque
+    # "session_id: …" error whenever that one provider was unavailable.
+    from app.services import ai_synthesis_service
 
-    # Route through Hermes CLI so we no longer depend on the retired
-    # localhost:8000 kiro gateway.
+    markdown = ""
     try:
-        cmd = [
-            bc._hermes_bin(),
-            "chat",
-            "-q",
-            prompt,
-            "-Q",
-            "--source",
-            "IvyeaOps-web-brain-url-ingest",
-            "--max-turns",
-            "1",
-            "--toolsets",
-            "",
-            "--provider",
-            "openai-codex",
-            "-m",
-            "gpt-5.4",
-        ]
-        # Run async so the URL-ingest (up to 180s) does NOT block the single-worker
-        # event loop — a sync subprocess.run here froze the whole server for the
-        # duration of one request.
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(gb.BRAIN_ROOT),
-            env=bc._hermes_env(),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **no_window_kwargs(),  # no black console flash on Windows
-        )
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=180)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            raise
-        stdout = out.decode("utf-8", "replace")
-        stderr = err.decode("utf-8", "replace")
-        if proc.returncode == 0:
-            markdown = bc._strip_hermes_output(stdout)
-        else:
-            detail = (stderr or stdout or "").strip()[-1200:]
-            errors.append(detail or "Hermes CLI 未知错误")
-    except Exception as e:
-        errors.append(str(e))
+        markdown = (await ai_synthesis_service.generate_text(prompt)).strip()
+    except Exception:  # noqa: BLE001 — surface a friendly message below
+        markdown = ""
 
     if not markdown:
-        raise HTTPException(502, f"AI整理失败: {'; '.join(errors)}")
+        raise HTTPException(
+            502,
+            "AI 整理失败：本地未配置可用文本模型，请在系统配置 → 全局兜底大模型设置后重试。",
+        )
 
+    # Ingest through the IvyeaAgent front door (consistent with paste/file
+    # upload); fall back to the legacy GBrain store only when it is down.
+    if _ivyea_front_door():
+        try:
+            return _ia_ingest_text(markdown)
+        except Exception:  # noqa: BLE001 — degrade to legacy GBrain ingest
+            pass
     return _handle(bc.ingest_pasted_text, markdown, body.import_after_save)
 
 
